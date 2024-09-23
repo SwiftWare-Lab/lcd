@@ -2,7 +2,7 @@ import triton
 import triton.language as tl
 
 @triton.jit
-def unroll_coarsen_kernel(A_ptr, B_ptr, C_ptr, Atp_ptr, Atk_ptr, Atv_ptr, M, N, K, stride_am, stride_ak, stride_bk, stride_bn, stride_cm, stride_cn, pattern_id):
+def unroll_coarsen_kernel(B_ptr, C_ptr, Atp_ptr, Atk_ptr, Atv_ptr, stride_bk, stride_bn, stride_cm, stride_cn, pattern_id):
     # Get the row index for the current warp (one warp processes 3 rows)
     row_idx = tl.program_id(0) * 3
     warp_idx = tl.thread_id() % 32  # Each warp has 32 threads
@@ -97,10 +97,8 @@ def launch_unroll_coarsen(A, B, C, Atp, Atk, Atv, pattern_id):
 
     # Launch the kernel with the given pattern ID
     unroll_coarsen_kernel[grid](
-        A_ptr, B_ptr, C_ptr, 
+        B_ptr, C_ptr, 
         Atp_ptr, Atk_ptr, Atv_ptr,
-        M, N, K, 
-        A.stride(0), A.stride(1), 
         B.stride(0), B.stride(1), 
         C.stride(0), C.stride(1),
         pattern_id

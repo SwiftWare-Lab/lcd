@@ -2,7 +2,7 @@ import triton
 import triton.language as tl
 
 @triton.jit
-def enumerated_kernel(A_ptr, B_ptr, C_ptr, M, N, K, stride_am, stride_ak, stride_bk, stride_bn, stride_cm, stride_cn):
+def enumerated_kernel(A_ptr, B_ptr, C_ptr, K, stride_am, stride_ak, stride_bk, stride_bn, stride_cm, stride_cn):
     # Get the row index for the current warp (one warp processes 3 rows)
     row_idx = tl.program_id(0) * 3
     warp_idx = tl.thread_id() % 32  # Each warp has 32 threads
@@ -74,7 +74,7 @@ def launch_enumerated(A, B, C):
     # Launch the kernel with one warp per 3 rows
     enumerated_kernel[grid](
         A_ptr, B_ptr, C_ptr, 
-        M, N, K, 
+        K, 
         A.stride(0), A.stride(1), 
         B.stride(0), B.stride(1), 
         C.stride(0), C.stride(1)
