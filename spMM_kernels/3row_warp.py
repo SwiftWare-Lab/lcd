@@ -1,8 +1,11 @@
+import numpy as np
+import scipy.sparse as sp
+import torch
 import triton
 import triton.language as tl
 
 @triton.jit
-def warp_level_kernel_3rows(A_ptr, B_ptr, C_ptr, N: tl.constexpr, K: tl.constexpr, stride_am, stride_ak, stride_bk, stride_bn, stride_cm, stride_cn):
+def _3row_warp_kernel(A_ptr, B_ptr, C_ptr, N: tl.constexpr, K: tl.constexpr, stride_am, stride_ak, stride_bk, stride_bn, stride_cm, stride_cn):
     # Get the warp index (1 warp per 3 rows)
     row_idx = (tl.program_id(0) // 32) * 3
     # Get the row index within the warp (0 to 2)
@@ -54,7 +57,7 @@ def warp_level_kernel_3rows(A_ptr, B_ptr, C_ptr, N: tl.constexpr, K: tl.constexp
     tl.store(C_ptr + C2_offset, C2_acc)
 
 # Handler Function to Launch the Kernel
-def launch_warp_level_3rows(A, B):
+def launch_3row_warp(A, B):
     # Get matrix dimensions
     M, K = A.shape  # A is MxK
     K, N = B.shape  # B is KxN
@@ -73,10 +76,34 @@ def launch_warp_level_3rows(A, B):
     # Launch the Triton kernel
     grid = (M // 3 * 32,)  # One warp per 3 rows of A
 
-    warp_level_kernel_3rows[grid](A_ptr, B_ptr, C_ptr, N, K, stride_am, stride_ak, stride_bk, stride_bn, stride_cm, stride_cn)
+    _3row_warp_kernel[grid](A_ptr, B_ptr, C_ptr, N, K, stride_am, stride_ak, stride_bk, stride_bn, stride_cm, stride_cn)
 
     return C_ptr.cpu().numpy()
 
+# Test the kernel
+def main():
+
+    # Define matrix dimensions
+    M, K, N = 96, 16, 16
+
+    # Create random matrices with numPy
+    A_sp = sp.random(96, 32, density=0.1, format='csr')
+    A = A_sp.toarray().astype(np.float32)
+
+    B = np.random.rand(32, 32).astype(np.float32)
+
+    # Launch the kernel
+    C = launch_3row_warp(A, B)
+
+    # Compare with built-in implementation
+    C_ref = A @ B
+    print(np.allclose(C, C_ref, atol=1e-6))
+
+
+if __name__ == '__main__':
+    main()
+
+"""
 # Example usage
 import numpy as np
 import torch
@@ -87,3 +114,4 @@ C = launch_warp_level_3rows(A, B)
 C_ref = A @ B
 # Check if the results match within a small tolerance
 print(np.allclose(C, C_ref, atol=1e-6))
+"""
