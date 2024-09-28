@@ -9,10 +9,11 @@ import scipy.sparse as sp
 from scipy.io import mmwrite, mmread
 
 @triton.jit
-def unroll_coarsen_kernel(Avp, Aip, Arp, B, C, k_rows: tl.constexpr, k_cols, patterns, Avp_offsets, Aip_offsets, N: tl.constexpr, A_ptr, K: tl.constexpr, C_ref):
+def unroll_coarsen_kernel(Avp, Aip, Arp, B, C, k_rows: tl.constexpr, k_cols, patterns, Avp_offsets, Aip_offsets, N: tl.constexpr):
     row_pi = tl.program_id(0)
     pattern_id = tl.program_id(1)
 
+    # Get the row panel start and end indices
     panel_start = tl.load(Arp + (tl.num_programs(0) + 1) * pattern_id + row_pi)
     panel_end = tl.load(Arp + (tl.num_programs(0) + 1) * pattern_id + row_pi + 1)
 
@@ -22,31 +23,24 @@ def unroll_coarsen_kernel(Avp, Aip, Arp, B, C, k_rows: tl.constexpr, k_cols, pat
     
     row_idx = row_pi * k_rows # We are on the row_pi-th row panel, each row panel has k_rows rows
     pattern_ptr = patterns + (k_rows * pattern_id)  # Points to first element of the pattern
-    #num_ones = tl.sum(pattern == 1)
+
+    # Count the number of '1' bits in the pattern
     num_ones = 0
     for i in range(k_rows):
         if(tl.load(pattern_ptr + i) == 1):
             num_ones += 1
     
-    # cast num_ones to tl.int1
-    #num_ones = tl.cast(num_ones, dtype=tl.int32)
-    pattern_offset = k_cols
-    Avp_start_idx = tl.load(Avp_offsets + pattern_id)
-    Avp_end_idx = tl.load(Avp_offsets + pattern_id + 1)
+    pattern_offset = k_cols # Used to move from one bit in the pattern to the next in the values array
+    Avp_start_idx = tl.load(Avp_offsets + pattern_id) # Index of the first value in the values array for the entire pattern
 
-    values_ptr = Avp + (Avp_start_idx) + (panel_start * num_ones)
-    #values = tl.load(Avp + Avp_start_idx + tl.arange(0, MAXIMUM_VALUES_SIZE))
+    values_ptr = Avp + (Avp_start_idx) + (panel_start * num_ones) # Points to the first value in the values array for this row panel
 
-    num_cols = (panel_end - panel_start)
-    num_kernels = num_cols // k_cols
+    num_cols = (panel_end - panel_start) # Number of total columns in this row panel for this pattern
+    num_kernels = num_cols // k_cols # Number of kernels in this row panel
 
-    idx_count = 0
+    idx_count = 0 # Index to keep track of the column we are at in the row panel
 
-    Aip_start_idx = tl.load(Aip_offsets + pattern_id)
-    #Aip_end_idx = tl.load(Aip_offsets + pattern_id + 1)
-
-    indices_ptr = Aip + Aip_start_idx + panel_start
-    #indices = tl.load(Aip + Aip_start_idx + tl.arange(0, MAXIMUM_VALUES_SIZE))
+    Aip_start_idx = tl.load(Aip_offsets + pattern_id) # Index of the first index in the indices array for the entire pattern
 
     # Loop over every kernel in the row panel
     for i in range(num_kernels):
@@ -56,18 +50,17 @@ def unroll_coarsen_kernel(Avp, Aip, Arp, B, C, k_rows: tl.constexpr, k_cols, pat
             if (tl.load(values_ptr + (num_ones * k_cols * i) + j) != 0.0):
 
                 # This part only runs if a column of non-zero values is found
-                ones_count = 0
+                ones_count = 0  # Used to keep track of the '1' bits we've processed
+
                 # Loop over every bit in the pattern, there are k_rows bits
                 for k in range(k_rows):
+                    # Only process the non-zero values
                     if tl.load(pattern_ptr + k) == 1:
+
                         # Process the value we are at
                         A_value = tl.load(values_ptr + (num_ones * k_cols * i) + j + (ones_count * pattern_offset))
 
-                        idx = tl.load(Aip + Aip_start_idx + idx_count)
-
-                        # convert A_value to type float
-                        A_value = tl.cast(A_value, dtype=tl.float32)
-                        A_cmp = tl.load(A_ptr + K * (row_idx + k) + idx)
+                        idx = tl.load(Aip + Aip_start_idx + idx_count) # The column index for this value
 
                         # Get the row of B with row index idx
                         b_row = tl.load(B + idx * N + tl.arange(0, N))
@@ -111,40 +104,43 @@ def flatten_array(array):
 
 def launch_unroll_coarsen(A_cf, B, A):
 
+    # Conver the patterns dict to a list for the GPU
     pattern_list = preprocess_patterns(A_cf.patterns)
+
+    # Create the offsets for the Avp and Aip arrays
     Avp_offsets = create_array_offsets(A_cf.padded_values_data_array)
     Aip_offsets = create_array_offsets(A_cf.indices_array)
 
     # Load everything into the GPU
     device = torch.device('cuda')
+
+    # Flatten and load arrays for A
     A_vp_flattened = flatten_array(A_cf.padded_values_data_array)
     A_vp = torch.tensor(A_vp_flattened, dtype=torch.float32, device=device)
     A_ip_flattened = flatten_array(A_cf.indices_array)
     A_ip = torch.tensor(A_ip_flattened, dtype=torch.int32, device=device)
     A_rp = torch.tensor(A_cf.row_panels_pointer, dtype=torch.int32, device=device)
-    B_ptr = torch.tensor(B, dtype=torch.float32, device=device)
-    C_ptr = torch.zeros((A_cf.num_row, B.shape[1]), dtype=torch.float32, device=device)
-    A_ptr = torch.tensor(A, dtype=torch.float32, device=device)
     patterns_ptr = torch.tensor(pattern_list, dtype=torch.int32, device=device)
     Avp_offsets_ptr = torch.tensor(Avp_offsets, dtype=torch.int32, device=device)
     Aip_offsets_ptr = torch.tensor(Aip_offsets, dtype=torch.int32, device=device)
 
+    # Load B and C arrays
+    B_ptr = torch.tensor(B, dtype=torch.float32, device=device)
+    C_ptr = torch.zeros((A_cf.num_row, B.shape[1]), dtype=torch.float32, device=device)
+
+    # Launch the kernel
     num_row_panels = len(A_cf.row_panels_pointer[0]) - 1
     grid = (num_row_panels, len(A_cf.patterns))
 
-    C_ref = A @ B
-    C_cmp = torch.tensor(C_ref, dtype=torch.float32, device=device)
+    unroll_coarsen_kernel[grid](A_vp, A_ip, A_rp,
+                                B_ptr, C_ptr, 
+                                A_cf.kernel_rows, A_cf.kernel_cols, 
+                                patterns_ptr, Avp_offsets_ptr, Aip_offsets_ptr,
+                                B.shape[1])
 
-    unroll_coarsen_kernel[grid](A_vp, A_ip, A_rp, B_ptr, C_ptr, A_cf.kernel_rows, A_cf.kernel_cols, patterns_ptr, Avp_offsets_ptr, Aip_offsets_ptr, B.shape[1], A_ptr, A.shape[1], C_cmp)
-
-    
-
-    # Sync the device
+    # Sync the device and return the result
     torch.cuda.synchronize()
-    print(C_ptr.cpu().numpy())
-    print(C_ref)
-    # Compare A and A_ptr
-    print(np.allclose(C_ref, C_ptr.cpu().numpy(), atol=1e-6))
+
     return C_ptr.cpu().numpy()
 
 
