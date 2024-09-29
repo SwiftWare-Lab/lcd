@@ -3,15 +3,16 @@ import torch
 import triton
 import triton.language as tl
 import read_compressed_format
-import math
+from cfmtx_utils import preprocess_patterns, create_array_offsets, flatten_array
 import numpy as np
 import scipy.sparse as sp
-from scipy.io import mmwrite, mmread
+from scipy.io import mmwrite
+from cfmtx_functions import cfmtx_spMM
 
 @triton.jit
-def unroll_coarsen_kernel(Avp, Aip, Arp, B, C, k_rows: tl.constexpr, k_cols, patterns, Avp_offsets, Aip_offsets, N: tl.constexpr):
-    row_pi = tl.program_id(0)
-    pattern_id = tl.program_id(1)
+def unroll_coarsen_kernel(Avp, Aip, Arp, B, C, k_rows: tl.constexpr, k_cols, patterns, Avp_offsets, Aip_offsets, N: tl.constexpr, A_ref, A_zeros):
+    row_pi = tl.program_id(axis=0)
+    pattern_id = tl.program_id(axis=1)
 
     # Get the row panel start and end indices
     panel_start = tl.load(Arp + (tl.num_programs(0) + 1) * pattern_id + row_pi)
@@ -31,23 +32,26 @@ def unroll_coarsen_kernel(Avp, Aip, Arp, B, C, k_rows: tl.constexpr, k_cols, pat
             num_ones += 1
     
     pattern_offset = k_cols # Used to move from one bit in the pattern to the next in the values array
-    Avp_start_idx = tl.load(Avp_offsets + pattern_id) # Index of the first value in the values array for the entire pattern
 
+    Avp_start_idx = tl.load(Avp_offsets + pattern_id) # Index of the first value in the values array for the entire pattern
     values_ptr = Avp + (Avp_start_idx) + (panel_start * num_ones) # Points to the first value in the values array for this row panel
 
     num_cols = (panel_end - panel_start) # Number of total columns in this row panel for this pattern
     num_kernels = num_cols // k_cols # Number of kernels in this row panel
 
-    idx_count = 0 # Index to keep track of the column we are at in the row panel
+    #idx_count = 0 # Index to keep track of the column we are at in the row panel
 
     Aip_start_idx = tl.load(Aip_offsets + pattern_id) # Index of the first index in the indices array for the entire pattern
+    indices_ptr = Aip + Aip_start_idx + panel_start # Points to the first index in the indices array for this row panel
 
     # Loop over every kernel in the row panel
     for i in range(num_kernels):
         # Loop over every column in the kernel
         for j in range(k_cols):
             # Some columns are just columns of zeroes, we want to skip those
-            if (tl.load(values_ptr + (num_ones * k_cols * i) + j) != 0.0):
+            first_value = tl.load(values_ptr + (num_ones * k_cols * i) + j)
+            tl.cast(first_value, dtype=tl.float32)
+            if (first_value != 0.0):
 
                 # This part only runs if a column of non-zero values is found
                 ones_count = 0  # Used to keep track of the '1' bits we've processed
@@ -60,47 +64,33 @@ def unroll_coarsen_kernel(Avp, Aip, Arp, B, C, k_rows: tl.constexpr, k_cols, pat
                         # Process the value we are at
                         A_value = tl.load(values_ptr + (num_ones * k_cols * i) + j + (ones_count * pattern_offset))
 
-                        idx = tl.load(Aip + Aip_start_idx + idx_count) # The column index for this value
+                        idx = tl.load(indices_ptr + (i * k_cols) + j) # The column index for this value
 
-                        # Get the row of B with row index idx
-                        b_row = tl.load(B + idx * N + tl.arange(0, N))
+                        # Get the value of A at row_idx + k and column idx
+                        A_ref_value = tl.load(A_ref + (row_idx + k) * N + idx)
+                        tl.store(A_zeros + (row_idx + k) * N + idx, A_value)
 
-                        C_row_idx = (row_idx + k) * N + tl.arange(0, N)
-                        C_val = A_value * b_row
-                        C_old = tl.load(C + C_row_idx)
-                        tl.store(C + C_row_idx, C_val + C_old)  # Use tl.store to write result into C
+                        # Load a row of B with at row index idx
+                        B_row = tl.load(B + (idx * N) + tl.arange(0, N))
+
+                        tl.device_print("B_row:", B_row)
+
+                        # Check if the value is correct
+                        if A_ref_value != A_value:
+                            tl.device_print("Correct ", A_ref_value - A_value)
+
+                        C_acc = tl.zeros((N,), dtype=tl.float32)
+                        C_acc = A_value * B_row
+
+                        #C_acc = tl.load(C + ((row_idx + k) * N) + tl.arange(0, N))
+                        C_old = tl.load(C + (row_idx + k) * N + tl.arange(0, N))
+                        tl.store(C + ((row_idx + k) * N) + tl.arange(0, N), C_acc + C_old)             
                     
                         ones_count += 1 # We've proccessed one '1' bit, move onto the next one
                 
-                idx_count += 1 # We've successfully processed a column, move onto the next one
+                #idx_count += 1 # We've successfully processed a column, move onto the next one
     
-def preprocess_patterns(patterns):
 
-    pattern_list = []
-    for i in range(len(patterns)):
-        pattern = [int(x) for x in patterns[i]]
-        pattern_list.append(pattern)
-
-    return pattern_list
-
-def create_array_offsets(array):
-    
-    offsets = np.zeros(len(array) + 1, dtype=np.int32)
-    for i in range(len(array)):
-        offsets[i + 1] = offsets[i] + len(array[i])
-
-    return offsets
-
-def next_power_of_two(n):
-    return 1 if n == 0 else 2**(n - 1).bit_length()
-
-def flatten_array(array):
-    flattened = []
-    for i in range(len(array)):
-        for j in range(len(array[i])):
-            flattened.append(array[i][j])
-
-    return flattened
 
 def launch_unroll_coarsen(A_cf, B, A):
 
@@ -116,7 +106,7 @@ def launch_unroll_coarsen(A_cf, B, A):
 
     # Flatten and load arrays for A
     A_vp_flattened = flatten_array(A_cf.padded_values_data_array)
-    A_vp = torch.tensor(A_vp_flattened, dtype=torch.float32, device=device)
+    A_vp = torch.tensor(A_vp_flattened, dtype=torch.int32, device=device)
     A_ip_flattened = flatten_array(A_cf.indices_array)
     A_ip = torch.tensor(A_ip_flattened, dtype=torch.int32, device=device)
     A_rp = torch.tensor(A_cf.row_panels_pointer, dtype=torch.int32, device=device)
@@ -132,186 +122,73 @@ def launch_unroll_coarsen(A_cf, B, A):
     num_row_panels = len(A_cf.row_panels_pointer[0]) - 1
     grid = (num_row_panels, len(A_cf.patterns))
 
+    A_ref = torch.tensor(A, dtype=torch.int32, device=device)
+    A_zeros = torch.zeros(A.shape, dtype=torch.int32, device=device)
+
     unroll_coarsen_kernel[grid](A_vp, A_ip, A_rp,
                                 B_ptr, C_ptr, 
                                 A_cf.kernel_rows, A_cf.kernel_cols, 
                                 patterns_ptr, Avp_offsets_ptr, Aip_offsets_ptr,
-                                B.shape[1])
+                                B.shape[1],
+                                A_ref,
+                                A_zeros)
+    
+    # Compare A_ref and A_zeros
+    #print(A)
+    #print(A_zeros.cpu().numpy())
+
+    print("COMPARING A ", np.allclose(A, A_zeros.cpu().numpy(), atol=1e-6))
 
     # Sync the device and return the result
     torch.cuda.synchronize()
 
+    print(B)
+
     return C_ptr.cpu().numpy()
 
-
-def cfmtx_spMM(Avp, Aip, Arp, B, C, k_rows, k_cols, pattern_id, patterns, row_pi):
-
-    panel_start = Arp[pattern_id][row_pi]
-    panel_end = Arp[pattern_id][row_pi + 1]
-
-    if panel_start == panel_end:
-        # row panel for this pattern is empty
-        return
-    
-    row_idx = row_pi * k_rows # We are on the row_idx-th row panel, each row panel has k_rows rows
-
-    pattern = patterns[pattern_id]
-    num_ones = pattern.count('1')
-    pattern_offset = k_cols # Go from one value in the pattern to the next, we pack k_cols values together so offset is k_cols
-    values = Avp[pattern_id][panel_start * num_ones: panel_end * num_ones]
-
-    num_cols = len(values) // num_ones # We are only containing the non-zero values (even the padded ones) and there are num_cols of them
-    num_kernels = num_cols// k_cols
-
-    idx_count = 0
-
-    indices = Aip[pattern_id][panel_start: panel_end]
-
-    # Loop over every kernel in the row panel
-    for i in range(num_kernels):
-        # Loop over every column in the kernel
-        for j in range(k_cols):
-            # Some columns are just columns of zeroes, we want to skip those
-            if(values[(num_ones * k_cols * i) + j] != 0.0):
-                # This part only runs if a column of non-zero values is found
-                ones_count = 0
-                # Loop over every bit in the pattern, there are k_rows bits
-                for k in range(k_rows):
-                    if pattern[k] == '1':
-                        # Process the value we are at
-                        A_value = values[(num_ones * k_cols * i) + (j) + (ones_count * pattern_offset)]
-                        # A_value is at row row_idx + k, col indices[idx_count]
-                        # Loop over the columns of B
-                        b_row = B[indices[idx_count], :]
-                        # Multiply and accumulate into C
-                        for l in range(len(b_row)):
-                            C[row_idx + k, l] += A_value * b_row[l]
-                    
-                        ones_count += 1 # We've proccessed one '1' bit, move onto the next one
-                
-                idx_count += 1 # We've successfully processed a column, move onto the next one
-
-def read_cfmtx_matrix(Avp, Aip, Arp, k_rows, k_cols, pattern_id, patterns, row_pi, A_matrix):
-# Performs spMM using the CompressedMatrix format for A
-
-    row_panel_idx = row_pi
-
-    panel_start = Arp[pattern_id][row_panel_idx]
-    panel_end = Arp[pattern_id][row_panel_idx + 1]
-
-
-    if panel_start == panel_end:
-        # row panel for this pattern is empty
-        return
-    
-    row_idx = row_panel_idx * k_rows # Each row panel has k_rows rows
-
-    pattern = patterns[pattern_id]
-    num_ones = pattern.count('1')
-    pattern_offset = k_cols # Go from one value in the pattern to the next, we pack k_cols values together so offset is k_cols
-    values = Avp[pattern_id][panel_start * num_ones: panel_end * num_ones]
-    #print(f"Values: {values}")
-    num_cols = len(values) // num_ones # We are only containing the non-zero values (even the padded ones) and there are num_cols of them
-    num_kernels = num_cols// k_cols
-
-    idx_count = 0
-    indices = Aip[pattern_id][panel_start: panel_end]
-    # Loop over every kernel in the row panel
-    for i in range(num_kernels):
-        # Loop over every column in the kernel
-        for j in range(k_cols):
-            # Some columns are just columns of zeroes, we want to skip those
-            if(values[(num_ones * k_cols * i) + j] != 0.0):
-
-                # This part only runs if a column of non-zero values is found
-                ones_count = 0
-                # Loop over every bit in the pattern, there are k_rows bits
-                for k in range(k_rows):
-                    if pattern[k] == '1':
-                        # Process the value we are at
-                        A_value = values[(num_ones * k_cols * i) + (j) + (ones_count * pattern_offset)] # We are in i-th kernel, j-th column, ones_count row
-                        #print(f"{A_value} is at row {row_idx + k} and col {indices[idx_count]}")
-                        if A_matrix[row_idx + k][indices[idx_count]] != A_value:
-                            print("Error")
-                        ones_count += 1 # We've proccessed one '1' bit, move onto the next one
-
-                idx_count += 1 # We've successfully processed a column, move onto the next one
-    
 # main function
 def main():
-    
-    rows, cols = 5, 5
-    density = 0.5
-    sparse_matrix = sp.random(rows, cols, density=density, format='csr', dtype=np.int32, data_rvs=lambda s: np.random.randint(1, 11, size=s))
-    mmwrite("med_matrix.mtx", sparse_matrix)
-    os.system("python3 compressed_format_generator.py med_matrix.mtx 2 2")
-    # make os run the command "python3 compressed_format_generator.py med_matrix.mtx 2 3"
-    # Read med_matrix.mtx and print it
-    #sparse_matrix_path = "med_matrix.mtx"
-    path = "med_matrix.cfmtx"
-    compressed_matrix = read_compressed_format.read_compressed_matrix(path)
-    # Read the matrix using mm
-    #sparse_matrix = mmread(sparse_matrix_path)
-    
 
-    # Create a dense matrix that has 9 rows
+    rows = 4
+    cols = 4
+    density = 0.2
+
+    # Create a a sparse matrix
+    A_sp = sp.random(rows, cols, density=density, format='csr', dtype=np.int32, data_rvs=lambda s: np.random.randint(1, 11, size=s))
+
+    # Write the sparse matrix to a file
+    mmwrite("A_sparse.mtx", A_sp)
+
+    # Convert the mtx format to cfmtx
+    os.system("python3 compressed_format_generator.py A_sparse.mtx 2 34")
+
+    # Read the compressed matrix
+    path = "A_sparse.cfmtx"
+    A_cf = read_compressed_format.read_compressed_matrix(path)
+
+    # Create dense matrix B and results matrix C
     B = np.random.rand(rows, cols).astype(np.float32)
-    # Create a matrix that is 9 x 9 and zero'd out
     C = np.zeros((rows, cols), dtype=np.float32)
 
-    C_ref = sparse_matrix.toarray() @ B
-    Avp = compressed_matrix.padded_values_data_array
-    Aip = compressed_matrix.indices_array
-    Arp = compressed_matrix.row_panels_pointer
-    k_rows = compressed_matrix.kernel_rows
-    k_cols = compressed_matrix.kernel_cols
-    patterns = compressed_matrix.patterns
-    num_panels = math.ceil(compressed_matrix.num_row / compressed_matrix.kernel_rows)
-    for i in range(len(compressed_matrix.patterns)):
-        for j in range(num_panels):
-            cfmtx_spMM(Avp, Aip, Arp, B, C, k_rows, k_cols, i, patterns, j)
+    # Perform the matrix multiplication uisng triton kernel
+    C = launch_unroll_coarsen(A_cf, B, A_sp.toarray())
 
+    num_row_panels = len(A_cf.row_panels_pointer[0]) - 1
+    num_patterns = len(A_cf.patterns)
+
+    #for i in range(num_row_panels):
+    #    for j in range(num_patterns):
+    #        cfmtx_spMM(A_cf.padded_values_data_array, A_cf.indices_array, A_cf.row_panels_pointer, B, C, A_cf.kernel_rows, A_cf.kernel_cols, j, A_cf.patterns, i)
+
+
+    # Perform the matrix multiplication using builtin function
+    C_ref = A_sp.toarray() @ B
+
+    # Compare the results
     #print(C)
     #print(C_ref)
-    # Compare C and C_ref
-    print(np.allclose(C, C_ref, atol=1e-6))
-
+    print("COMPARING C", np.allclose(C, C_ref, atol=1e-6))
     
-
-
-    """
-    # loop over every kernel in the compressed matrix
-    num_panels = math.ceil(compressed_matrix.num_row / compressed_matrix.kernel_rows)
-    for i in range(num_panels):
-        for j in range(len(compressed_matrix.patterns)):
-            read_cfmtx_matrix(compressed_matrix.padded_values_data_array, compressed_matrix.indices_array, compressed_matrix.row_panels_pointer, compressed_matrix.kernel_rows, compressed_matrix.kernel_cols, j, compressed_matrix.patterns, i, sparse_matrix.toarray())
-    print("Success")
-    """
-def test():
-
-    rows, cols = 4, 4
-    density = 1.0
-    sparse_matrix = sp.random(rows, cols, density=density, format='csr', dtype=np.int32, data_rvs=lambda s: np.random.randint(1, 11, size=s))
-    mmwrite("med_matrix.mtx", sparse_matrix)
-    os.system("python3 compressed_format_generator.py med_matrix.mtx 2 2")
-    A = mmread("med_matrix.mtx")
-    path = "med_matrix.cfmtx"
-    compressed_matrix = read_compressed_format.read_compressed_matrix(path)
-    rows = cols = compressed_matrix.num_row
-
-
-    B = np.random.rand(rows, cols).astype(np.float32)
-
-    C = launch_unroll_coarsen(compressed_matrix, B, A.toarray())
-
-    A = mmread("med_matrix.mtx")
-    C_ref = A.toarray() @ B
-    #print(C)
-    #print(C_ref)
-    #print(np.allclose(C, C_ref, atol=1e-6))
-
-
-
 if __name__ == "__main__":
-    test()
+    main()
 
