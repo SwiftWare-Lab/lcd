@@ -122,7 +122,7 @@ def main():
 
     rows = 4
     cols = 4
-    density = 0.2
+    density = 1.0
 
     # Create a a sparse matrix
     A_sp = sp.random(rows, cols, density=density, format='csr', dtype=np.int32, data_rvs=lambda s: np.random.randint(1, 11, size=s))
@@ -148,8 +148,8 @@ def main():
     C_ref = A_sp.toarray() @ B
 
     # Compare the results
-    #print(C)
-    #print(C_ref)
+    print(C)
+    print(C_ref)
     print("COMPARING C", np.allclose(C, C_ref, atol=1e-6))
     
 if __name__ == "__main__":
