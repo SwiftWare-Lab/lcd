@@ -1,105 +1,157 @@
+import os
+import torch
 import triton
 import triton.language as tl
+import read_compressed_format
+from cfmtx_utils import preprocess_patterns, create_array_offsets, flatten_array
+import numpy as np
+import scipy.sparse as sp
+from scipy.io import mmwrite
 
 @triton.jit
-def unroll_coarsen_kernel(B_ptr, C_ptr, Atp_ptr, Atk_ptr, Atv_ptr, stride_bk, stride_bn, stride_cm, stride_cn, pattern_id):
-    # Get the row index for the current warp (one warp processes 3 rows)
-    row_idx = tl.program_id(0) * 3
-    warp_idx = tl.thread_id() % 32  # Each warp has 32 threads
+def unroll_coarsen_kernel(Avp, Aip, Arp, B, C, k_rows: tl.constexpr, k_cols, patterns, Avp_offsets, Aip_offsets, N: tl.constexpr):
+    row_pi = tl.program_id(axis=0)
+    pattern_id = tl.program_id(axis=1)
+
+    # Get the row panel start and end indices
+    panel_start = tl.load(Arp + (tl.num_programs(0) + 1) * pattern_id + row_pi)
+    panel_end = tl.load(Arp + (tl.num_programs(0) + 1) * pattern_id + row_pi + 1)
+
+    if panel_start == panel_end:
+        # row panel for this pattern is empty
+        return
     
-    # Switch based on pattern ID
-    if pattern_id == 1:
-        # Initialize accumulators for the result of these 3 rows
-        c00 = tl.zeros((2,), dtype=tl.float32)
-        c01 = tl.zeros((2,), dtype=tl.float32)
-        c10 = tl.zeros((2,), dtype=tl.float32)
-        c11 = tl.zeros((2,), dtype=tl.float32)
-        c20 = tl.zeros((2,), dtype=tl.float32)
-        c21 = tl.zeros((2,), dtype=tl.float32)
-        
-        # Loop over non-zero elements in A (sparse structure)
-        for p in range(tl.load(Atp_ptr + row_idx), tl.load(Atp_ptr + row_idx + 1), 32):
-            k = tl.load(Atk_ptr + p) + warp_idx
-            B_col0 = tl.load(B_ptr + k * stride_bk + tl.arange(0, 2) * stride_bn)
-            B_col1 = tl.load(B_ptr + k * stride_bk + tl.arange(2, 4) * stride_bn)
-            
-            # Accumulate results
-            c00 += tl.load(Atv_ptr) * B_col0
-            c01 += tl.load(Atv_ptr) * B_col1
-            c10 += tl.load(Atv_ptr + 1) * B_col0
-            c11 += tl.load(Atv_ptr + 1) * B_col1
-            c20 += tl.load(Atv_ptr + 2) * B_col0
-            c21 += tl.load(Atv_ptr + 2) * B_col1
-            Atv_ptr += 3  # Move to next non-zero values in Atv
+    row_idx = row_pi * k_rows # We are on the row_pi-th row panel, each row panel has k_rows rows
+    pattern_ptr = patterns + (k_rows * pattern_id)  # Points to first element of the pattern
 
-        # Warp-level reduction to sum the results from all threads in the warp
-        c00 = tl.sum(c00, axis=0)
-        c01 = tl.sum(c01, axis=0)
-        c10 = tl.sum(c10, axis=0)
-        c11 = tl.sum(c11, axis=0)
-        c20 = tl.sum(c20, axis=0)
-        c21 = tl.sum(c21, axis=0)
-        
-        # Atomic add to ensure that multiple threads can safely update matrix C
-        tl.atomic_add(C_ptr + row_idx * stride_cm + tl.arange(0, 2) * stride_cn, c00)
-        tl.atomic_add(C_ptr + (row_idx + 1) * stride_cm + tl.arange(0, 2) * stride_cn, c10)
-        tl.atomic_add(C_ptr + (row_idx + 2) * stride_cm + tl.arange(0, 2) * stride_cn, c20)
-
-    elif pattern_id == 2:
-        # Another pattern with different computation for rows 0 and 2
-        c00 = tl.zeros((2,), dtype=tl.float32)
-        c01 = tl.zeros((2,), dtype=tl.float32)
-        c20 = tl.zeros((2,), dtype=tl.float32)
-        c21 = tl.zeros((2,), dtype=tl.float32)
-        
-        # Loop over non-zero elements in A (sparse structure)
-        for p in range(tl.load(Atp_ptr + row_idx), tl.load(Atp_ptr + row_idx + 1), 32):
-            k = tl.load(Atk_ptr + p) + warp_idx
-            B_col0 = tl.load(B_ptr + k * stride_bk + tl.arange(0, 2) * stride_bn)
-            B_col1 = tl.load(B_ptr + k * stride_bk + tl.arange(2, 4) * stride_bn)
-            
-            # Accumulate results
-            c00 += tl.load(Atv_ptr) * B_col0
-            c01 += tl.load(Atv_ptr) * B_col1
-            c20 += tl.load(Atv_ptr + 2) * B_col0
-            c21 += tl.load(Atv_ptr + 2) * B_col1
-            Atv_ptr += 3
-
-        # Warp-level reduction to sum the results from all threads in the warp
-        c00 = tl.sum(c00, axis=0)
-        c01 = tl.sum(c01, axis=0)
-        c20 = tl.sum(c20, axis=0)
-        c21 = tl.sum(c21, axis=0)
-        
-        # Atomic add for rows 0 and 2
-        tl.atomic_add(C_ptr + row_idx * stride_cm + tl.arange(0, 2) * stride_cn, c00)
-        tl.atomic_add(C_ptr + (row_idx + 2) * stride_cm + tl.arange(0, 2) * stride_cn, c20)
-        
-    # Add other patterns (case 3, case 4, etc.) here as needed...
-
-
-# Handler Function to Launch the Kernel
-def launch_unroll_coarsen(A, B, C, Atp, Atk, Atv, pattern_id):
-    # Get matrix dimensions
-    M, K = A.shape  # A is MxK
-    K, N = B.shape  # B is KxN
+    # Count the number of '1' bits in the pattern
+    num_ones = 0
+    for i in range(k_rows):
+        if(tl.load(pattern_ptr + i) == 1):
+            num_ones += 1
     
-    # Convert matrices to pointers for Triton
-    A_ptr = A.data_ptr()
-    B_ptr = B.data_ptr()
-    C_ptr = C.data_ptr()
-    Atp_ptr = Atp.data_ptr()
-    Atk_ptr = Atk.data_ptr()
-    Atv_ptr = Atv.data_ptr()
+    pattern_offset = k_cols # Used to move from one bit in the pattern to the next in the values array
 
-    # Define grid - M // 3 warps, each warp handles 3 rows
-    grid = (M // 3,)
+    Avp_start_idx = tl.load(Avp_offsets + pattern_id) # Index of the first value in the values array for the entire pattern
+    values_ptr = Avp + (Avp_start_idx) + (panel_start * num_ones) # Points to the first value in the values array for this row panel
 
-    # Launch the kernel with the given pattern ID
-    unroll_coarsen_kernel[grid](
-        B_ptr, C_ptr, 
-        Atp_ptr, Atk_ptr, Atv_ptr,
-        B.stride(0), B.stride(1), 
-        C.stride(0), C.stride(1),
-        pattern_id
-    )
+    num_cols = (panel_end - panel_start) # Number of total columns in this row panel for this pattern
+    num_kernels = num_cols // k_cols # Number of kernels in this row panel
+
+    Aip_start_idx = tl.load(Aip_offsets + pattern_id) # Index of the first index in the indices array for the entire pattern
+    indices_ptr = Aip + Aip_start_idx + panel_start # Points to the first index in the indices array for this row panel
+
+    # Loop over every kernel in the row panel
+    for i in range(num_kernels):
+        # Loop over every column in the kernel
+        for j in range(k_cols):
+            # Some columns are just columns of zeroes, we want to skip those
+            first_value = tl.load(values_ptr + (num_ones * k_cols * i) + j)
+            tl.cast(first_value, dtype=tl.float32)
+            if (first_value != 0.0):
+
+                # This part only runs if a column of non-zero values is found
+                ones_count = 0  # Used to keep track of the '1' bits we've processed
+
+                # Loop over every bit in the pattern, there are k_rows bits
+                for k in range(k_rows):
+                    # Only process the non-zero values
+                    if tl.load(pattern_ptr + k) == 1:
+
+                        # Process the value we are at
+                        A_value = tl.load(values_ptr + (num_ones * k_cols * i) + j + (ones_count * pattern_offset))
+
+                        idx = tl.load(indices_ptr + (i * k_cols) + j) # The column index for this value
+
+                        # Load a row of B with at row index idx
+                        B_row = tl.load(B + (idx * N) + tl.arange(0, N))
+
+                        C_acc = tl.zeros((N,), dtype=tl.float32)
+                        C_acc = A_value * B_row
+
+                        C_old = tl.load(C + (row_idx + k) * N + tl.arange(0, N))
+                        tl.store(C + ((row_idx + k) * N) + tl.arange(0, N), C_acc + C_old)             
+                    
+                        ones_count += 1 # We've proccessed one '1' bit, move onto the next one
+    
+
+
+def launch_unroll_coarsen(A_cf, B):
+
+    # Conver the patterns dict to a list for the GPU
+    pattern_list = preprocess_patterns(A_cf.patterns)
+
+    # Create the offsets for the Avp and Aip arrays
+    Avp_offsets = create_array_offsets(A_cf.padded_values_data_array)
+    Aip_offsets = create_array_offsets(A_cf.indices_array)
+
+    # Load everything into the GPU
+    device = torch.device('cuda')
+
+    # Flatten and load arrays for A
+    A_vp_flattened = flatten_array(A_cf.padded_values_data_array)
+    A_vp = torch.tensor(A_vp_flattened, dtype=torch.int32, device=device)
+    A_ip_flattened = flatten_array(A_cf.indices_array)
+    A_ip = torch.tensor(A_ip_flattened, dtype=torch.int32, device=device)
+    A_rp = torch.tensor(A_cf.row_panels_pointer, dtype=torch.int32, device=device)
+    patterns_ptr = torch.tensor(pattern_list, dtype=torch.int32, device=device)
+    Avp_offsets_ptr = torch.tensor(Avp_offsets, dtype=torch.int32, device=device)
+    Aip_offsets_ptr = torch.tensor(Aip_offsets, dtype=torch.int32, device=device)
+
+    # Load B and C arrays
+    B_ptr = torch.tensor(B, dtype=torch.float32, device=device)
+    C_ptr = torch.zeros((A_cf.num_row, B.shape[1]), dtype=torch.float32, device=device)
+
+    # Launch the kernel
+    num_row_panels = len(A_cf.row_panels_pointer[0]) - 1
+    grid = (num_row_panels, len(A_cf.patterns))
+
+    unroll_coarsen_kernel[grid](A_vp, A_ip, A_rp,
+                                B_ptr, C_ptr,
+                                A_cf.kernel_rows, A_cf.kernel_cols, 
+                                patterns_ptr, Avp_offsets_ptr, Aip_offsets_ptr,
+                                B.shape[1])
+
+    # Sync the device and return the result
+    torch.cuda.synchronize()
+
+    return C_ptr.cpu().numpy()
+
+# main function
+def main():
+
+    rows = 4
+    cols = 4
+    density = 0.2
+
+    # Create a a sparse matrix
+    A_sp = sp.random(rows, cols, density=density, format='csr', dtype=np.int32, data_rvs=lambda s: np.random.randint(1, 11, size=s))
+
+    # Write the sparse matrix to a file
+    mmwrite("A_sparse.mtx", A_sp)
+
+    # Convert the mtx format to cfmtx
+    os.system("python3 compressed_format_generator.py A_sparse.mtx 2 34")
+
+    # Read the compressed matrix
+    path = "A_sparse.cfmtx"
+    A_cf = read_compressed_format.read_compressed_matrix(path)
+
+    # Create dense matrix B and results matrix C
+    B = np.random.rand(rows, cols).astype(np.float32)
+    C = np.zeros((rows, cols), dtype=np.float32)
+
+    # Perform the matrix multiplication uisng triton kernel
+    C = launch_unroll_coarsen(A_cf, B)
+
+    # Perform the matrix multiplication using builtin function
+    C_ref = A_sp.toarray() @ B
+
+    # Compare the results
+    #print(C)
+    #print(C_ref)
+    print("COMPARING C", np.allclose(C, C_ref, atol=1e-6))
+    
+if __name__ == "__main__":
+    main()
+

@@ -1,6 +1,6 @@
 import numpy as np
 
-
+# Transforms a patterns dict to a flattened list
 def preprocess_patterns(patterns):
 
     pattern_list = []
