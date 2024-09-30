@@ -1,15 +1,10 @@
 # Script to generate sparse/dense matrices with varying densities
 
-# Generate matrices with 96 rows and columns that vary from 32, 128, 256, and 512
-# The density of the matrices will vary from 0.00 to 0.20 with a step size of 0.02
-# The matrices will be stored in the 'matrices' directory
-# The matrices will be stored in the Matrix Market format
 import numpy as np
 import scipy.sparse as sp
 from scipy.io import mmwrite
 import os
 
-# Create the 'matrices' directory that is a sibling to the directory containing this script
 matrices_dir = '../matrices'
 
 if not os.path.exists(matrices_dir):

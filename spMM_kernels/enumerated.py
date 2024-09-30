@@ -120,7 +120,7 @@ def launch_enumerated(A, B):
     stride_bk, stride_bn = B_ptr.stride()
     stride_cm, stride_cn = C_ptr.stride()
 
-    # Define grid - M warps, each warp handles three rows
+    # Define grid
     grid = (M // 3 * 32,)
 
     enumerated_kernel[grid](A_ptr, B_ptr, C_ptr, N, K, stride_am, stride_ak, stride_bk, stride_bn, stride_cm, stride_cn)

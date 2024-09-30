@@ -7,16 +7,17 @@ from benchmark_warp_level import benchmark_warp_level
 from benchmark_3row_warp_unroll import benchmark_3row_warp_unroll
 from benchmark_enumerated import benchmark_enumerated
 from benchmark_unroll_coarsen import benchmark_unroll_coarsen
-sys.path.insert(1, '../utils')
 from read_compressed_format import read_compressed_matrix
 from scipy.io import mmread
 import matplotlib.pyplot as plt
+
+sys.path.insert(1, '../utils')
 
 # Script for generating plots for benchmarking the kernels
 cols = [32, 64, 128, 256, 512]
 row_n = 768
 densities = np.arange(0.1, 0.8, 0.1)
-cusparse_csr= ctypes.CDLL('./libcuSPARSE_spMM_csr.so')
+cusparse_csr= ctypes.CDLL('./libcuSPARSE_spMM_csr.so')  # Load the cuSPARSE implementation
 
 for col in cols:
     thread_level_results = []
@@ -47,7 +48,7 @@ for col in cols:
 
         thread_level_res = benchmark_thread_level(A, B)
         warp_level_res = benchmark_warp_level(A, B)
-        warp_unroll_res = benchmark_3row_warp_unroll(A, B)
+        warp_unroll_res = benchmark_3row_warp_unroll(A, B)      # Comment this out if you want to run with dimensions that are not multiples of 3
         enumerated_res = benchmark_enumerated(A, B)
         unroll_coarsen_res = benchmark_unroll_coarsen(A_cf, B)
         cusparse_csr.benchmark_cusparseSpMMCSR.restype = ctypes.c_float
@@ -73,7 +74,7 @@ for col in cols:
     
     plt.figure()
     plt.plot(densities, thread_level_results, label="Thread Level")
-    #plt.plot(densities, warp_level_results, label="Warp Level")
+    #plt.plot(densities, warp_level_results, label="Warp Level")            Warp level seems to not be working properly at the moment, commented them out
     #plt.plot(densities, warp_unroll_results, label="3 Row Warp Unroll")
     #plt.plot(densities, enumerated_results, label="Enumerated")
     plt.plot(densities, unroll_coarsen_results, label="Unroll Coarsen")
