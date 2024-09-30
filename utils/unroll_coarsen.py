@@ -148,8 +148,8 @@ def main():
     C_ref = A_sp.toarray() @ B
 
     # Compare the results
-    print(C)
-    print(C_ref)
+    #print(C)
+    #print(C_ref)
     print("COMPARING C", np.allclose(C, C_ref, atol=1e-6))
     
 if __name__ == "__main__":
