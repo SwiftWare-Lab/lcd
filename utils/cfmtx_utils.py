@@ -1,4 +1,6 @@
 import numpy as np
+import scipy.sparse as sp
+from scipy.io import mmwrite
 
 # Transforms a patterns dict to a flattened list
 def preprocess_patterns(patterns):
@@ -28,3 +30,21 @@ def flatten_array(array):
             flattened.append(array[i][j])
 
     return flattened
+
+# Generate a random sparse matrix using scipy
+def generate_sparse_matrix(rows, cols, density):
+    A_sp = sp.random(rows, cols, density=density, format='csr', dtype=np.int32, data_rvs=lambda s: np.random.randint(1, 11, size=s))
+    return A_sp
+
+def main():
+    rows = 9
+    cols = 9
+
+    # Generate a random sparse matrix
+    A = generate_sparse_matrix(rows, cols, 0.5)
+
+    # output to mtx file
+    mmwrite('A.mtx', A)
+
+if __name__ == '__main__':
+    main()

@@ -73,7 +73,7 @@ def unroll_coarsen_kernel(Avp, Aip, Arp, B, C, k_rows: tl.constexpr, k_cols, pat
                         C_acc = A_value * B_row
 
                         C_old = tl.load(C + (row_idx + k) * N + tl.arange(0, N))
-                        tl.store(C + ((row_idx + k) * N) + tl.arange(0, N), C_acc + C_old)             
+                        tl.store(C + ((row_idx + k) * N) + tl.arange(0, N), C_acc + C_old)        
                     
                         ones_count += 1 # We've proccessed one '1' bit, move onto the next one
     
