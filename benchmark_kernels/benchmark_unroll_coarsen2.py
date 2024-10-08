@@ -259,6 +259,60 @@ def benchmark_unroll_coarsen(A_cf, B):
 
     return elapsed_time_ms
 
+def test_unroll_coarsen(A_cf, B):
+
+    # Conver the patterns dict to a list for the GPU
+    pattern_list = preprocess_patterns(A_cf.patterns)
+
+    # Create the offsets for the Avp and Aip arrays
+    Avp_offsets = create_array_offsets(A_cf.padded_values_data_array)
+    Aip_offsets = create_array_offsets(A_cf.indices_array)
+
+    # Load everything into the GPU
+    device = torch.device('cuda')
+
+    # Flatten and load arrays for A
+    A_vp_flattened = flatten_array(A_cf.padded_values_data_array)
+    A_vp = torch.tensor(A_vp_flattened, dtype=torch.int32, device=device)
+    A_ip_flattened = flatten_array(A_cf.indices_array)
+    A_ip = torch.tensor(A_ip_flattened, dtype=torch.int32, device=device)
+    A_rp = torch.tensor(A_cf.row_panels_pointer, dtype=torch.int32, device=device)
+    patterns_ptr = torch.tensor(pattern_list, dtype=torch.int32, device=device)
+    Avp_offsets_ptr = torch.tensor(Avp_offsets, dtype=torch.int32, device=device)
+    Aip_offsets_ptr = torch.tensor(Aip_offsets, dtype=torch.int32, device=device)
+
+    # Load B and C arrays
+    B_ptr = torch.tensor(B, dtype=torch.float32, device=device)
+    C_ptr = torch.zeros((A_cf.num_row, B.shape[1]), dtype=torch.float32, device=device)
+
+    # Launch the kernel
+    num_row_panels = len(A_cf.row_panels_pointer[0]) - 1
+    grid = (num_row_panels, len(A_cf.patterns))
+
+    # This is for testing, remove lateer
+    #A_ptr = torch.tensor(A_np, dtype=torch.float32, device=device)
+
+    # Create CUDA events to record the time
+    start = torch.cuda.Event(enable_timing=True)
+    stop = torch.cuda.Event(enable_timing=True)
+
+    # Launch Triton kernel (or any CUDA operation)
+    start.record()
+
+    unroll_coarsen_kernel[grid](A_vp, A_ip, A_rp,
+                                B_ptr, C_ptr,
+                                patterns_ptr, Avp_offsets_ptr, Aip_offsets_ptr,
+                                A_cf.kernel_rows, A_cf.kernel_cols, 
+                                B.shape[1])
+    
+    stop.record()
+
+    torch.cuda.synchronize()
+    elapsed_time_ms = start.elapsed_time(stop)
+
+    return elapsed_time_ms, C_ptr.cpu().numpy()
+
+# A simple test for the kernel
 def main():
 
     # Create a random sparse matrix A
@@ -267,12 +321,12 @@ def main():
     density = 0.5
 
     # A 3 by 4 array where only the first row is non zero
-    #A_test = np.array([[1, 2, 3, 4],
-                        #[9, 10, 11, 0],
-                        #[5, 6, 7, 8]], dtype=np.int32)
-    #A_sp = sp.csr_matrix(A_test)
+    A_test = np.array([[1, 2, 3, 4],
+                        [9, 10, 11, 12],
+                        [5, 6, 7, 8]], dtype=np.int32)
+    A_sp = sp.csr_matrix(A_test)
 
-    A_sp = sp.random(num_rows, num_cols, density=density, format='csr', dtype=np.int32, data_rvs=lambda s: np.random.randint(1, 11, size=s))
+    #A_sp = sp.random(num_rows, num_cols, density=density, format='csr', dtype=np.int32, data_rvs=lambda s: np.random.randint(1, 11, size=s))
     A_np = A_sp.toarray()
 
     # Convert A to a compressed format
@@ -284,13 +338,14 @@ def main():
     B = np.random.randint(1, 11, (num_cols, 4)).astype(np.float32)
 
     # Benchmark the kernel
-    elapsed_time_ms, C = benchmark_unroll_coarsen(A_cf, B, A_np)
+    elapsed_time_ms, C = test_unroll_coarsen(A_cf, B)
 
     # Reference result
     C_ref = A_sp @ B
 
     # Check if the result is correct
     print(elapsed_time_ms)
+    print(np.allclose(C, C_ref, atol=1e-3))
 
 if __name__ == '__main__':
     main()

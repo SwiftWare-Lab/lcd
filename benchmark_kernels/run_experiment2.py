@@ -21,6 +21,8 @@ densities = np.arange(0.1, 0.8, 0.1)
 k = 20  # Number of iterations to average
 cuda_lib= ctypes.CDLL('./cuda_lib.so')  # Load the cuSPARSE implementation
 
+print("Running benchmarks...")
+
 for col in cols:
     thread_level_results = []
     warp_level_results = []
@@ -46,7 +48,8 @@ for col in cols:
         C = np.zeros((A.shape[0], B.shape[1]), dtype=np.float32)
 
         # Convert A to cfmtx format using compressed_format_generator.py
-        os.system(f"python3 ../utils/compressed_format_generator.py {A_path} 8 8")
+        # remove output of this command from stdout
+        os.system(f"python3 ../utils/compressed_format_generator.py {A_path} 3 4 > /dev/null 2>&1")
 
         A_cf_path = f"../matrices/A_sparse_{row_n}x128_{density:.2f}.cfmtx"
         A_cf = read_compressed_matrix(A_cf_path)
@@ -132,3 +135,5 @@ for col in cols:
     
     # Save the plot as a PNG file
     plt.savefig(f"B_columns_{col}.png")
+
+print("Done!")

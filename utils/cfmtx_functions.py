@@ -1,3 +1,5 @@
+# CPU implementation of the CompressedMatrix format functions (reading cfmtx and spMM)
+
 def read_cfmtx_matrix(Avp, Aip, Arp, k_rows, k_cols, pattern_id, patterns, row_pi, A_matrix):
 # Performs spMM using the CompressedMatrix format for A
 
