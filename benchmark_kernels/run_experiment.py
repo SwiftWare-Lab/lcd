@@ -17,7 +17,7 @@ sys.path.insert(1, '../utils')
 cols = [32, 64, 128, 256, 512]
 row_n = 768
 densities = np.arange(0.1, 0.8, 0.1)
-cusparse_csr= ctypes.CDLL('./libcuSPARSE_spMM_csr.so')  # Load the cuSPARSE implementation
+cuda_lib= ctypes.CDLL('./libcuSPARSE_spMM_csr.so')  # Load the cuSPARSE implementation
 
 for col in cols:
     thread_level_results = []
@@ -51,8 +51,8 @@ for col in cols:
         warp_unroll_res = benchmark_3row_warp_unroll(A, B)      # Comment this out if you want to run with dimensions that are not multiples of 3
         enumerated_res = benchmark_enumerated(A, B)
         unroll_coarsen_res = benchmark_unroll_coarsen(A_cf, B)
-        cusparse_csr.benchmark_cusparseSpMMCSR.restype = ctypes.c_float
-        cuSPARSE_res = cusparse_csr.benchmark_cusparseSpMMCSR(
+        cuda_lib.benchmark_cusparseSpMMCSR.restype = ctypes.c_float
+        cuSPARSE_res = cuda_lib.benchmark_cusparseSpMMCSR(
             ctypes.c_int(A_sp.shape[0]),
             ctypes.c_int(A_sp.shape[1]),
             ctypes.c_int(A_sp.nnz),

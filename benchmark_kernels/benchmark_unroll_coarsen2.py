@@ -14,10 +14,11 @@ from read_compressed_format import read_compressed_matrix
 
 
 @triton.jit
-def unroll_coarsen_kernel(Avp, Aip, Arp, B, C, patterns, Avp_offsets, Aip_offsets, k_rows: tl.constexpr, k_cols: tl.constexpr, N: tl.constexpr, A_ref):
+def unroll_coarsen_kernel(Avp, Aip, Arp, B, C, patterns, Avp_offsets, Aip_offsets, k_rows: tl.constexpr, k_cols: tl.constexpr, N: tl.constexpr):
 
     row_pi = tl.program_id(axis=0)  # Index of row panel we are working on
     pattern_id = tl.program_id(axis=1) 
+    #tl.device_print("pattern_id:", pattern_id)
 
     # Get the row panel start and end indices
     panel_start = tl.load(Arp + (tl.num_programs(0) + 1) * pattern_id + row_pi)
@@ -176,11 +177,6 @@ def unroll_coarsen_kernel(Avp, Aip, Arp, B, C, patterns, Avp_offsets, Aip_offset
 
                     idx = tl.load(indices_ptr + (i * k_cols) + j)
 
-                    A_1_r = tl.load(A_ref + (row_idx + 1) * N + idx)
-
-                    if A_1_r != A_1:
-                        tl.device_print("Error", A_1_r)
-
                     # Load a row of B with at row index idx
                     B_row = tl.load(B + (idx * N) + tl.arange(0, N))
 
@@ -210,7 +206,7 @@ def unroll_coarsen_kernel(Avp, Aip, Arp, B, C, patterns, Avp_offsets, Aip_offset
 
                     tl.store(C + ((row_idx + 2) * N) + tl.arange(0, N), C_2 + C_2_old)
 
-def benchmark_unroll_coarsen(A_cf, B, A_np):
+def benchmark_unroll_coarsen(A_cf, B):
 
     # Conver the patterns dict to a list for the GPU
     pattern_list = preprocess_patterns(A_cf.patterns)
@@ -241,7 +237,7 @@ def benchmark_unroll_coarsen(A_cf, B, A_np):
     grid = (num_row_panels, len(A_cf.patterns))
 
     # This is for testing, remove lateer
-    A_ptr = torch.tensor(A_np, dtype=torch.float32, device=device)
+    #A_ptr = torch.tensor(A_np, dtype=torch.float32, device=device)
 
     # Create CUDA events to record the time
     start = torch.cuda.Event(enable_timing=True)
@@ -254,15 +250,14 @@ def benchmark_unroll_coarsen(A_cf, B, A_np):
                                 B_ptr, C_ptr,
                                 patterns_ptr, Avp_offsets_ptr, Aip_offsets_ptr,
                                 A_cf.kernel_rows, A_cf.kernel_cols, 
-                                B.shape[1],
-                                A_ptr)
+                                B.shape[1])
     
     stop.record()
 
     torch.cuda.synchronize()
     elapsed_time_ms = start.elapsed_time(stop)
 
-    return elapsed_time_ms, C_ptr.cpu().numpy()
+    return elapsed_time_ms
 
 def main():
 
@@ -272,9 +267,9 @@ def main():
     density = 0.5
 
     # A 3 by 4 array where only the first row is non zero
-    #A_test = np.array([[0, 0, 0, 0],
-                        #[0, 0, 0, 0],
-                        #[1, 2, 3, 4]], dtype=np.int32)
+    #A_test = np.array([[1, 2, 3, 4],
+                        #[9, 10, 11, 0],
+                        #[5, 6, 7, 8]], dtype=np.int32)
     #A_sp = sp.csr_matrix(A_test)
 
     A_sp = sp.random(num_rows, num_cols, density=density, format='csr', dtype=np.int32, data_rvs=lambda s: np.random.randint(1, 11, size=s))
@@ -295,11 +290,7 @@ def main():
     C_ref = A_sp @ B
 
     # Check if the result is correct
-    print(A_np)
-    print(B)
-    print(C)
-    print(C_ref)
-    print(np.allclose(C, C_ref, atol=1e-3))
+    print(elapsed_time_ms)
 
 if __name__ == '__main__':
     main()
