@@ -5,6 +5,10 @@
 #include <vector>
 #include <cmath>
 
+// A wrapper for CUDA APIs
+// run using nvcc -o cuda_lib.so. CUDA_wrapper.cu -shared -lcusparse -lcublas -lcudart -Xcompiler -fPIC
+
+
 #define CHECK_CUDA(func)                                                       \
 {                                                                              \
     cudaError_t status = (func);                                               \
