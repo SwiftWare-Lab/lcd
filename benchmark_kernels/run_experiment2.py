@@ -48,7 +48,6 @@ for col in cols:
         C = np.zeros((A.shape[0], B.shape[1]), dtype=np.float32)
 
         # Convert A to cfmtx format using compressed_format_generator.py
-        # remove output of this command from stdout
         os.system(f"python3 ../utils/compressed_format_generator.py {A_path} 3 4 > /dev/null 2>&1")
 
         A_cf_path = f"../matrices/A_sparse_{row_n}x128_{density:.2f}.cfmtx"

@@ -1,20 +1,16 @@
-import os
 import sys
 sys.path.insert(1, '../utils')
 import torch
 import triton
 import triton.language as tl
 from cfmtx_utils import preprocess_patterns, create_array_offsets, flatten_array
-from read_compressed_format import read_compressed_matrix
-import numpy as np
-import scipy.sparse as sp
-from scipy.io import mmwrite
-
 
 @triton.jit
 def unroll_coarsen_kernel(Avp, Aip, Arp, B, C, k_rows: tl.constexpr, k_cols, patterns, Avp_offsets, Aip_offsets, N: tl.constexpr):
     row_pi = tl.program_id(axis=0)
     pattern_id = tl.program_id(axis=1)
+
+    tl.device_print("pattern_id:", pattern_id)
 
     # Get the row panel start and end indices
     panel_start = tl.load(Arp + (tl.num_programs(0) + 1) * pattern_id + row_pi)
