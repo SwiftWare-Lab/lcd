@@ -1,9 +1,14 @@
 import sys
+import os
 sys.path.insert(1, '../utils')
+import numpy as np
+import scipy.sparse as sp
 import torch
 import triton
 import triton.language as tl
 from cfmtx_utils import preprocess_patterns, create_array_offsets, flatten_array
+from scipy.io import mmwrite
+from read_compressed_format import read_compressed_matrix
 
 @triton.jit
 def unroll_coarsen_kernel(Avp, Aip, Arp, B, C, patterns, Avp_offsets, Aip_offsets, k_rows: tl.constexpr, k_cols: tl.constexpr, N: tl.constexpr):
@@ -11,6 +16,7 @@ def unroll_coarsen_kernel(Avp, Aip, Arp, B, C, patterns, Avp_offsets, Aip_offset
     row_pi = tl.program_id(axis=0)  # Index of row panel we are working on
     pattern_id = tl.program_id(axis=1) 
     tl.device_print("pattern_id:", pattern_id)
+    #tl.debug_barrier()
 
     # Get the row panel start and end indices
     panel_start = tl.load(Arp + (tl.num_programs(0) + 1) * pattern_id + row_pi)
@@ -68,9 +74,21 @@ def unroll_coarsen_kernel(Avp, Aip, Arp, B, C, patterns, Avp_offsets, Aip_offset
                     C_1 = A_1 * B_row
                     C_2 = A_2 * B_row
 
-                    tl.atomic_add(C + ((row_idx + 0) * N) + tl.arange(0, N), C_0)
-                    tl.atomic_add(C + ((row_idx + 1) * N) + tl.arange(0, N), C_1)
-                    tl.atomic_add(C + ((row_idx + 2) * N) + tl.arange(0, N), C_2)
+                    C_0_old = tl.load(C + ((row_idx + 0) * N) + tl.arange(0, N))
+                    C_1_old = tl.load(C + ((row_idx + 1) * N) + tl.arange(0, N))
+                    C_2_old = tl.load(C + ((row_idx + 2) * N) + tl.arange(0, N))
+
+                    C_0 = C_0 + C_0_old
+                    C_1 = C_1 + C_1_old
+                    C_2 = C_2 + C_2_old
+
+                    tl.store(C + ((row_idx + 0) * N) + tl.arange(0, N), C_0)
+                    tl.store(C + ((row_idx + 1) * N) + tl.arange(0, N), C_1)
+                    tl.store(C + ((row_idx + 2) * N) + tl.arange(0, N), C_2)
+
+                    #tl.atomic_add(C + ((row_idx + 0) * N) + tl.arange(0, N), C_0)
+                    #tl.atomic_add(C + ((row_idx + 1) * N) + tl.arange(0, N), C_1)
+                    #tl.atomic_add(C + ((row_idx + 2) * N) + tl.arange(0, N), C_2)
                  
                 elif pattern_id == 1:
                     # 110
@@ -85,11 +103,20 @@ def unroll_coarsen_kernel(Avp, Aip, Arp, B, C, patterns, Avp_offsets, Aip_offset
                     C_0 = tl.zeros((N,), dtype=tl.float32)
                     C_1 = tl.zeros((N,), dtype=tl.float32)
 
+                    C_0_old = tl.load(C + ((row_idx + 0) * N) + tl.arange(0, N))
+                    C_1_old = tl.load(C + ((row_idx + 1) * N) + tl.arange(0, N))
+
                     C_0 = A_0 * B_row
                     C_1 = A_1 * B_row
 
-                    tl.atomic_add(C + ((row_idx + 0) * N) + tl.arange(0, N), C_0)
-                    tl.atomic_add(C + ((row_idx + 1) * N) + tl.arange(0, N), C_1)
+                    C_0 = C_0 + C_0_old
+                    C_1 = C_1 + C_1_old
+
+                    tl.store(C + ((row_idx + 0) * N) + tl.arange(0, N), C_0)
+                    tl.store(C + ((row_idx + 1) * N) + tl.arange(0, N), C_1)
+
+                    #tl.atomic_add(C + ((row_idx + 0) * N) + tl.arange(0, N), C_0)
+                    #tl.atomic_add(C + ((row_idx + 1) * N) + tl.arange(0, N), C_1)
 
                 elif pattern_id == 2:
                     # 101
@@ -108,8 +135,17 @@ def unroll_coarsen_kernel(Avp, Aip, Arp, B, C, patterns, Avp_offsets, Aip_offset
                     C_0 = A_0 * B_row
                     C_2 = A_2 * B_row
 
-                    tl.atomic_add(C + ((row_idx + 0) * N) + tl.arange(0, N), C_0)
-                    tl.atomic_add(C + ((row_idx + 2) * N) + tl.arange(0, N), C_2)
+                    C_0_old = tl.load(C + ((row_idx + 0) * N) + tl.arange(0, N))
+                    C_2_old = tl.load(C + ((row_idx + 2) * N) + tl.arange(0, N))
+
+                    C_0 = C_0 + C_0_old
+                    C_2 = C_2 + C_2_old
+
+                    tl.store(C + ((row_idx + 0) * N) + tl.arange(0, N), C_0)
+                    tl.store(C + ((row_idx + 2) * N) + tl.arange(0, N), C_2)
+
+                    #tl.atomic_add(C + ((row_idx + 0) * N) + tl.arange(0, N), C_0)
+                    #tl.atomic_add(C + ((row_idx + 2) * N) + tl.arange(0, N), C_2)
 
                 elif pattern_id == 3:
                     # 100
@@ -125,7 +161,13 @@ def unroll_coarsen_kernel(Avp, Aip, Arp, B, C, patterns, Avp_offsets, Aip_offset
 
                     C_0 = A_0 * B_row
 
-                    tl.atomic_add(C + ((row_idx + 0) * N) + tl.arange(0, N), C_0)
+                    C_0_old = tl.load(C + ((row_idx + 0) * N) + tl.arange(0, N))
+
+                    C_0 = C_0 + C_0_old
+
+                    tl.store(C + ((row_idx + 0) * N) + tl.arange(0, N), C_0)
+
+                    #tl.atomic_add(C + ((row_idx + 0) * N) + tl.arange(0, N), C_0)
 
                 elif pattern_id == 4:
                     # 011
@@ -144,8 +186,17 @@ def unroll_coarsen_kernel(Avp, Aip, Arp, B, C, patterns, Avp_offsets, Aip_offset
                     C_1 = A_1 * B_row
                     C_2 = A_2 * B_row
 
-                    tl.atomic_add(C + ((row_idx + 1) * N) + tl.arange(0, N), C_1)
-                    tl.atomic_add(C + ((row_idx + 2) * N) + tl.arange(0, N), C_2)
+                    C_1_old = tl.load(C + ((row_idx + 1) * N) + tl.arange(0, N))
+                    C_2_old = tl.load(C + ((row_idx + 2) * N) + tl.arange(0, N))
+
+                    C_1 = C_1 + C_1_old
+                    C_2 = C_2 + C_2_old
+
+                    tl.store(C + ((row_idx + 1) * N) + tl.arange(0, N), C_1)
+                    tl.store(C + ((row_idx + 2) * N) + tl.arange(0, N), C_2)
+
+                    #tl.atomic_add(C + ((row_idx + 1) * N) + tl.arange(0, N), C_1)
+                    #tl.atomic_add(C + ((row_idx + 2) * N) + tl.arange(0, N), C_2)
 
                 elif pattern_id == 5:
                     # 010
@@ -161,7 +212,13 @@ def unroll_coarsen_kernel(Avp, Aip, Arp, B, C, patterns, Avp_offsets, Aip_offset
 
                     C_1 = A_1 * B_row
 
-                    tl.atomic_add(C + ((row_idx + 1) * N) + tl.arange(0, N), C_1)
+                    C_1_old = tl.load(C + ((row_idx + 1) * N) + tl.arange(0, N))
+
+                    C_1 = C_1 + C_1_old
+
+                    tl.store(C + ((row_idx + 1) * N) + tl.arange(0, N), C_1)
+
+                    #tl.atomic_add(C + ((row_idx + 1) * N) + tl.arange(0, N), C_1)
 
                 elif pattern_id == 6:
                     # 001
@@ -177,7 +234,13 @@ def unroll_coarsen_kernel(Avp, Aip, Arp, B, C, patterns, Avp_offsets, Aip_offset
 
                     C_2 = A_2 * B_row
 
-                    tl.atomic_add(C + ((row_idx + 2) * N) + tl.arange(0, N), C_2)
+                    C_2_old = tl.load(C + ((row_idx + 2) * N) + tl.arange(0, N))
+
+                    C_2 = C_2 + C_2_old
+
+                    tl.store(C + ((row_idx + 2) * N) + tl.arange(0, N), C_2)
+
+                    #tl.atomic_add(C + ((row_idx + 2) * N) + tl.arange(0, N), C_2)
 
 def benchmark_unroll_coarsen(A_cf, B):
 
@@ -282,4 +345,44 @@ def test_unroll_coarsen(A_cf, B):
     elapsed_time_ms = start.elapsed_time(stop)
 
     return elapsed_time_ms, C_ptr.cpu().numpy()
+
+def compare_matrices(A, B):
+    # loop over all entries in the matrix
+    for i in range(A.shape[0]):
+        for j in range(A.shape[1]):
+            if A[i, j] != B[i, j]:
+                print(f"FAILED AT {i}, {j}")
+                print(f"FIRST MATRIX VALUE: {A[i, j]}")
+                print(f"SECOND MATRIX VALUE: {B[i, j]}")
+                return False
+    return True
+
+
+# A small test
+def main():
+
+    num_rows = 768
+    num_cols = 512
+    density = 0.2
+
+    A_sp = sp.random(num_rows, num_cols, density=density, format='csr', dtype=np.int32, data_rvs=lambda s: np.random.randint(1, 11, size=s))
+    A_np = A_sp.toarray()
+
+    mmwrite("A.mtx", A_sp)
+    os.system("python3 ../utils/compressed_format_generator.py A.mtx 3 4")
+    A_cf = read_compressed_matrix("A.cfmtx")
+
+    B = np.random.randint(1, 11, (512, 32)).astype(np.float32)
+
+    elapsed_time_ms, C = test_unroll_coarsen(A_cf, B)
+
+    C_ref = A_sp @ B
+
+    print(compare_matrices(C, C_ref))
+    print(elapsed_time_ms)
+
+if __name__ == '__main__':
+    main()
+
+
 

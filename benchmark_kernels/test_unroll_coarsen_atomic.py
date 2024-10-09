@@ -2,7 +2,7 @@ from scipy.io import mmread
 import os
 import sys
 import numpy as np
-from benchmark_unroll_coarsen2 import test_unroll_coarsen
+from benchmark_unroll_coarsen3 import test_unroll_coarsen
 
 sys.path.insert(1, '../utils')
 
@@ -34,7 +34,7 @@ for col in cols:
 
         os.system(f"python3 ../utils/compressed_format_generator.py {A_path} 3 4 > /dev/null 2>&1")
 
-        A_cf_path = f"../matrices/A_sparse_{row_n}x128_{density:.2f}.cfmtx"
+        A_cf_path = f"../matrices/A_sparse_{row_n}x512_{density:.2f}.cfmtx"
         A_cf = read_compressed_matrix(A_cf_path)
 
         exec_time, C = test_unroll_coarsen(A_cf, B)
@@ -42,6 +42,7 @@ for col in cols:
         C_ref = A @ B
 
         if np.allclose(C, C_ref, atol=1e-3):
+            print(f"Test passed for matrix A_sparse_{row_n}x512_{density:.2f}.mtx and B_sparse_512x{col}_1.0.mtx")
             passed += 1
 
         else:
