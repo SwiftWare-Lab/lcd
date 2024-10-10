@@ -18,7 +18,7 @@ sys.path.insert(1, '../utils')
 cols = [32, 64, 128, 256, 512]
 row_n = 768
 densities = np.arange(0.1, 0.8, 0.1)
-k = 1  # Number of iterations to average
+k = 20  # Number of iterations to average
 cuda_lib= ctypes.CDLL('./cuda_lib.so')  # Load the cuSPARSE implementation
 
 print("Running benchmarks...")
