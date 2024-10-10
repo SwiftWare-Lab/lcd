@@ -1,5 +1,6 @@
 import sys
 import os
+
 sys.path.insert(1, '../utils')
 import numpy as np
 import scipy.sparse as sp
@@ -10,11 +11,12 @@ from cfmtx_utils import preprocess_patterns, create_array_offsets, flatten_array
 from scipy.io import mmwrite
 from read_compressed_format import read_compressed_matrix
 
-@triton.jit
-def unroll_coarsen_kernel(Avp, Aip, Arp, B, C, patterns, Avp_offsets, Aip_offsets, k_rows: tl.constexpr, k_cols: tl.constexpr, N: tl.constexpr):
 
+@triton.jit
+def unroll_coarsen_kernel(Avp, Aip, Arp, B, C, patterns, Avp_offsets, Aip_offsets, k_rows: tl.constexpr,
+                          k_cols: tl.constexpr, N: tl.constexpr):
     row_pi = tl.program_id(axis=0)  # Index of row panel we are working on
-    pattern_id = tl.program_id(axis=1) 
+    pattern_id = tl.program_id(axis=1)
 
     # Get the row panel start and end indices
     panel_start = tl.load(Arp + (tl.num_programs(0) + 1) * pattern_id + row_pi)
@@ -23,28 +25,31 @@ def unroll_coarsen_kernel(Avp, Aip, Arp, B, C, patterns, Avp_offsets, Aip_offset
     if panel_start == panel_end:
         # row panel for this pattern is empty
         return
-    
-    row_idx = row_pi * k_rows # We are on the row_pi-th row panel, each row panel has k_rows rows
+
+    row_idx = row_pi * k_rows  # We are on the row_pi-th row panel, each row panel has k_rows rows
     pattern_ptr = patterns + (k_rows * pattern_id)  # Points to first element of the pattern
 
     # Count the number of '1' bits in the pattern
     num_ones = 0
     for i in range(k_rows):
-        if(tl.load(pattern_ptr + i) == 1):
+        if (tl.load(pattern_ptr + i) == 1):
             num_ones += 1
 
     pattern_offset = k_cols
 
-    Avp_start_idx = tl.load(Avp_offsets + pattern_id) # Index of the first value in the values array for the entire pattern
-    values_ptr = Avp + (Avp_start_idx) + (panel_start * num_ones) # Points to the first value in the values array for this row panel
+    Avp_start_idx = tl.load(
+        Avp_offsets + pattern_id)  # Index of the first value in the values array for the entire pattern
+    values_ptr = Avp + (Avp_start_idx) + (
+            panel_start * num_ones)  # Points to the first value in the values array for this row panel
 
-    num_cols = (panel_end - panel_start) # Number of total columns in this row panel for this pattern
-    num_kernels = num_cols // k_cols # Number of kernels in this row panel
+    num_cols = (panel_end - panel_start)  # Number of total columns in this row panel for this pattern
+    num_kernels = num_cols // k_cols  # Number of kernels in this row panel
 
-    Aip_start_idx = tl.load(Aip_offsets + pattern_id) # Index of the first index in the indices array for the entire pattern
-    indices_ptr = Aip + Aip_start_idx + panel_start # Points to the first index in the indices array for this row panel
+    Aip_start_idx = tl.load(
+        Aip_offsets + pattern_id)  # Index of the first index in the indices array for the entire pattern
+    indices_ptr = Aip + Aip_start_idx + panel_start  # Points to the first index in the indices array for this row panel
 
-     # Loop over every kernel in the row panel
+    # Loop over every kernel in the row panel
     for i in range(num_kernels):
         # Loop over every column in the kernel
         for j in range(k_cols):
@@ -75,7 +80,7 @@ def unroll_coarsen_kernel(Avp, Aip, Arp, B, C, patterns, Avp_offsets, Aip_offset
                     tl.atomic_add(C + ((row_idx + 0) * N) + tl.arange(0, N), C_0)
                     tl.atomic_add(C + ((row_idx + 1) * N) + tl.arange(0, N), C_1)
                     tl.atomic_add(C + ((row_idx + 2) * N) + tl.arange(0, N), C_2)
-                 
+
                 elif pattern_id == 1:
                     # 110
                     A_0 = first_value
@@ -183,8 +188,8 @@ def unroll_coarsen_kernel(Avp, Aip, Arp, B, C, patterns, Avp_offsets, Aip_offset
 
                     tl.atomic_add(C + ((row_idx + 2) * N) + tl.arange(0, N), C_2)
 
-def benchmark_unroll_coarsen(A_cf, B):
 
+def benchmark_unroll_coarsen(A_cf, B):
     # Conver the patterns dict to a list for the GPU
     pattern_list = preprocess_patterns(A_cf.patterns)
 
@@ -214,7 +219,7 @@ def benchmark_unroll_coarsen(A_cf, B):
     grid = (num_row_panels, len(A_cf.patterns))
 
     # This is for testing, remove lateer
-    #A_ptr = torch.tensor(A_np, dtype=torch.float32, device=device)
+    # A_ptr = torch.tensor(A_np, dtype=torch.float32, device=device)
 
     # Create CUDA events to record the time
     start = torch.cuda.Event(enable_timing=True)
@@ -226,18 +231,18 @@ def benchmark_unroll_coarsen(A_cf, B):
     unroll_coarsen_kernel[grid](A_vp, A_ip, A_rp,
                                 B_ptr, C_ptr,
                                 patterns_ptr, Avp_offsets_ptr, Aip_offsets_ptr,
-                                A_cf.kernel_rows, A_cf.kernel_cols, 
+                                A_cf.kernel_rows, A_cf.kernel_cols,
                                 B.shape[1])
-    torch.cuda.synchronize()
     stop.record()
 
-    
+    torch.cuda.synchronize()
+
     elapsed_time_ms = start.elapsed_time(stop)
 
     return elapsed_time_ms
 
-def test_unroll_coarsen(A_cf, B):
 
+def test_unroll_coarsen(A_cf, B):
     # Conver the patterns dict to a list for the GPU
     pattern_list = preprocess_patterns(A_cf.patterns)
 
@@ -266,7 +271,6 @@ def test_unroll_coarsen(A_cf, B):
     num_row_panels = len(A_cf.row_panels_pointer[0]) - 1
     grid = (num_row_panels, len(A_cf.patterns))
 
-
     # Create CUDA events to record the time
     start = torch.cuda.Event(enable_timing=True)
     stop = torch.cuda.Event(enable_timing=True)
@@ -277,17 +281,12 @@ def test_unroll_coarsen(A_cf, B):
     unroll_coarsen_kernel[grid](A_vp, A_ip, A_rp,
                                 B_ptr, C_ptr,
                                 patterns_ptr, Avp_offsets_ptr, Aip_offsets_ptr,
-                                A_cf.kernel_rows, A_cf.kernel_cols, 
+                                A_cf.kernel_rows, A_cf.kernel_cols,
                                 B.shape[1])
-    
+
     stop.record()
 
     torch.cuda.synchronize()
     elapsed_time_ms = start.elapsed_time(stop)
 
     return elapsed_time_ms, C_ptr.cpu().numpy()
-
-
-
-
-

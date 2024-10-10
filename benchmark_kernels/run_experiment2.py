@@ -6,7 +6,7 @@ from benchmark_thread_level import benchmark_thread_level
 from benchmark_warp_level import benchmark_warp_level
 from benchmark_3row_warp_unroll import benchmark_3row_warp_unroll
 from benchmark_enumerated import benchmark_enumerated
-from benchmark_unroll_coarsen2 import benchmark_unroll_coarsen
+from benchmark_unroll_coarsen3 import benchmark_unroll_coarsen
 from read_compressed_format import read_compressed_matrix
 from scipy.io import mmread
 import matplotlib.pyplot as plt
@@ -18,7 +18,7 @@ sys.path.insert(1, '../utils')
 cols = [32, 64, 128, 256, 512]
 row_n = 768
 densities = np.arange(0.1, 0.8, 0.1)
-k = 20  # Number of iterations to average
+k = 1  # Number of iterations to average
 cuda_lib= ctypes.CDLL('./cuda_lib.so')  # Load the cuSPARSE implementation
 
 print("Running benchmarks...")
@@ -50,7 +50,7 @@ for col in cols:
         # Convert A to cfmtx format using compressed_format_generator.py
         os.system(f"python3 ../utils/compressed_format_generator.py {A_path} 3 4 > /dev/null 2>&1")
 
-        A_cf_path = f"../matrices/A_sparse_{row_n}x128_{density:.2f}.cfmtx"
+        A_cf_path = f"../matrices/A_sparse_{row_n}x512_{density:.2f}.cfmtx"
         A_cf = read_compressed_matrix(A_cf_path)
 
         # Function to run a benchmark `k` times and return the average
@@ -82,9 +82,10 @@ for col in cols:
                 ctypes.c_void_p(C.ctypes.data),
             )
 
+
         def benchmark_cublas(A_np, B, C):
             cuda_lib.benchmark_cublasSgemm.restype = ctypes.c_float
-            return cuda_lib.benchmark_cublasSgemm(
+            res = cuda_lib.benchmark_cublasSgemm(
                 ctypes.c_int(A_sp.shape[0]),
                 ctypes.c_int(A_sp.shape[1]),
                 ctypes.c_int(B.shape[1]),
@@ -92,6 +93,7 @@ for col in cols:
                 ctypes.c_void_p(B.ctypes.data),
                 ctypes.c_void_p(C.ctypes.data),
             )
+            return res
 
         # benchmark builin matrix multiplication
         def benchmark_builtin(A_np, B, C):
