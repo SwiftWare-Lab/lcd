@@ -142,6 +142,7 @@ bool compare_results(const std::vector<float>& cpu_result, const std::vector<flo
 }
 
 int main() {
+    std::cout << "Running Tests...\n" << std::endl;
     int passed = 0;
     int total = 0;
     int row_n = 768;
@@ -153,7 +154,6 @@ int main() {
             int A_num_rows = row_n;
             int A_num_cols = 512;
 
-            int B_num_rows = 512;
             int B_num_cols = col;
 
             // Generate a sparse matrix
@@ -199,7 +199,6 @@ int main() {
 
             // Compare the result from cuSPARSE with the CPU result
             if (compare_matrices(A_num_rows, B_num_cols, hC1.data(), hCPU.data(), 1e-5f)) {
-                std::cout << "Test passed! The cuSPARSE result matches the CPU result.\n";
                 passed += 1;
             } else {
                 std::cerr << "Test failed! The cuSPARSE result does not match the CPU result.\n";
@@ -207,7 +206,6 @@ int main() {
             
             // Compare the result from cuBLAS with the CPU result
             if (compare_matrices(A_num_rows, B_num_cols, hC_temp, hCPU.data(), 1e-2f)) {
-                std::cout << "Test passed! The cuBLAS result matches the CPU result.\n";
                 passed += 1;
             } else {
                 std::cerr << "Test failed! The cuBLAS result does not match the CPU result.\n";

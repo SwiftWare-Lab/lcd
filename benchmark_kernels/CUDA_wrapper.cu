@@ -60,7 +60,6 @@ extern "C" float benchmark_cusparseSpMMCSR(int A_num_rows, int A_num_cols, int A
                                const float* hA_values, const float* hB,
                                float* hC)
 {
-    int   B_num_rows      = A_num_cols;
     int   ldb             = B_num_cols; // leading dimension of B
     int   ldc             = B_num_cols; // leading dimension of C
     int   B_size          = A_num_cols * B_num_cols;
@@ -166,7 +165,7 @@ extern "C" float* test_cusparseSpMMCSR(int A_num_rows, int A_num_cols, int A_nnz
                                const float* hA_values, const float* hB,
                                float* hC)
 {
-    int   B_num_rows      = A_num_cols;
+
     int   ldb             = B_num_cols; // leading dimension of B
     int   ldc             = B_num_cols; // leading dimension of C
     int   B_size          = A_num_cols * B_num_cols;
