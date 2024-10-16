@@ -75,10 +75,8 @@ for col in cols:
             # Perform sparse matrix multiplication: A_sparse_csr.dot(B_dense)
             c_cuSparse = A_sparse_csr.dot(cp.asarray(B))
 
-            end_event.synchronize()
-            # GPU-based timing (end)
             end_event.record()
-
+            end_event.synchronize()
             c_cuSparse_ref = c_cuSparse.get()
 
             elapsed_time_cuSparse = cp.cuda.get_elapsed_time(start_event, end_event)
@@ -94,10 +92,10 @@ for col in cols:
 
             c_cuBLAS = cp.matmul(cp.asarray(A), cp.asarray(B))
 
-            end_event.record()
-
             # Wait for all operations to complete
+            end_event.record()
             end_event.synchronize()
+
             elapsed_time_cuBLAS = cp.cuda.get_elapsed_time(start_event, end_event)
 
             return elapsed_time_cuBLAS
@@ -113,9 +111,6 @@ for col in cols:
 
         # Run each benchmark `k` times and compute the average
         thread_level_res = average_benchmark(benchmark_thread_level, A, B)
-        warp_level_res = average_benchmark(benchmark_warp_level, A, B)
-        warp_unroll_res = average_benchmark(benchmark_3row_warp_unroll, A, B)
-        enumerated_res = average_benchmark(benchmark_enumerated, A, B)
         unroll_coarsen_res = average_benchmark(benchmark_unroll_coarsen, A_cf, B)
         cuSPARSE_res = average_benchmark(benchmark_cusparse, A, B, C)
         cuBLAS_res = average_benchmark(benchmark_cublas, A, B, C)
@@ -123,9 +118,6 @@ for col in cols:
 
         # Append results to corresponding lists
         thread_level_results.append(thread_level_res)
-        warp_level_results.append(warp_level_res)
-        warp_unroll_results.append(warp_unroll_res)
-        enumerated_results.append(enumerated_res)
         unroll_coarsen_results.append(unroll_coarsen_res)
         cuSPARSE_results.append(cuSPARSE_res)
         cuBLAS_results.append(cuBLAS_res)
