@@ -1,5 +1,3 @@
-#!/bin/bash
-
 #SBATCH --gpus-per-node=1
 #SBATCH --cpus-per-task=1
 #SBATCH --export=ALL
@@ -23,8 +21,16 @@ module load cuda/12.2
 
 python3 -m venv venv
 source venv/bin/activate
-pip3 install -r requirements.txt
 
-cd ./benchmark_kernels
+pip install numpy
+pip install triton
+pip install torch
+pip install scipy
+pip install matplotlib
+pip install cupy
 
-nvcc -o cuda_lib.so CUDA_wrapper.cu -shared -lcusparse -lcublas -lcudart -Xcompiler -fPIC
+nvcc --version
+
+#cd ./benchmark_kernels
+
+#nvcc -o cuda_lib.so CUDA_wrapper.cu -shared -lcusparse -lcublas -lcudart -Xcompiler -fPIC

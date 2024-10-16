@@ -286,7 +286,8 @@ def test_unroll_coarsen(A_cf, B):
 
     stop.record()
 
-    torch.cuda.synchronize()
+    stop.synchronize()
+
     elapsed_time_ms = start.elapsed_time(stop)
 
     return elapsed_time_ms, C_ptr.cpu().numpy()
