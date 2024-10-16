@@ -68,6 +68,8 @@ def benchmark_thread_level(A, B):
     torch.cuda.synchronize()
     elapsed_time_ms = start.elapsed_time(stop)
 
+    # print("C Thread Level :", C_ptr.cpu().numpy()[0:5, 0:5])
+
     #execution_time_s = elapsed_time_ms / 1e3  # in seconds
 
     return elapsed_time_ms
