@@ -19,7 +19,7 @@ module load intel/2022.2.1
 module load cmake
 module load gcc
 module load python
-module load cuda
+module load cuda/12.2
 
 python3 -m venv venv
 source venv/bin/activate

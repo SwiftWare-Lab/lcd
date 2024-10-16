@@ -1,5 +1,5 @@
 contourpy
-cupy-cuda115
+cupy-cuda122
 cycler
 fastrlock
 filelock
