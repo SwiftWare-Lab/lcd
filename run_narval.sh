@@ -14,7 +14,6 @@
 
 module load StdEnv/2020
 module load intel/2022.2.1
-
 module load cmake
 module load gcc
 module load python
