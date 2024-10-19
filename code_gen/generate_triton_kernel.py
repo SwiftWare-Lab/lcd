@@ -6,7 +6,7 @@ import triton
 import triton.language as tl
 
 @triton.jit
-def unroll_coarsen_kernel_{k_rows}x{k_cols}(Avp, Aip, Arp, B, C, patterns, Avp_offsets, Aip_offsets, k_rows: tl.constexpr, 
+def unroll_coarsen_kernel(Avp, Aip, Arp, B, C, patterns, Avp_offsets, Aip_offsets, k_rows: tl.constexpr, 
                                             k_cols: tl.constexpr, N: tl.constexpr):
     row_pi = tl.program_id(axis=0)
     pattern_id = tl.program_id(axis=1)
@@ -86,8 +86,8 @@ def main():
         print("Usage: python generate_triton_kernel.py arg1 arg2")
         sys.exit(1)
 
-    k_rows = sys.argv[1]
-    k_cols = sys.argv[2]
+    k_rows = int(sys.argv[1])
+    k_cols = int(sys.argv[2])
 
     # File to write the generated code
     with open("triton_kernel.py", "w") as f:
