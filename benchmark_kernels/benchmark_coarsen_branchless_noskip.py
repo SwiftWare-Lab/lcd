@@ -45,8 +45,7 @@ def unroll_coarsen_kernel(Avp, Aip, Arp, B, C, patterns, Avp_offsets, Aip_offset
     num_cols = (panel_end - panel_start)  # Number of total columns in this row panel for this pattern
     num_kernels = num_cols // k_cols  # Number of kernels in this row panel
 
-    Aip_start_idx = tl.load(
-        Aip_offsets + pattern_id)  # Index of the first index in the indices array for the entire pattern
+    Aip_start_idx = tl.load(Aip_offsets + pattern_id)  # Index of the first index in the indices array for the entire pattern
     indices_ptr = Aip + Aip_start_idx + panel_start  # Points to the first index in the indices array for this row panel
 
     # 111
