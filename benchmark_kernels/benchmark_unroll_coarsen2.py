@@ -103,11 +103,11 @@ def unroll_coarsen_kernel(Avp, Aip, Arp, B, C, patterns, Avp_offsets, Aip_offset
                     C_0 = tl.zeros((N,), dtype=tl.float32)
                     C_1 = tl.zeros((N,), dtype=tl.float32)
 
-                    C_0_old = tl.load(C + ((row_idx + 0) * N) + tl.arange(0, N))
-                    C_1_old = tl.load(C + ((row_idx + 1) * N) + tl.arange(0, N))
-
                     C_0 = A_0 * B_row
                     C_1 = A_1 * B_row
+
+                    C_0_old = tl.load(C + ((row_idx + 0) * N) + tl.arange(0, N))
+                    C_1_old = tl.load(C + ((row_idx + 1) * N) + tl.arange(0, N))
 
                     C_0 = C_0 + C_0_old
                     C_1 = C_1 + C_1_old
