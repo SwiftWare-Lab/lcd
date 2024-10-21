@@ -20,7 +20,7 @@ class TritonCodelet:
         self.loop_order = loop_order or list(iteration_space.keys())
 
     def gen_code(self):
-        
+
         # function signature
         code = "@triton.jit\ndef unroll_coarsen_kernel("
         code += "Avp, Aip, Arp, B, C, patterns, Avp_offsets, Aip_offsets, "
@@ -30,8 +30,11 @@ class TritonCodelet:
         # basic setup
         code += self.generate_setup_code(indent)
 
-        # Generate nested loops based on the specified order and unroll factors
-        code += self.gen_loop_nest(indent)
+        for pattern_id, active_rows in self.patterns.items():
+            code += f"{indent}if pattern_id == {pattern_id}:\n"
+            inner_indent = indent + '    '
+            # write loop nest
+            code += self.gen_loop_nest(inner_indent)
 
         # Generate access function code
         for access_func in self.access_funcs:
@@ -83,21 +86,9 @@ class TritonCodelet:
             start, end, step = self.iteration_space[var]
             unroll_factor = self.unroll_factors.get(var, 1)
 
-            # Check for unrolling
-            if unroll_factor > 1:
-                # Create a loop that steps by the unroll factor
-                code += f"{indent}for {var} in range({start}, {end}, {step * unroll_factor}):\n"
-                indent += '    '
-                # Unroll the loop manually
-                for u in range(unroll_factor):
-                    code += f"{indent}# Unroll step {u}\n"
-                    code += f"{indent}j_unroll = {var} + {u}\n"
-                    code += f"{indent}if j_unroll < {end}:\n"
-                    indent += '    '
-            else:
-                # Normal loop generation without unrolling
-                code += f"{indent}for {var} in range({start}, {end}, {step}):\n"
-                indent += '    '
+            # Create a loop that steps by the unroll factor
+            code += f"{indent}for {var} in range({start}, {end}, {step * unroll_factor}):\n"
+            indent += '    '
 
         return code
 

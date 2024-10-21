@@ -31,14 +31,27 @@ def unroll_coarsen_kernel(Avp, Aip, Arp, B, C, patterns, Avp_offsets, Aip_offset
     Aip_start_idx = tl.load(Aip_offsets + pattern_id)  # Index of the first index in the indices array for the entire pattern
     indices_ptr = Aip + Aip_start_idx + panel_start  # Points to the first index in the indices array for this row panel
 
-    for j in range(0, k_cols, 2):
-        # Unroll step 0
-        j_unroll = j + 0
-        if j_unroll < k_cols:
-            # Unroll step 1
-            j_unroll = j + 1
-            if j_unroll < k_cols:
-                for i in range(0, num_kernels, 1):
+    if pattern_id == 0:
+        for j in range(0, k_cols, 2):
+            for i in range(0, num_kernels, 1):
+    if pattern_id == 1:
+        for j in range(0, k_cols, 2):
+            for i in range(0, num_kernels, 1):
+    if pattern_id == 2:
+        for j in range(0, k_cols, 2):
+            for i in range(0, num_kernels, 1):
+    if pattern_id == 3:
+        for j in range(0, k_cols, 2):
+            for i in range(0, num_kernels, 1):
+    if pattern_id == 4:
+        for j in range(0, k_cols, 2):
+            for i in range(0, num_kernels, 1):
+    if pattern_id == 5:
+        for j in range(0, k_cols, 2):
+            for i in range(0, num_kernels, 1):
+    if pattern_id == 6:
+        for j in range(0, k_cols, 2):
+            for i in range(0, num_kernels, 1):
     A_0 = tl.load(values_ptr + ((num_ones * k_cols * i) + j_unroll))
     A_1 = tl.load(values_ptr + ((num_ones * k_cols * i) + j_unroll + pattern_offset))
     A_2 = tl.load(values_ptr + ((num_ones * k_cols * i) + j_unroll + (2 * pattern_offset)))
