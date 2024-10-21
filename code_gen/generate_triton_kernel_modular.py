@@ -42,23 +42,27 @@ class TritonCodelet:
             unroll_factor = self.unroll_factors.get('j', 1)
             for i in range(unroll_factor):
                 code += f"{inner_indent}# Unrolled iteration {i}\n"
+
+                # Generate code for loading A matrix
                 for row in active_rows:
-                    code += f"{inner_indent}C_{row}_{i} = A_{row}_{i} * B_row\n"
-                    code += f"{inner_indent}tl.atomic_add(C + ((row_idx + {row}) * N) + tl.arange(0, N), C_{row})\n"
+                    code += f"{inner_indent}A_{row}_{i} = tl.load(values_ptr + (num_ones * k_cols * i) + (j + {i}) + ({row} * pattern_offset))\n"
+                
                 code += "\n"
+                
+                # Generate code for idx and B_row
+                code += f"{inner_indent}idx_{i} = j + {i}\n"
+                code += f"{inner_indent}B_row_{i} = B + (idx_{i} * N)\n\n"
 
-        # Generate access function code
-        for access_func in self.access_funcs:
-            code += access_func.get_load_code(indent)
+                # Computations for C matrix
+                for row in active_rows:
+                    # C = tl.zeros(tl.float32, N)
+                    code += f"{inner_indent}C_{row}_{i} = tl.zeros(tl.float32, N)\n"
 
-        # Generate pattern-based operations (e.g., `C_0 = A_0 * B_row`)
-        for pattern_id, active_rows in self.patterns.items():
-            code += f"{indent}if pattern_id == {pattern_id}:\n"
-            inner_indent = indent + '    '
-            for row in active_rows:
-                code += f"{inner_indent}C_{row} = A_{row} * B_row\n"
-                code += f"{inner_indent}tl.atomic_add(C + ((row_idx + {row}) * N) + tl.arange(0, N), C_{row})\n"
-            code += "\n"
+                    # C = A * B
+                    code += f"{inner_indent}C_{row}_{i} = A_{row}_{i} * B_row_{i}\n"
+                    # tl.atomic_add(C..."
+                    code += f"{inner_indent}tl.atomic_add(C + ((row_idx + {row}) * N) + tl.arange(0, N), C_{row}_{i})\n\n"
+                code += "\n"
 
         return code
     
