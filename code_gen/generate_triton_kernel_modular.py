@@ -22,7 +22,8 @@ class TritonCodelet:
     def gen_code(self):
 
         # function signature
-        code = "@triton.jit\ndef unroll_coarsen_kernel("
+        code = "import triton\nimport triton.language as tl\n\n"
+        code += "@triton.jit\ndef unroll_coarsen_kernel("
         code += "Avp, Aip, Arp, B, C, patterns, Avp_offsets, Aip_offsets, "
         code += f"k_rows: tl.constexpr, k_cols: tl.constexpr, N: tl.constexpr):\n"
         indent = '    '
@@ -51,12 +52,12 @@ class TritonCodelet:
                 
                 # Generate code for idx and B_row
                 code += f"{inner_indent}idx_{i} = j + {i}\n"
-                code += f"{inner_indent}B_row_{i} = B + (idx_{i} * N)\n\n"
+                code += f"{inner_indent}B_row_{i} = tl.load(B + (idx_{i} * N) + tl.arange(0, N))\n\n"
 
                 # Computations for C matrix
                 for row in active_rows:
                     # C = tl.zeros(tl.float32, N)
-                    code += f"{inner_indent}C_{row}_{i} = tl.zeros(tl.float32, N)\n"
+                    code += f"{inner_indent}C_{row}_{i} = tl.zeros((N,), dtype=tl.float32)\n"
 
                     # C = A * B
                     code += f"{inner_indent}C_{row}_{i} = A_{row}_{i} * B_row_{i}\n"

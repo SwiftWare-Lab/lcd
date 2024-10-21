@@ -1,3 +1,6 @@
+import triton
+import triton.language as tl
+
 @triton.jit
 def unroll_coarsen_kernel(Avp, Aip, Arp, B, C, patterns, Avp_offsets, Aip_offsets, k_rows: tl.constexpr, k_cols: tl.constexpr, N: tl.constexpr):
     row_pi = tl.program_id(axis=0)  # Index of row panel we are working on
