@@ -36,6 +36,17 @@ class TritonCodelet:
             # write loop nest
             code += self.gen_loop_nest(inner_indent)
 
+            inner_indent += '    '
+            inner_indent += '    '
+
+            unroll_factor = self.unroll_factors.get('j', 1)
+            for i in range(unroll_factor):
+                code += f"{inner_indent}# Unrolled iteration {i}\n"
+                for row in active_rows:
+                    code += f"{inner_indent}C_{row}_{i} = A_{row}_{i} * B_row\n"
+                    code += f"{inner_indent}tl.atomic_add(C + ((row_idx + {row}) * N) + tl.arange(0, N), C_{row})\n"
+                code += "\n"
+
         # Generate access function code
         for access_func in self.access_funcs:
             code += access_func.get_load_code(indent)
