@@ -51,7 +51,7 @@ class TritonCodelet:
                 code += "\n"
                 
                 # Generate code for idx and B_row
-                code += f"{inner_indent}idx_{i} = j + {i}\n"
+                code += f"{inner_indent}idx_{i} = tl.load(indices_ptr + (i * k_cols) + j)\n"
                 code += f"{inner_indent}B_row_{i} = tl.load(B + (idx_{i} * N) + tl.arange(0, N))\n\n"
 
                 # Computations for C matrix
@@ -120,8 +120,8 @@ patterns = {
     6: [2]         # Corresponds to pattern 001
 }
 # Unroll 'j' by a factor of 2 and change loop order
-unroll_factors = {'j': 2}
-loop_order = ['j', 'i']
+unroll_factors = {}
+loop_order = ['i', 'j']
 
 # Define access functions
 access_A_0 = TritonAccessFunction("A_0", "values_ptr", "(num_ones * k_cols * i) + j_unroll")
