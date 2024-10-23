@@ -45,8 +45,10 @@ class TritonCodelet:
                 code += f"{inner_indent}# Unrolled iteration {i}\n"
 
                 # Generate code for loading A matrix
+                value_idx = 0
                 for row in active_rows:
-                    code += f"{inner_indent}A_{row}_{i} = tl.load(values_ptr + (num_ones * k_cols * i) + (j + {i}) + ({row} * pattern_offset))\n"
+                    code += f"{inner_indent}A_{row}_{i} = tl.load(values_ptr + (num_ones * k_cols * i) + (j + {i}) + ({value_idx} * pattern_offset))\n"
+                    value_idx += 1
                 
                 code += "\n"
                 
