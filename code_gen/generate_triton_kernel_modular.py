@@ -67,6 +67,30 @@ class TritonCodelet:
                     code += f"{inner_indent}tl.atomic_add(C + ((row_idx + {row}) * N) + tl.arange(0, N), C_{row}_{i})\n\n"
                 code += "\n"
 
+            inner_indent = 3 * indent
+            code += self.gen_loop_unroll_remainder('j', inner_indent)
+            inner_indent += '   '
+            value_idx = 0
+            for row in active_rows:
+                code += f"{inner_indent}A_{row} = tl.load(values_ptr + (num_ones * k_cols * i) + (j) + ({value_idx} * pattern_offset))\n"
+                value_idx += 1
+            code += "\n"
+
+            code += f"{inner_indent}idx = tl.load(indices_ptr + (i * k_cols) + j)\n"
+            code += f"{inner_indent}B_row = tl.load(B + (idx * N) + tl.arange(0, N))\n\n"
+
+            # Computations for C matrix
+            for row in active_rows:
+                # C = tl.zeros(tl.float32, N)
+                code += f"{inner_indent}C_{row} = tl.zeros((N,), dtype=tl.float32)\n"
+
+                # C = A * B
+                code += f"{inner_indent}C_{row} = A_{row} * B_row\n"
+                # tl.atomic_add(C..."
+                code += f"{inner_indent}tl.atomic_add(C + ((row_idx + {row}) * N) + tl.arange(0, N), C_{row})\n\n"
+
+
+
         return code
     
     def generate_setup_code(self, indent="    "):
@@ -103,12 +127,27 @@ class TritonCodelet:
         for var in self.loop_order:
             start, end, step = self.iteration_space[var]
             unroll_factor = self.unroll_factors.get(var, 1)
+            end = f"{end} - {end} % {unroll_factor}"
 
             # Create a loop that steps by the unroll factor
             code += f"{indent}for {var} in range({start}, {end}, {step * unroll_factor}):\n"
             indent += '    '
 
         return code
+    
+    def gen_loop_unroll_remainder(self, var, base_indent):
+        code = ""
+        indent = base_indent
+
+        unroll_factor = self.unroll_factors.get(var, 1)
+
+        start, end, _ = self.iteration_space[var]
+        start = f"{end} - {end} % {unroll_factor}"
+
+        code += f"{indent}for {var} in range({start}, {end}):\n"
+
+        return code
+
 
 # Example usage of the new class
 iteration_space = {'i': [0, 'num_kernels', 1], 'j': [0, 'k_cols', 1]}
@@ -122,7 +161,7 @@ patterns = {
     6: [2]         # Corresponds to pattern 001
 }
 # Unroll 'j' by a factor of 2 and change loop order
-unroll_factors = {}
+unroll_factors = {'i': 1, 'j': 1}
 loop_order = ['i', 'j']
 
 # Define access functions
