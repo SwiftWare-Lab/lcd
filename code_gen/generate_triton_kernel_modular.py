@@ -34,62 +34,7 @@ class TritonCodelet:
         for pattern_id, active_rows in self.patterns.items():
             code += f"{indent}if pattern_id == {pattern_id}:\n"
             inner_indent = indent + '    '
-            # write loop nest
-            code += self.gen_loop_nest(inner_indent)
-
-            inner_indent += '    '
-            inner_indent += '    '
-
-            unroll_factor = self.unroll_factors.get('j', 1)
-            for i in range(unroll_factor):
-                code += f"{inner_indent}# Unrolled iteration {i}\n"
-
-                # Generate code for loading A matrix
-                value_idx = 0
-                for row in active_rows:
-                    code += f"{inner_indent}A_{row}_{i} = tl.load(values_ptr + (num_ones * k_cols * i) + (j + {i}) + ({value_idx} * pattern_offset))\n"
-                    value_idx += 1
-                
-                code += "\n"
-                
-                # Generate code for idx and B_row
-                code += f"{inner_indent}idx_{i} = tl.load(indices_ptr + (i * k_cols) + j)\n"
-                code += f"{inner_indent}B_row_{i} = tl.load(B + (idx_{i} * N) + tl.arange(0, N))\n\n"
-
-                # Computations for C matrix
-                for row in active_rows:
-                    # C = tl.zeros(tl.float32, N)
-                    code += f"{inner_indent}C_{row}_{i} = tl.zeros((N,), dtype=tl.float32)\n"
-
-                    # C = A * B
-                    code += f"{inner_indent}C_{row}_{i} = A_{row}_{i} * B_row_{i}\n"
-                    # tl.atomic_add(C..."
-                    code += f"{inner_indent}tl.atomic_add(C + ((row_idx + {row}) * N) + tl.arange(0, N), C_{row}_{i})\n\n"
-                code += "\n"
-
-            inner_indent = 3 * indent
-            code += self.gen_loop_unroll_remainder('j', inner_indent)
-            inner_indent += '   '
-            value_idx = 0
-            for row in active_rows:
-                code += f"{inner_indent}A_{row} = tl.load(values_ptr + (num_ones * k_cols * i) + (j) + ({value_idx} * pattern_offset))\n"
-                value_idx += 1
-            code += "\n"
-
-            code += f"{inner_indent}idx = tl.load(indices_ptr + (i * k_cols) + j)\n"
-            code += f"{inner_indent}B_row = tl.load(B + (idx * N) + tl.arange(0, N))\n\n"
-
-            # Computations for C matrix
-            for row in active_rows:
-                # C = tl.zeros(tl.float32, N)
-                code += f"{inner_indent}C_{row} = tl.zeros((N,), dtype=tl.float32)\n"
-
-                # C = A * B
-                code += f"{inner_indent}C_{row} = A_{row} * B_row\n"
-                # tl.atomic_add(C..."
-                code += f"{inner_indent}tl.atomic_add(C + ((row_idx + {row}) * N) + tl.arange(0, N), C_{row})\n\n"
-
-
+            code +=  self.gen_outer_loop(inner_indent, active_rows)
 
         return code
     
@@ -135,6 +80,90 @@ class TritonCodelet:
 
         return code
     
+    def gen_outer_loop(self, indent, active_rows):
+
+        code = ""
+        var = self.loop_order[0]
+        start, end_m, step = self.iteration_space[var]
+        unroll_factor = self.unroll_factors.get(var, 1)
+        end = f"{end_m} - {end_m} % {unroll_factor}"
+
+        code += f"{indent}for {var} in range({start}, {end}, {step * unroll_factor}):\n"
+        for i in range(unroll_factor):
+            code += self.gen_inner_loop(indent + "    ", i, active_rows)
+
+        start_r = end
+        code += f"{indent}for {var} in range({start_r}, {end_m}):\n"
+        code += self.gen_inner_loop(indent + "    ", 0, active_rows)
+
+        return code
+            
+
+    def gen_inner_loop(self, indent, n, active_rows):
+
+        code = ""
+        var = self.loop_order[1]
+        start, end_m, step = self.iteration_space[var]
+        unroll_factor = self.unroll_factors.get(var, 1)
+        end = f"{end_m} - {end_m} % {unroll_factor}"
+
+        code += f"{indent}for {var} in range({start}, {end}, {step * unroll_factor}):\n"
+        inner_indent = indent + "    "
+        # main unroll loop
+        for i in range(unroll_factor):
+
+            # Retrieve A's values
+            value_idx = 0
+            for row in active_rows:
+                code += f"{inner_indent}A_{row}_{i} = tl.load(values_ptr + (num_ones * k_cols * (i + {n})) + (j + {i}) + ({value_idx} * pattern_offset))\n"
+                value_idx += 1
+            
+            code += "\n"
+
+            # Generate code for idx and B_row
+            code += f"{inner_indent}idx_{i} = tl.load(indices_ptr + ((i + {n}) * k_cols) + (j + {i}))\n"
+            code += f"{inner_indent}B_row_{i} = tl.load(B + (idx_{i} * N) + tl.arange(0, N))\n\n"
+
+            # Computations for C matrix
+            for row in active_rows:
+                # C = tl.zeros(tl.float32, N)
+                code += f"{inner_indent}C_{row}_{i} = tl.zeros((N,), dtype=tl.float32)\n"
+
+                # C = A * B
+                code += f"{inner_indent}C_{row}_{i} = A_{row}_{i} * B_row_{i}\n"
+                # tl.atomic_add(C..."
+                code += f"{inner_indent}tl.atomic_add(C + ((row_idx + {row}) * N) + tl.arange(0, N), C_{row}_{i})\n\n"
+            code += "\n"
+
+        # remainder of unroll
+        start_r = end
+        code += f"{indent}for {var} in range({start_r}, {end_m}):\n"
+        # Retrieve A's values
+        value_idx = 0
+        for row in active_rows:
+            code += f"{inner_indent}A_{row} = tl.load(values_ptr + (num_ones * k_cols * (i + {n})) + (j) + ({value_idx} * pattern_offset))\n"
+            value_idx += 1
+        
+        code += "\n"
+
+        # Generate code for idx and B_row
+        code += f"{inner_indent}idx = tl.load(indices_ptr + ((i + {n}) * k_cols) + j)\n"
+        code += f"{inner_indent}B_row = tl.load(B + (idx * N) + tl.arange(0, N))\n\n"
+
+        # Computations for C matrix
+        for row in active_rows:
+            # C = tl.zeros(tl.float32, N)
+            code += f"{inner_indent}C_{row} = tl.zeros((N,), dtype=tl.float32)\n"
+
+            # C = A * B
+            code += f"{inner_indent}C_{row} = A_{row} * B_row\n"
+            # tl.atomic_add(C..."
+            code += f"{inner_indent}tl.atomic_add(C + ((row_idx + {row}) * N) + tl.arange(0, N), C_{row})\n\n"
+        code += "\n"
+
+        return code
+
+    
     def gen_loop_unroll_remainder(self, var, base_indent):
         code = ""
         indent = base_indent
@@ -161,7 +190,7 @@ patterns = {
     6: [2]         # Corresponds to pattern 001
 }
 # Unroll 'j' by a factor of 2 and change loop order
-unroll_factors = {'i': 1, 'j': 1}
+unroll_factors = {'i': 2, 'j': 2}
 loop_order = ['i', 'j']
 
 # Define access functions

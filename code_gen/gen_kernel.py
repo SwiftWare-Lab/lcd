@@ -35,14 +35,13 @@ def unroll_coarsen_kernel(Avp, Aip, Arp, B, C, patterns, Avp_offsets, Aip_offset
     indices_ptr = Aip + Aip_start_idx + panel_start  # Points to the first index in the indices array for this row panel
 
     if pattern_id == 0:
-        for i in range(0, num_kernels - num_kernels % 1, 1):
-            for j in range(0, k_cols - k_cols % 1, 1):
-                # Unrolled iteration 0
-                A_0_0 = tl.load(values_ptr + (num_ones * k_cols * i) + (j + 0) + (0 * pattern_offset))
-                A_1_0 = tl.load(values_ptr + (num_ones * k_cols * i) + (j + 0) + (1 * pattern_offset))
-                A_2_0 = tl.load(values_ptr + (num_ones * k_cols * i) + (j + 0) + (2 * pattern_offset))
+        for i in range(0, num_kernels - num_kernels % 2, 2):
+            for j in range(0, k_cols - k_cols % 2, 2):
+                A_0_0 = tl.load(values_ptr + (num_ones * k_cols * (i + 0)) + (j + 0) + (0 * pattern_offset))
+                A_1_0 = tl.load(values_ptr + (num_ones * k_cols * (i + 0)) + (j + 0) + (1 * pattern_offset))
+                A_2_0 = tl.load(values_ptr + (num_ones * k_cols * (i + 0)) + (j + 0) + (2 * pattern_offset))
 
-                idx_0 = tl.load(indices_ptr + (i * k_cols) + j)
+                idx_0 = tl.load(indices_ptr + ((i + 0) * k_cols) + (j + 0))
                 B_row_0 = tl.load(B + (idx_0 * N) + tl.arange(0, N))
 
                 C_0_0 = tl.zeros((N,), dtype=tl.float32)
@@ -58,34 +57,179 @@ def unroll_coarsen_kernel(Avp, Aip, Arp, B, C, patterns, Avp_offsets, Aip_offset
                 tl.atomic_add(C + ((row_idx + 2) * N) + tl.arange(0, N), C_2_0)
 
 
-            for j in range(k_cols - k_cols % 1, k_cols):
-               A_0 = tl.load(values_ptr + (num_ones * k_cols * i) + (j) + (0 * pattern_offset))
-               A_1 = tl.load(values_ptr + (num_ones * k_cols * i) + (j) + (1 * pattern_offset))
-               A_2 = tl.load(values_ptr + (num_ones * k_cols * i) + (j) + (2 * pattern_offset))
+                A_0_1 = tl.load(values_ptr + (num_ones * k_cols * (i + 0)) + (j + 1) + (0 * pattern_offset))
+                A_1_1 = tl.load(values_ptr + (num_ones * k_cols * (i + 0)) + (j + 1) + (1 * pattern_offset))
+                A_2_1 = tl.load(values_ptr + (num_ones * k_cols * (i + 0)) + (j + 1) + (2 * pattern_offset))
 
-               idx = tl.load(indices_ptr + (i * k_cols) + j)
-               B_row = tl.load(B + (idx * N) + tl.arange(0, N))
+                idx_1 = tl.load(indices_ptr + ((i + 0) * k_cols) + (j + 1))
+                B_row_1 = tl.load(B + (idx_1 * N) + tl.arange(0, N))
 
-               C_0 = tl.zeros((N,), dtype=tl.float32)
-               C_0 = A_0 * B_row
-               tl.atomic_add(C + ((row_idx + 0) * N) + tl.arange(0, N), C_0)
+                C_0_1 = tl.zeros((N,), dtype=tl.float32)
+                C_0_1 = A_0_1 * B_row_1
+                tl.atomic_add(C + ((row_idx + 0) * N) + tl.arange(0, N), C_0_1)
 
-               C_1 = tl.zeros((N,), dtype=tl.float32)
-               C_1 = A_1 * B_row
-               tl.atomic_add(C + ((row_idx + 1) * N) + tl.arange(0, N), C_1)
+                C_1_1 = tl.zeros((N,), dtype=tl.float32)
+                C_1_1 = A_1_1 * B_row_1
+                tl.atomic_add(C + ((row_idx + 1) * N) + tl.arange(0, N), C_1_1)
 
-               C_2 = tl.zeros((N,), dtype=tl.float32)
-               C_2 = A_2 * B_row
-               tl.atomic_add(C + ((row_idx + 2) * N) + tl.arange(0, N), C_2)
+                C_2_1 = tl.zeros((N,), dtype=tl.float32)
+                C_2_1 = A_2_1 * B_row_1
+                tl.atomic_add(C + ((row_idx + 2) * N) + tl.arange(0, N), C_2_1)
+
+
+            for j in range(k_cols - k_cols % 2, k_cols):
+                A_0 = tl.load(values_ptr + (num_ones * k_cols * (i + 0)) + (j) + (0 * pattern_offset))
+                A_1 = tl.load(values_ptr + (num_ones * k_cols * (i + 0)) + (j) + (1 * pattern_offset))
+                A_2 = tl.load(values_ptr + (num_ones * k_cols * (i + 0)) + (j) + (2 * pattern_offset))
+
+                idx = tl.load(indices_ptr + ((i + 0) * k_cols) + j)
+                B_row = tl.load(B + (idx * N) + tl.arange(0, N))
+
+                C_0 = tl.zeros((N,), dtype=tl.float32)
+                C_0 = A_0 * B_row
+                tl.atomic_add(C + ((row_idx + 0) * N) + tl.arange(0, N), C_0)
+
+                C_1 = tl.zeros((N,), dtype=tl.float32)
+                C_1 = A_1 * B_row
+                tl.atomic_add(C + ((row_idx + 1) * N) + tl.arange(0, N), C_1)
+
+                C_2 = tl.zeros((N,), dtype=tl.float32)
+                C_2 = A_2 * B_row
+                tl.atomic_add(C + ((row_idx + 2) * N) + tl.arange(0, N), C_2)
+
+
+            for j in range(0, k_cols - k_cols % 2, 2):
+                A_0_0 = tl.load(values_ptr + (num_ones * k_cols * (i + 1)) + (j + 0) + (0 * pattern_offset))
+                A_1_0 = tl.load(values_ptr + (num_ones * k_cols * (i + 1)) + (j + 0) + (1 * pattern_offset))
+                A_2_0 = tl.load(values_ptr + (num_ones * k_cols * (i + 1)) + (j + 0) + (2 * pattern_offset))
+
+                idx_0 = tl.load(indices_ptr + ((i + 1) * k_cols) + (j + 0))
+                B_row_0 = tl.load(B + (idx_0 * N) + tl.arange(0, N))
+
+                C_0_0 = tl.zeros((N,), dtype=tl.float32)
+                C_0_0 = A_0_0 * B_row_0
+                tl.atomic_add(C + ((row_idx + 0) * N) + tl.arange(0, N), C_0_0)
+
+                C_1_0 = tl.zeros((N,), dtype=tl.float32)
+                C_1_0 = A_1_0 * B_row_0
+                tl.atomic_add(C + ((row_idx + 1) * N) + tl.arange(0, N), C_1_0)
+
+                C_2_0 = tl.zeros((N,), dtype=tl.float32)
+                C_2_0 = A_2_0 * B_row_0
+                tl.atomic_add(C + ((row_idx + 2) * N) + tl.arange(0, N), C_2_0)
+
+
+                A_0_1 = tl.load(values_ptr + (num_ones * k_cols * (i + 1)) + (j + 1) + (0 * pattern_offset))
+                A_1_1 = tl.load(values_ptr + (num_ones * k_cols * (i + 1)) + (j + 1) + (1 * pattern_offset))
+                A_2_1 = tl.load(values_ptr + (num_ones * k_cols * (i + 1)) + (j + 1) + (2 * pattern_offset))
+
+                idx_1 = tl.load(indices_ptr + ((i + 1) * k_cols) + (j + 1))
+                B_row_1 = tl.load(B + (idx_1 * N) + tl.arange(0, N))
+
+                C_0_1 = tl.zeros((N,), dtype=tl.float32)
+                C_0_1 = A_0_1 * B_row_1
+                tl.atomic_add(C + ((row_idx + 0) * N) + tl.arange(0, N), C_0_1)
+
+                C_1_1 = tl.zeros((N,), dtype=tl.float32)
+                C_1_1 = A_1_1 * B_row_1
+                tl.atomic_add(C + ((row_idx + 1) * N) + tl.arange(0, N), C_1_1)
+
+                C_2_1 = tl.zeros((N,), dtype=tl.float32)
+                C_2_1 = A_2_1 * B_row_1
+                tl.atomic_add(C + ((row_idx + 2) * N) + tl.arange(0, N), C_2_1)
+
+
+            for j in range(k_cols - k_cols % 2, k_cols):
+                A_0 = tl.load(values_ptr + (num_ones * k_cols * (i + 1)) + (j) + (0 * pattern_offset))
+                A_1 = tl.load(values_ptr + (num_ones * k_cols * (i + 1)) + (j) + (1 * pattern_offset))
+                A_2 = tl.load(values_ptr + (num_ones * k_cols * (i + 1)) + (j) + (2 * pattern_offset))
+
+                idx = tl.load(indices_ptr + ((i + 1) * k_cols) + j)
+                B_row = tl.load(B + (idx * N) + tl.arange(0, N))
+
+                C_0 = tl.zeros((N,), dtype=tl.float32)
+                C_0 = A_0 * B_row
+                tl.atomic_add(C + ((row_idx + 0) * N) + tl.arange(0, N), C_0)
+
+                C_1 = tl.zeros((N,), dtype=tl.float32)
+                C_1 = A_1 * B_row
+                tl.atomic_add(C + ((row_idx + 1) * N) + tl.arange(0, N), C_1)
+
+                C_2 = tl.zeros((N,), dtype=tl.float32)
+                C_2 = A_2 * B_row
+                tl.atomic_add(C + ((row_idx + 2) * N) + tl.arange(0, N), C_2)
+
+
+        for i in range(num_kernels - num_kernels % 2, num_kernels):
+            for j in range(0, k_cols - k_cols % 2, 2):
+                A_0_0 = tl.load(values_ptr + (num_ones * k_cols * (i + 0)) + (j + 0) + (0 * pattern_offset))
+                A_1_0 = tl.load(values_ptr + (num_ones * k_cols * (i + 0)) + (j + 0) + (1 * pattern_offset))
+                A_2_0 = tl.load(values_ptr + (num_ones * k_cols * (i + 0)) + (j + 0) + (2 * pattern_offset))
+
+                idx_0 = tl.load(indices_ptr + ((i + 0) * k_cols) + (j + 0))
+                B_row_0 = tl.load(B + (idx_0 * N) + tl.arange(0, N))
+
+                C_0_0 = tl.zeros((N,), dtype=tl.float32)
+                C_0_0 = A_0_0 * B_row_0
+                tl.atomic_add(C + ((row_idx + 0) * N) + tl.arange(0, N), C_0_0)
+
+                C_1_0 = tl.zeros((N,), dtype=tl.float32)
+                C_1_0 = A_1_0 * B_row_0
+                tl.atomic_add(C + ((row_idx + 1) * N) + tl.arange(0, N), C_1_0)
+
+                C_2_0 = tl.zeros((N,), dtype=tl.float32)
+                C_2_0 = A_2_0 * B_row_0
+                tl.atomic_add(C + ((row_idx + 2) * N) + tl.arange(0, N), C_2_0)
+
+
+                A_0_1 = tl.load(values_ptr + (num_ones * k_cols * (i + 0)) + (j + 1) + (0 * pattern_offset))
+                A_1_1 = tl.load(values_ptr + (num_ones * k_cols * (i + 0)) + (j + 1) + (1 * pattern_offset))
+                A_2_1 = tl.load(values_ptr + (num_ones * k_cols * (i + 0)) + (j + 1) + (2 * pattern_offset))
+
+                idx_1 = tl.load(indices_ptr + ((i + 0) * k_cols) + (j + 1))
+                B_row_1 = tl.load(B + (idx_1 * N) + tl.arange(0, N))
+
+                C_0_1 = tl.zeros((N,), dtype=tl.float32)
+                C_0_1 = A_0_1 * B_row_1
+                tl.atomic_add(C + ((row_idx + 0) * N) + tl.arange(0, N), C_0_1)
+
+                C_1_1 = tl.zeros((N,), dtype=tl.float32)
+                C_1_1 = A_1_1 * B_row_1
+                tl.atomic_add(C + ((row_idx + 1) * N) + tl.arange(0, N), C_1_1)
+
+                C_2_1 = tl.zeros((N,), dtype=tl.float32)
+                C_2_1 = A_2_1 * B_row_1
+                tl.atomic_add(C + ((row_idx + 2) * N) + tl.arange(0, N), C_2_1)
+
+
+            for j in range(k_cols - k_cols % 2, k_cols):
+                A_0 = tl.load(values_ptr + (num_ones * k_cols * (i + 0)) + (j) + (0 * pattern_offset))
+                A_1 = tl.load(values_ptr + (num_ones * k_cols * (i + 0)) + (j) + (1 * pattern_offset))
+                A_2 = tl.load(values_ptr + (num_ones * k_cols * (i + 0)) + (j) + (2 * pattern_offset))
+
+                idx = tl.load(indices_ptr + ((i + 0) * k_cols) + j)
+                B_row = tl.load(B + (idx * N) + tl.arange(0, N))
+
+                C_0 = tl.zeros((N,), dtype=tl.float32)
+                C_0 = A_0 * B_row
+                tl.atomic_add(C + ((row_idx + 0) * N) + tl.arange(0, N), C_0)
+
+                C_1 = tl.zeros((N,), dtype=tl.float32)
+                C_1 = A_1 * B_row
+                tl.atomic_add(C + ((row_idx + 1) * N) + tl.arange(0, N), C_1)
+
+                C_2 = tl.zeros((N,), dtype=tl.float32)
+                C_2 = A_2 * B_row
+                tl.atomic_add(C + ((row_idx + 2) * N) + tl.arange(0, N), C_2)
+
 
     if pattern_id == 1:
-        for i in range(0, num_kernels - num_kernels % 1, 1):
-            for j in range(0, k_cols - k_cols % 1, 1):
-                # Unrolled iteration 0
-                A_0_0 = tl.load(values_ptr + (num_ones * k_cols * i) + (j + 0) + (0 * pattern_offset))
-                A_1_0 = tl.load(values_ptr + (num_ones * k_cols * i) + (j + 0) + (1 * pattern_offset))
+        for i in range(0, num_kernels - num_kernels % 2, 2):
+            for j in range(0, k_cols - k_cols % 2, 2):
+                A_0_0 = tl.load(values_ptr + (num_ones * k_cols * (i + 0)) + (j + 0) + (0 * pattern_offset))
+                A_1_0 = tl.load(values_ptr + (num_ones * k_cols * (i + 0)) + (j + 0) + (1 * pattern_offset))
 
-                idx_0 = tl.load(indices_ptr + (i * k_cols) + j)
+                idx_0 = tl.load(indices_ptr + ((i + 0) * k_cols) + (j + 0))
                 B_row_0 = tl.load(B + (idx_0 * N) + tl.arange(0, N))
 
                 C_0_0 = tl.zeros((N,), dtype=tl.float32)
@@ -97,29 +241,139 @@ def unroll_coarsen_kernel(Avp, Aip, Arp, B, C, patterns, Avp_offsets, Aip_offset
                 tl.atomic_add(C + ((row_idx + 1) * N) + tl.arange(0, N), C_1_0)
 
 
-            for j in range(k_cols - k_cols % 1, k_cols):
-               A_0 = tl.load(values_ptr + (num_ones * k_cols * i) + (j) + (0 * pattern_offset))
-               A_1 = tl.load(values_ptr + (num_ones * k_cols * i) + (j) + (1 * pattern_offset))
+                A_0_1 = tl.load(values_ptr + (num_ones * k_cols * (i + 0)) + (j + 1) + (0 * pattern_offset))
+                A_1_1 = tl.load(values_ptr + (num_ones * k_cols * (i + 0)) + (j + 1) + (1 * pattern_offset))
 
-               idx = tl.load(indices_ptr + (i * k_cols) + j)
-               B_row = tl.load(B + (idx * N) + tl.arange(0, N))
+                idx_1 = tl.load(indices_ptr + ((i + 0) * k_cols) + (j + 1))
+                B_row_1 = tl.load(B + (idx_1 * N) + tl.arange(0, N))
 
-               C_0 = tl.zeros((N,), dtype=tl.float32)
-               C_0 = A_0 * B_row
-               tl.atomic_add(C + ((row_idx + 0) * N) + tl.arange(0, N), C_0)
+                C_0_1 = tl.zeros((N,), dtype=tl.float32)
+                C_0_1 = A_0_1 * B_row_1
+                tl.atomic_add(C + ((row_idx + 0) * N) + tl.arange(0, N), C_0_1)
 
-               C_1 = tl.zeros((N,), dtype=tl.float32)
-               C_1 = A_1 * B_row
-               tl.atomic_add(C + ((row_idx + 1) * N) + tl.arange(0, N), C_1)
+                C_1_1 = tl.zeros((N,), dtype=tl.float32)
+                C_1_1 = A_1_1 * B_row_1
+                tl.atomic_add(C + ((row_idx + 1) * N) + tl.arange(0, N), C_1_1)
+
+
+            for j in range(k_cols - k_cols % 2, k_cols):
+                A_0 = tl.load(values_ptr + (num_ones * k_cols * (i + 0)) + (j) + (0 * pattern_offset))
+                A_1 = tl.load(values_ptr + (num_ones * k_cols * (i + 0)) + (j) + (1 * pattern_offset))
+
+                idx = tl.load(indices_ptr + ((i + 0) * k_cols) + j)
+                B_row = tl.load(B + (idx * N) + tl.arange(0, N))
+
+                C_0 = tl.zeros((N,), dtype=tl.float32)
+                C_0 = A_0 * B_row
+                tl.atomic_add(C + ((row_idx + 0) * N) + tl.arange(0, N), C_0)
+
+                C_1 = tl.zeros((N,), dtype=tl.float32)
+                C_1 = A_1 * B_row
+                tl.atomic_add(C + ((row_idx + 1) * N) + tl.arange(0, N), C_1)
+
+
+            for j in range(0, k_cols - k_cols % 2, 2):
+                A_0_0 = tl.load(values_ptr + (num_ones * k_cols * (i + 1)) + (j + 0) + (0 * pattern_offset))
+                A_1_0 = tl.load(values_ptr + (num_ones * k_cols * (i + 1)) + (j + 0) + (1 * pattern_offset))
+
+                idx_0 = tl.load(indices_ptr + ((i + 1) * k_cols) + (j + 0))
+                B_row_0 = tl.load(B + (idx_0 * N) + tl.arange(0, N))
+
+                C_0_0 = tl.zeros((N,), dtype=tl.float32)
+                C_0_0 = A_0_0 * B_row_0
+                tl.atomic_add(C + ((row_idx + 0) * N) + tl.arange(0, N), C_0_0)
+
+                C_1_0 = tl.zeros((N,), dtype=tl.float32)
+                C_1_0 = A_1_0 * B_row_0
+                tl.atomic_add(C + ((row_idx + 1) * N) + tl.arange(0, N), C_1_0)
+
+
+                A_0_1 = tl.load(values_ptr + (num_ones * k_cols * (i + 1)) + (j + 1) + (0 * pattern_offset))
+                A_1_1 = tl.load(values_ptr + (num_ones * k_cols * (i + 1)) + (j + 1) + (1 * pattern_offset))
+
+                idx_1 = tl.load(indices_ptr + ((i + 1) * k_cols) + (j + 1))
+                B_row_1 = tl.load(B + (idx_1 * N) + tl.arange(0, N))
+
+                C_0_1 = tl.zeros((N,), dtype=tl.float32)
+                C_0_1 = A_0_1 * B_row_1
+                tl.atomic_add(C + ((row_idx + 0) * N) + tl.arange(0, N), C_0_1)
+
+                C_1_1 = tl.zeros((N,), dtype=tl.float32)
+                C_1_1 = A_1_1 * B_row_1
+                tl.atomic_add(C + ((row_idx + 1) * N) + tl.arange(0, N), C_1_1)
+
+
+            for j in range(k_cols - k_cols % 2, k_cols):
+                A_0 = tl.load(values_ptr + (num_ones * k_cols * (i + 1)) + (j) + (0 * pattern_offset))
+                A_1 = tl.load(values_ptr + (num_ones * k_cols * (i + 1)) + (j) + (1 * pattern_offset))
+
+                idx = tl.load(indices_ptr + ((i + 1) * k_cols) + j)
+                B_row = tl.load(B + (idx * N) + tl.arange(0, N))
+
+                C_0 = tl.zeros((N,), dtype=tl.float32)
+                C_0 = A_0 * B_row
+                tl.atomic_add(C + ((row_idx + 0) * N) + tl.arange(0, N), C_0)
+
+                C_1 = tl.zeros((N,), dtype=tl.float32)
+                C_1 = A_1 * B_row
+                tl.atomic_add(C + ((row_idx + 1) * N) + tl.arange(0, N), C_1)
+
+
+        for i in range(num_kernels - num_kernels % 2, num_kernels):
+            for j in range(0, k_cols - k_cols % 2, 2):
+                A_0_0 = tl.load(values_ptr + (num_ones * k_cols * (i + 0)) + (j + 0) + (0 * pattern_offset))
+                A_1_0 = tl.load(values_ptr + (num_ones * k_cols * (i + 0)) + (j + 0) + (1 * pattern_offset))
+
+                idx_0 = tl.load(indices_ptr + ((i + 0) * k_cols) + (j + 0))
+                B_row_0 = tl.load(B + (idx_0 * N) + tl.arange(0, N))
+
+                C_0_0 = tl.zeros((N,), dtype=tl.float32)
+                C_0_0 = A_0_0 * B_row_0
+                tl.atomic_add(C + ((row_idx + 0) * N) + tl.arange(0, N), C_0_0)
+
+                C_1_0 = tl.zeros((N,), dtype=tl.float32)
+                C_1_0 = A_1_0 * B_row_0
+                tl.atomic_add(C + ((row_idx + 1) * N) + tl.arange(0, N), C_1_0)
+
+
+                A_0_1 = tl.load(values_ptr + (num_ones * k_cols * (i + 0)) + (j + 1) + (0 * pattern_offset))
+                A_1_1 = tl.load(values_ptr + (num_ones * k_cols * (i + 0)) + (j + 1) + (1 * pattern_offset))
+
+                idx_1 = tl.load(indices_ptr + ((i + 0) * k_cols) + (j + 1))
+                B_row_1 = tl.load(B + (idx_1 * N) + tl.arange(0, N))
+
+                C_0_1 = tl.zeros((N,), dtype=tl.float32)
+                C_0_1 = A_0_1 * B_row_1
+                tl.atomic_add(C + ((row_idx + 0) * N) + tl.arange(0, N), C_0_1)
+
+                C_1_1 = tl.zeros((N,), dtype=tl.float32)
+                C_1_1 = A_1_1 * B_row_1
+                tl.atomic_add(C + ((row_idx + 1) * N) + tl.arange(0, N), C_1_1)
+
+
+            for j in range(k_cols - k_cols % 2, k_cols):
+                A_0 = tl.load(values_ptr + (num_ones * k_cols * (i + 0)) + (j) + (0 * pattern_offset))
+                A_1 = tl.load(values_ptr + (num_ones * k_cols * (i + 0)) + (j) + (1 * pattern_offset))
+
+                idx = tl.load(indices_ptr + ((i + 0) * k_cols) + j)
+                B_row = tl.load(B + (idx * N) + tl.arange(0, N))
+
+                C_0 = tl.zeros((N,), dtype=tl.float32)
+                C_0 = A_0 * B_row
+                tl.atomic_add(C + ((row_idx + 0) * N) + tl.arange(0, N), C_0)
+
+                C_1 = tl.zeros((N,), dtype=tl.float32)
+                C_1 = A_1 * B_row
+                tl.atomic_add(C + ((row_idx + 1) * N) + tl.arange(0, N), C_1)
+
 
     if pattern_id == 2:
-        for i in range(0, num_kernels - num_kernels % 1, 1):
-            for j in range(0, k_cols - k_cols % 1, 1):
-                # Unrolled iteration 0
-                A_0_0 = tl.load(values_ptr + (num_ones * k_cols * i) + (j + 0) + (0 * pattern_offset))
-                A_2_0 = tl.load(values_ptr + (num_ones * k_cols * i) + (j + 0) + (1 * pattern_offset))
+        for i in range(0, num_kernels - num_kernels % 2, 2):
+            for j in range(0, k_cols - k_cols % 2, 2):
+                A_0_0 = tl.load(values_ptr + (num_ones * k_cols * (i + 0)) + (j + 0) + (0 * pattern_offset))
+                A_2_0 = tl.load(values_ptr + (num_ones * k_cols * (i + 0)) + (j + 0) + (1 * pattern_offset))
 
-                idx_0 = tl.load(indices_ptr + (i * k_cols) + j)
+                idx_0 = tl.load(indices_ptr + ((i + 0) * k_cols) + (j + 0))
                 B_row_0 = tl.load(B + (idx_0 * N) + tl.arange(0, N))
 
                 C_0_0 = tl.zeros((N,), dtype=tl.float32)
@@ -131,28 +385,138 @@ def unroll_coarsen_kernel(Avp, Aip, Arp, B, C, patterns, Avp_offsets, Aip_offset
                 tl.atomic_add(C + ((row_idx + 2) * N) + tl.arange(0, N), C_2_0)
 
 
-            for j in range(k_cols - k_cols % 1, k_cols):
-               A_0 = tl.load(values_ptr + (num_ones * k_cols * i) + (j) + (0 * pattern_offset))
-               A_2 = tl.load(values_ptr + (num_ones * k_cols * i) + (j) + (1 * pattern_offset))
+                A_0_1 = tl.load(values_ptr + (num_ones * k_cols * (i + 0)) + (j + 1) + (0 * pattern_offset))
+                A_2_1 = tl.load(values_ptr + (num_ones * k_cols * (i + 0)) + (j + 1) + (1 * pattern_offset))
 
-               idx = tl.load(indices_ptr + (i * k_cols) + j)
-               B_row = tl.load(B + (idx * N) + tl.arange(0, N))
+                idx_1 = tl.load(indices_ptr + ((i + 0) * k_cols) + (j + 1))
+                B_row_1 = tl.load(B + (idx_1 * N) + tl.arange(0, N))
 
-               C_0 = tl.zeros((N,), dtype=tl.float32)
-               C_0 = A_0 * B_row
-               tl.atomic_add(C + ((row_idx + 0) * N) + tl.arange(0, N), C_0)
+                C_0_1 = tl.zeros((N,), dtype=tl.float32)
+                C_0_1 = A_0_1 * B_row_1
+                tl.atomic_add(C + ((row_idx + 0) * N) + tl.arange(0, N), C_0_1)
 
-               C_2 = tl.zeros((N,), dtype=tl.float32)
-               C_2 = A_2 * B_row
-               tl.atomic_add(C + ((row_idx + 2) * N) + tl.arange(0, N), C_2)
+                C_2_1 = tl.zeros((N,), dtype=tl.float32)
+                C_2_1 = A_2_1 * B_row_1
+                tl.atomic_add(C + ((row_idx + 2) * N) + tl.arange(0, N), C_2_1)
+
+
+            for j in range(k_cols - k_cols % 2, k_cols):
+                A_0 = tl.load(values_ptr + (num_ones * k_cols * (i + 0)) + (j) + (0 * pattern_offset))
+                A_2 = tl.load(values_ptr + (num_ones * k_cols * (i + 0)) + (j) + (1 * pattern_offset))
+
+                idx = tl.load(indices_ptr + ((i + 0) * k_cols) + j)
+                B_row = tl.load(B + (idx * N) + tl.arange(0, N))
+
+                C_0 = tl.zeros((N,), dtype=tl.float32)
+                C_0 = A_0 * B_row
+                tl.atomic_add(C + ((row_idx + 0) * N) + tl.arange(0, N), C_0)
+
+                C_2 = tl.zeros((N,), dtype=tl.float32)
+                C_2 = A_2 * B_row
+                tl.atomic_add(C + ((row_idx + 2) * N) + tl.arange(0, N), C_2)
+
+
+            for j in range(0, k_cols - k_cols % 2, 2):
+                A_0_0 = tl.load(values_ptr + (num_ones * k_cols * (i + 1)) + (j + 0) + (0 * pattern_offset))
+                A_2_0 = tl.load(values_ptr + (num_ones * k_cols * (i + 1)) + (j + 0) + (1 * pattern_offset))
+
+                idx_0 = tl.load(indices_ptr + ((i + 1) * k_cols) + (j + 0))
+                B_row_0 = tl.load(B + (idx_0 * N) + tl.arange(0, N))
+
+                C_0_0 = tl.zeros((N,), dtype=tl.float32)
+                C_0_0 = A_0_0 * B_row_0
+                tl.atomic_add(C + ((row_idx + 0) * N) + tl.arange(0, N), C_0_0)
+
+                C_2_0 = tl.zeros((N,), dtype=tl.float32)
+                C_2_0 = A_2_0 * B_row_0
+                tl.atomic_add(C + ((row_idx + 2) * N) + tl.arange(0, N), C_2_0)
+
+
+                A_0_1 = tl.load(values_ptr + (num_ones * k_cols * (i + 1)) + (j + 1) + (0 * pattern_offset))
+                A_2_1 = tl.load(values_ptr + (num_ones * k_cols * (i + 1)) + (j + 1) + (1 * pattern_offset))
+
+                idx_1 = tl.load(indices_ptr + ((i + 1) * k_cols) + (j + 1))
+                B_row_1 = tl.load(B + (idx_1 * N) + tl.arange(0, N))
+
+                C_0_1 = tl.zeros((N,), dtype=tl.float32)
+                C_0_1 = A_0_1 * B_row_1
+                tl.atomic_add(C + ((row_idx + 0) * N) + tl.arange(0, N), C_0_1)
+
+                C_2_1 = tl.zeros((N,), dtype=tl.float32)
+                C_2_1 = A_2_1 * B_row_1
+                tl.atomic_add(C + ((row_idx + 2) * N) + tl.arange(0, N), C_2_1)
+
+
+            for j in range(k_cols - k_cols % 2, k_cols):
+                A_0 = tl.load(values_ptr + (num_ones * k_cols * (i + 1)) + (j) + (0 * pattern_offset))
+                A_2 = tl.load(values_ptr + (num_ones * k_cols * (i + 1)) + (j) + (1 * pattern_offset))
+
+                idx = tl.load(indices_ptr + ((i + 1) * k_cols) + j)
+                B_row = tl.load(B + (idx * N) + tl.arange(0, N))
+
+                C_0 = tl.zeros((N,), dtype=tl.float32)
+                C_0 = A_0 * B_row
+                tl.atomic_add(C + ((row_idx + 0) * N) + tl.arange(0, N), C_0)
+
+                C_2 = tl.zeros((N,), dtype=tl.float32)
+                C_2 = A_2 * B_row
+                tl.atomic_add(C + ((row_idx + 2) * N) + tl.arange(0, N), C_2)
+
+
+        for i in range(num_kernels - num_kernels % 2, num_kernels):
+            for j in range(0, k_cols - k_cols % 2, 2):
+                A_0_0 = tl.load(values_ptr + (num_ones * k_cols * (i + 0)) + (j + 0) + (0 * pattern_offset))
+                A_2_0 = tl.load(values_ptr + (num_ones * k_cols * (i + 0)) + (j + 0) + (1 * pattern_offset))
+
+                idx_0 = tl.load(indices_ptr + ((i + 0) * k_cols) + (j + 0))
+                B_row_0 = tl.load(B + (idx_0 * N) + tl.arange(0, N))
+
+                C_0_0 = tl.zeros((N,), dtype=tl.float32)
+                C_0_0 = A_0_0 * B_row_0
+                tl.atomic_add(C + ((row_idx + 0) * N) + tl.arange(0, N), C_0_0)
+
+                C_2_0 = tl.zeros((N,), dtype=tl.float32)
+                C_2_0 = A_2_0 * B_row_0
+                tl.atomic_add(C + ((row_idx + 2) * N) + tl.arange(0, N), C_2_0)
+
+
+                A_0_1 = tl.load(values_ptr + (num_ones * k_cols * (i + 0)) + (j + 1) + (0 * pattern_offset))
+                A_2_1 = tl.load(values_ptr + (num_ones * k_cols * (i + 0)) + (j + 1) + (1 * pattern_offset))
+
+                idx_1 = tl.load(indices_ptr + ((i + 0) * k_cols) + (j + 1))
+                B_row_1 = tl.load(B + (idx_1 * N) + tl.arange(0, N))
+
+                C_0_1 = tl.zeros((N,), dtype=tl.float32)
+                C_0_1 = A_0_1 * B_row_1
+                tl.atomic_add(C + ((row_idx + 0) * N) + tl.arange(0, N), C_0_1)
+
+                C_2_1 = tl.zeros((N,), dtype=tl.float32)
+                C_2_1 = A_2_1 * B_row_1
+                tl.atomic_add(C + ((row_idx + 2) * N) + tl.arange(0, N), C_2_1)
+
+
+            for j in range(k_cols - k_cols % 2, k_cols):
+                A_0 = tl.load(values_ptr + (num_ones * k_cols * (i + 0)) + (j) + (0 * pattern_offset))
+                A_2 = tl.load(values_ptr + (num_ones * k_cols * (i + 0)) + (j) + (1 * pattern_offset))
+
+                idx = tl.load(indices_ptr + ((i + 0) * k_cols) + j)
+                B_row = tl.load(B + (idx * N) + tl.arange(0, N))
+
+                C_0 = tl.zeros((N,), dtype=tl.float32)
+                C_0 = A_0 * B_row
+                tl.atomic_add(C + ((row_idx + 0) * N) + tl.arange(0, N), C_0)
+
+                C_2 = tl.zeros((N,), dtype=tl.float32)
+                C_2 = A_2 * B_row
+                tl.atomic_add(C + ((row_idx + 2) * N) + tl.arange(0, N), C_2)
+
 
     if pattern_id == 3:
-        for i in range(0, num_kernels - num_kernels % 1, 1):
-            for j in range(0, k_cols - k_cols % 1, 1):
-                # Unrolled iteration 0
-                A_0_0 = tl.load(values_ptr + (num_ones * k_cols * i) + (j + 0) + (0 * pattern_offset))
+        for i in range(0, num_kernels - num_kernels % 2, 2):
+            for j in range(0, k_cols - k_cols % 2, 2):
+                A_0_0 = tl.load(values_ptr + (num_ones * k_cols * (i + 0)) + (j + 0) + (0 * pattern_offset))
 
-                idx_0 = tl.load(indices_ptr + (i * k_cols) + j)
+                idx_0 = tl.load(indices_ptr + ((i + 0) * k_cols) + (j + 0))
                 B_row_0 = tl.load(B + (idx_0 * N) + tl.arange(0, N))
 
                 C_0_0 = tl.zeros((N,), dtype=tl.float32)
@@ -160,24 +524,99 @@ def unroll_coarsen_kernel(Avp, Aip, Arp, B, C, patterns, Avp_offsets, Aip_offset
                 tl.atomic_add(C + ((row_idx + 0) * N) + tl.arange(0, N), C_0_0)
 
 
-            for j in range(k_cols - k_cols % 1, k_cols):
-               A_0 = tl.load(values_ptr + (num_ones * k_cols * i) + (j) + (0 * pattern_offset))
+                A_0_1 = tl.load(values_ptr + (num_ones * k_cols * (i + 0)) + (j + 1) + (0 * pattern_offset))
 
-               idx = tl.load(indices_ptr + (i * k_cols) + j)
-               B_row = tl.load(B + (idx * N) + tl.arange(0, N))
+                idx_1 = tl.load(indices_ptr + ((i + 0) * k_cols) + (j + 1))
+                B_row_1 = tl.load(B + (idx_1 * N) + tl.arange(0, N))
 
-               C_0 = tl.zeros((N,), dtype=tl.float32)
-               C_0 = A_0 * B_row
-               tl.atomic_add(C + ((row_idx + 0) * N) + tl.arange(0, N), C_0)
+                C_0_1 = tl.zeros((N,), dtype=tl.float32)
+                C_0_1 = A_0_1 * B_row_1
+                tl.atomic_add(C + ((row_idx + 0) * N) + tl.arange(0, N), C_0_1)
+
+
+            for j in range(k_cols - k_cols % 2, k_cols):
+                A_0 = tl.load(values_ptr + (num_ones * k_cols * (i + 0)) + (j) + (0 * pattern_offset))
+
+                idx = tl.load(indices_ptr + ((i + 0) * k_cols) + j)
+                B_row = tl.load(B + (idx * N) + tl.arange(0, N))
+
+                C_0 = tl.zeros((N,), dtype=tl.float32)
+                C_0 = A_0 * B_row
+                tl.atomic_add(C + ((row_idx + 0) * N) + tl.arange(0, N), C_0)
+
+
+            for j in range(0, k_cols - k_cols % 2, 2):
+                A_0_0 = tl.load(values_ptr + (num_ones * k_cols * (i + 1)) + (j + 0) + (0 * pattern_offset))
+
+                idx_0 = tl.load(indices_ptr + ((i + 1) * k_cols) + (j + 0))
+                B_row_0 = tl.load(B + (idx_0 * N) + tl.arange(0, N))
+
+                C_0_0 = tl.zeros((N,), dtype=tl.float32)
+                C_0_0 = A_0_0 * B_row_0
+                tl.atomic_add(C + ((row_idx + 0) * N) + tl.arange(0, N), C_0_0)
+
+
+                A_0_1 = tl.load(values_ptr + (num_ones * k_cols * (i + 1)) + (j + 1) + (0 * pattern_offset))
+
+                idx_1 = tl.load(indices_ptr + ((i + 1) * k_cols) + (j + 1))
+                B_row_1 = tl.load(B + (idx_1 * N) + tl.arange(0, N))
+
+                C_0_1 = tl.zeros((N,), dtype=tl.float32)
+                C_0_1 = A_0_1 * B_row_1
+                tl.atomic_add(C + ((row_idx + 0) * N) + tl.arange(0, N), C_0_1)
+
+
+            for j in range(k_cols - k_cols % 2, k_cols):
+                A_0 = tl.load(values_ptr + (num_ones * k_cols * (i + 1)) + (j) + (0 * pattern_offset))
+
+                idx = tl.load(indices_ptr + ((i + 1) * k_cols) + j)
+                B_row = tl.load(B + (idx * N) + tl.arange(0, N))
+
+                C_0 = tl.zeros((N,), dtype=tl.float32)
+                C_0 = A_0 * B_row
+                tl.atomic_add(C + ((row_idx + 0) * N) + tl.arange(0, N), C_0)
+
+
+        for i in range(num_kernels - num_kernels % 2, num_kernels):
+            for j in range(0, k_cols - k_cols % 2, 2):
+                A_0_0 = tl.load(values_ptr + (num_ones * k_cols * (i + 0)) + (j + 0) + (0 * pattern_offset))
+
+                idx_0 = tl.load(indices_ptr + ((i + 0) * k_cols) + (j + 0))
+                B_row_0 = tl.load(B + (idx_0 * N) + tl.arange(0, N))
+
+                C_0_0 = tl.zeros((N,), dtype=tl.float32)
+                C_0_0 = A_0_0 * B_row_0
+                tl.atomic_add(C + ((row_idx + 0) * N) + tl.arange(0, N), C_0_0)
+
+
+                A_0_1 = tl.load(values_ptr + (num_ones * k_cols * (i + 0)) + (j + 1) + (0 * pattern_offset))
+
+                idx_1 = tl.load(indices_ptr + ((i + 0) * k_cols) + (j + 1))
+                B_row_1 = tl.load(B + (idx_1 * N) + tl.arange(0, N))
+
+                C_0_1 = tl.zeros((N,), dtype=tl.float32)
+                C_0_1 = A_0_1 * B_row_1
+                tl.atomic_add(C + ((row_idx + 0) * N) + tl.arange(0, N), C_0_1)
+
+
+            for j in range(k_cols - k_cols % 2, k_cols):
+                A_0 = tl.load(values_ptr + (num_ones * k_cols * (i + 0)) + (j) + (0 * pattern_offset))
+
+                idx = tl.load(indices_ptr + ((i + 0) * k_cols) + j)
+                B_row = tl.load(B + (idx * N) + tl.arange(0, N))
+
+                C_0 = tl.zeros((N,), dtype=tl.float32)
+                C_0 = A_0 * B_row
+                tl.atomic_add(C + ((row_idx + 0) * N) + tl.arange(0, N), C_0)
+
 
     if pattern_id == 4:
-        for i in range(0, num_kernels - num_kernels % 1, 1):
-            for j in range(0, k_cols - k_cols % 1, 1):
-                # Unrolled iteration 0
-                A_1_0 = tl.load(values_ptr + (num_ones * k_cols * i) + (j + 0) + (0 * pattern_offset))
-                A_2_0 = tl.load(values_ptr + (num_ones * k_cols * i) + (j + 0) + (1 * pattern_offset))
+        for i in range(0, num_kernels - num_kernels % 2, 2):
+            for j in range(0, k_cols - k_cols % 2, 2):
+                A_1_0 = tl.load(values_ptr + (num_ones * k_cols * (i + 0)) + (j + 0) + (0 * pattern_offset))
+                A_2_0 = tl.load(values_ptr + (num_ones * k_cols * (i + 0)) + (j + 0) + (1 * pattern_offset))
 
-                idx_0 = tl.load(indices_ptr + (i * k_cols) + j)
+                idx_0 = tl.load(indices_ptr + ((i + 0) * k_cols) + (j + 0))
                 B_row_0 = tl.load(B + (idx_0 * N) + tl.arange(0, N))
 
                 C_1_0 = tl.zeros((N,), dtype=tl.float32)
@@ -189,28 +628,138 @@ def unroll_coarsen_kernel(Avp, Aip, Arp, B, C, patterns, Avp_offsets, Aip_offset
                 tl.atomic_add(C + ((row_idx + 2) * N) + tl.arange(0, N), C_2_0)
 
 
-            for j in range(k_cols - k_cols % 1, k_cols):
-               A_1 = tl.load(values_ptr + (num_ones * k_cols * i) + (j) + (0 * pattern_offset))
-               A_2 = tl.load(values_ptr + (num_ones * k_cols * i) + (j) + (1 * pattern_offset))
+                A_1_1 = tl.load(values_ptr + (num_ones * k_cols * (i + 0)) + (j + 1) + (0 * pattern_offset))
+                A_2_1 = tl.load(values_ptr + (num_ones * k_cols * (i + 0)) + (j + 1) + (1 * pattern_offset))
 
-               idx = tl.load(indices_ptr + (i * k_cols) + j)
-               B_row = tl.load(B + (idx * N) + tl.arange(0, N))
+                idx_1 = tl.load(indices_ptr + ((i + 0) * k_cols) + (j + 1))
+                B_row_1 = tl.load(B + (idx_1 * N) + tl.arange(0, N))
 
-               C_1 = tl.zeros((N,), dtype=tl.float32)
-               C_1 = A_1 * B_row
-               tl.atomic_add(C + ((row_idx + 1) * N) + tl.arange(0, N), C_1)
+                C_1_1 = tl.zeros((N,), dtype=tl.float32)
+                C_1_1 = A_1_1 * B_row_1
+                tl.atomic_add(C + ((row_idx + 1) * N) + tl.arange(0, N), C_1_1)
 
-               C_2 = tl.zeros((N,), dtype=tl.float32)
-               C_2 = A_2 * B_row
-               tl.atomic_add(C + ((row_idx + 2) * N) + tl.arange(0, N), C_2)
+                C_2_1 = tl.zeros((N,), dtype=tl.float32)
+                C_2_1 = A_2_1 * B_row_1
+                tl.atomic_add(C + ((row_idx + 2) * N) + tl.arange(0, N), C_2_1)
+
+
+            for j in range(k_cols - k_cols % 2, k_cols):
+                A_1 = tl.load(values_ptr + (num_ones * k_cols * (i + 0)) + (j) + (0 * pattern_offset))
+                A_2 = tl.load(values_ptr + (num_ones * k_cols * (i + 0)) + (j) + (1 * pattern_offset))
+
+                idx = tl.load(indices_ptr + ((i + 0) * k_cols) + j)
+                B_row = tl.load(B + (idx * N) + tl.arange(0, N))
+
+                C_1 = tl.zeros((N,), dtype=tl.float32)
+                C_1 = A_1 * B_row
+                tl.atomic_add(C + ((row_idx + 1) * N) + tl.arange(0, N), C_1)
+
+                C_2 = tl.zeros((N,), dtype=tl.float32)
+                C_2 = A_2 * B_row
+                tl.atomic_add(C + ((row_idx + 2) * N) + tl.arange(0, N), C_2)
+
+
+            for j in range(0, k_cols - k_cols % 2, 2):
+                A_1_0 = tl.load(values_ptr + (num_ones * k_cols * (i + 1)) + (j + 0) + (0 * pattern_offset))
+                A_2_0 = tl.load(values_ptr + (num_ones * k_cols * (i + 1)) + (j + 0) + (1 * pattern_offset))
+
+                idx_0 = tl.load(indices_ptr + ((i + 1) * k_cols) + (j + 0))
+                B_row_0 = tl.load(B + (idx_0 * N) + tl.arange(0, N))
+
+                C_1_0 = tl.zeros((N,), dtype=tl.float32)
+                C_1_0 = A_1_0 * B_row_0
+                tl.atomic_add(C + ((row_idx + 1) * N) + tl.arange(0, N), C_1_0)
+
+                C_2_0 = tl.zeros((N,), dtype=tl.float32)
+                C_2_0 = A_2_0 * B_row_0
+                tl.atomic_add(C + ((row_idx + 2) * N) + tl.arange(0, N), C_2_0)
+
+
+                A_1_1 = tl.load(values_ptr + (num_ones * k_cols * (i + 1)) + (j + 1) + (0 * pattern_offset))
+                A_2_1 = tl.load(values_ptr + (num_ones * k_cols * (i + 1)) + (j + 1) + (1 * pattern_offset))
+
+                idx_1 = tl.load(indices_ptr + ((i + 1) * k_cols) + (j + 1))
+                B_row_1 = tl.load(B + (idx_1 * N) + tl.arange(0, N))
+
+                C_1_1 = tl.zeros((N,), dtype=tl.float32)
+                C_1_1 = A_1_1 * B_row_1
+                tl.atomic_add(C + ((row_idx + 1) * N) + tl.arange(0, N), C_1_1)
+
+                C_2_1 = tl.zeros((N,), dtype=tl.float32)
+                C_2_1 = A_2_1 * B_row_1
+                tl.atomic_add(C + ((row_idx + 2) * N) + tl.arange(0, N), C_2_1)
+
+
+            for j in range(k_cols - k_cols % 2, k_cols):
+                A_1 = tl.load(values_ptr + (num_ones * k_cols * (i + 1)) + (j) + (0 * pattern_offset))
+                A_2 = tl.load(values_ptr + (num_ones * k_cols * (i + 1)) + (j) + (1 * pattern_offset))
+
+                idx = tl.load(indices_ptr + ((i + 1) * k_cols) + j)
+                B_row = tl.load(B + (idx * N) + tl.arange(0, N))
+
+                C_1 = tl.zeros((N,), dtype=tl.float32)
+                C_1 = A_1 * B_row
+                tl.atomic_add(C + ((row_idx + 1) * N) + tl.arange(0, N), C_1)
+
+                C_2 = tl.zeros((N,), dtype=tl.float32)
+                C_2 = A_2 * B_row
+                tl.atomic_add(C + ((row_idx + 2) * N) + tl.arange(0, N), C_2)
+
+
+        for i in range(num_kernels - num_kernels % 2, num_kernels):
+            for j in range(0, k_cols - k_cols % 2, 2):
+                A_1_0 = tl.load(values_ptr + (num_ones * k_cols * (i + 0)) + (j + 0) + (0 * pattern_offset))
+                A_2_0 = tl.load(values_ptr + (num_ones * k_cols * (i + 0)) + (j + 0) + (1 * pattern_offset))
+
+                idx_0 = tl.load(indices_ptr + ((i + 0) * k_cols) + (j + 0))
+                B_row_0 = tl.load(B + (idx_0 * N) + tl.arange(0, N))
+
+                C_1_0 = tl.zeros((N,), dtype=tl.float32)
+                C_1_0 = A_1_0 * B_row_0
+                tl.atomic_add(C + ((row_idx + 1) * N) + tl.arange(0, N), C_1_0)
+
+                C_2_0 = tl.zeros((N,), dtype=tl.float32)
+                C_2_0 = A_2_0 * B_row_0
+                tl.atomic_add(C + ((row_idx + 2) * N) + tl.arange(0, N), C_2_0)
+
+
+                A_1_1 = tl.load(values_ptr + (num_ones * k_cols * (i + 0)) + (j + 1) + (0 * pattern_offset))
+                A_2_1 = tl.load(values_ptr + (num_ones * k_cols * (i + 0)) + (j + 1) + (1 * pattern_offset))
+
+                idx_1 = tl.load(indices_ptr + ((i + 0) * k_cols) + (j + 1))
+                B_row_1 = tl.load(B + (idx_1 * N) + tl.arange(0, N))
+
+                C_1_1 = tl.zeros((N,), dtype=tl.float32)
+                C_1_1 = A_1_1 * B_row_1
+                tl.atomic_add(C + ((row_idx + 1) * N) + tl.arange(0, N), C_1_1)
+
+                C_2_1 = tl.zeros((N,), dtype=tl.float32)
+                C_2_1 = A_2_1 * B_row_1
+                tl.atomic_add(C + ((row_idx + 2) * N) + tl.arange(0, N), C_2_1)
+
+
+            for j in range(k_cols - k_cols % 2, k_cols):
+                A_1 = tl.load(values_ptr + (num_ones * k_cols * (i + 0)) + (j) + (0 * pattern_offset))
+                A_2 = tl.load(values_ptr + (num_ones * k_cols * (i + 0)) + (j) + (1 * pattern_offset))
+
+                idx = tl.load(indices_ptr + ((i + 0) * k_cols) + j)
+                B_row = tl.load(B + (idx * N) + tl.arange(0, N))
+
+                C_1 = tl.zeros((N,), dtype=tl.float32)
+                C_1 = A_1 * B_row
+                tl.atomic_add(C + ((row_idx + 1) * N) + tl.arange(0, N), C_1)
+
+                C_2 = tl.zeros((N,), dtype=tl.float32)
+                C_2 = A_2 * B_row
+                tl.atomic_add(C + ((row_idx + 2) * N) + tl.arange(0, N), C_2)
+
 
     if pattern_id == 5:
-        for i in range(0, num_kernels - num_kernels % 1, 1):
-            for j in range(0, k_cols - k_cols % 1, 1):
-                # Unrolled iteration 0
-                A_1_0 = tl.load(values_ptr + (num_ones * k_cols * i) + (j + 0) + (0 * pattern_offset))
+        for i in range(0, num_kernels - num_kernels % 2, 2):
+            for j in range(0, k_cols - k_cols % 2, 2):
+                A_1_0 = tl.load(values_ptr + (num_ones * k_cols * (i + 0)) + (j + 0) + (0 * pattern_offset))
 
-                idx_0 = tl.load(indices_ptr + (i * k_cols) + j)
+                idx_0 = tl.load(indices_ptr + ((i + 0) * k_cols) + (j + 0))
                 B_row_0 = tl.load(B + (idx_0 * N) + tl.arange(0, N))
 
                 C_1_0 = tl.zeros((N,), dtype=tl.float32)
@@ -218,23 +767,98 @@ def unroll_coarsen_kernel(Avp, Aip, Arp, B, C, patterns, Avp_offsets, Aip_offset
                 tl.atomic_add(C + ((row_idx + 1) * N) + tl.arange(0, N), C_1_0)
 
 
-            for j in range(k_cols - k_cols % 1, k_cols):
-               A_1 = tl.load(values_ptr + (num_ones * k_cols * i) + (j) + (0 * pattern_offset))
+                A_1_1 = tl.load(values_ptr + (num_ones * k_cols * (i + 0)) + (j + 1) + (0 * pattern_offset))
 
-               idx = tl.load(indices_ptr + (i * k_cols) + j)
-               B_row = tl.load(B + (idx * N) + tl.arange(0, N))
+                idx_1 = tl.load(indices_ptr + ((i + 0) * k_cols) + (j + 1))
+                B_row_1 = tl.load(B + (idx_1 * N) + tl.arange(0, N))
 
-               C_1 = tl.zeros((N,), dtype=tl.float32)
-               C_1 = A_1 * B_row
-               tl.atomic_add(C + ((row_idx + 1) * N) + tl.arange(0, N), C_1)
+                C_1_1 = tl.zeros((N,), dtype=tl.float32)
+                C_1_1 = A_1_1 * B_row_1
+                tl.atomic_add(C + ((row_idx + 1) * N) + tl.arange(0, N), C_1_1)
+
+
+            for j in range(k_cols - k_cols % 2, k_cols):
+                A_1 = tl.load(values_ptr + (num_ones * k_cols * (i + 0)) + (j) + (0 * pattern_offset))
+
+                idx = tl.load(indices_ptr + ((i + 0) * k_cols) + j)
+                B_row = tl.load(B + (idx * N) + tl.arange(0, N))
+
+                C_1 = tl.zeros((N,), dtype=tl.float32)
+                C_1 = A_1 * B_row
+                tl.atomic_add(C + ((row_idx + 1) * N) + tl.arange(0, N), C_1)
+
+
+            for j in range(0, k_cols - k_cols % 2, 2):
+                A_1_0 = tl.load(values_ptr + (num_ones * k_cols * (i + 1)) + (j + 0) + (0 * pattern_offset))
+
+                idx_0 = tl.load(indices_ptr + ((i + 1) * k_cols) + (j + 0))
+                B_row_0 = tl.load(B + (idx_0 * N) + tl.arange(0, N))
+
+                C_1_0 = tl.zeros((N,), dtype=tl.float32)
+                C_1_0 = A_1_0 * B_row_0
+                tl.atomic_add(C + ((row_idx + 1) * N) + tl.arange(0, N), C_1_0)
+
+
+                A_1_1 = tl.load(values_ptr + (num_ones * k_cols * (i + 1)) + (j + 1) + (0 * pattern_offset))
+
+                idx_1 = tl.load(indices_ptr + ((i + 1) * k_cols) + (j + 1))
+                B_row_1 = tl.load(B + (idx_1 * N) + tl.arange(0, N))
+
+                C_1_1 = tl.zeros((N,), dtype=tl.float32)
+                C_1_1 = A_1_1 * B_row_1
+                tl.atomic_add(C + ((row_idx + 1) * N) + tl.arange(0, N), C_1_1)
+
+
+            for j in range(k_cols - k_cols % 2, k_cols):
+                A_1 = tl.load(values_ptr + (num_ones * k_cols * (i + 1)) + (j) + (0 * pattern_offset))
+
+                idx = tl.load(indices_ptr + ((i + 1) * k_cols) + j)
+                B_row = tl.load(B + (idx * N) + tl.arange(0, N))
+
+                C_1 = tl.zeros((N,), dtype=tl.float32)
+                C_1 = A_1 * B_row
+                tl.atomic_add(C + ((row_idx + 1) * N) + tl.arange(0, N), C_1)
+
+
+        for i in range(num_kernels - num_kernels % 2, num_kernels):
+            for j in range(0, k_cols - k_cols % 2, 2):
+                A_1_0 = tl.load(values_ptr + (num_ones * k_cols * (i + 0)) + (j + 0) + (0 * pattern_offset))
+
+                idx_0 = tl.load(indices_ptr + ((i + 0) * k_cols) + (j + 0))
+                B_row_0 = tl.load(B + (idx_0 * N) + tl.arange(0, N))
+
+                C_1_0 = tl.zeros((N,), dtype=tl.float32)
+                C_1_0 = A_1_0 * B_row_0
+                tl.atomic_add(C + ((row_idx + 1) * N) + tl.arange(0, N), C_1_0)
+
+
+                A_1_1 = tl.load(values_ptr + (num_ones * k_cols * (i + 0)) + (j + 1) + (0 * pattern_offset))
+
+                idx_1 = tl.load(indices_ptr + ((i + 0) * k_cols) + (j + 1))
+                B_row_1 = tl.load(B + (idx_1 * N) + tl.arange(0, N))
+
+                C_1_1 = tl.zeros((N,), dtype=tl.float32)
+                C_1_1 = A_1_1 * B_row_1
+                tl.atomic_add(C + ((row_idx + 1) * N) + tl.arange(0, N), C_1_1)
+
+
+            for j in range(k_cols - k_cols % 2, k_cols):
+                A_1 = tl.load(values_ptr + (num_ones * k_cols * (i + 0)) + (j) + (0 * pattern_offset))
+
+                idx = tl.load(indices_ptr + ((i + 0) * k_cols) + j)
+                B_row = tl.load(B + (idx * N) + tl.arange(0, N))
+
+                C_1 = tl.zeros((N,), dtype=tl.float32)
+                C_1 = A_1 * B_row
+                tl.atomic_add(C + ((row_idx + 1) * N) + tl.arange(0, N), C_1)
+
 
     if pattern_id == 6:
-        for i in range(0, num_kernels - num_kernels % 1, 1):
-            for j in range(0, k_cols - k_cols % 1, 1):
-                # Unrolled iteration 0
-                A_2_0 = tl.load(values_ptr + (num_ones * k_cols * i) + (j + 0) + (0 * pattern_offset))
+        for i in range(0, num_kernels - num_kernels % 2, 2):
+            for j in range(0, k_cols - k_cols % 2, 2):
+                A_2_0 = tl.load(values_ptr + (num_ones * k_cols * (i + 0)) + (j + 0) + (0 * pattern_offset))
 
-                idx_0 = tl.load(indices_ptr + (i * k_cols) + j)
+                idx_0 = tl.load(indices_ptr + ((i + 0) * k_cols) + (j + 0))
                 B_row_0 = tl.load(B + (idx_0 * N) + tl.arange(0, N))
 
                 C_2_0 = tl.zeros((N,), dtype=tl.float32)
@@ -242,14 +866,90 @@ def unroll_coarsen_kernel(Avp, Aip, Arp, B, C, patterns, Avp_offsets, Aip_offset
                 tl.atomic_add(C + ((row_idx + 2) * N) + tl.arange(0, N), C_2_0)
 
 
-            for j in range(k_cols - k_cols % 1, k_cols):
-               A_2 = tl.load(values_ptr + (num_ones * k_cols * i) + (j) + (0 * pattern_offset))
+                A_2_1 = tl.load(values_ptr + (num_ones * k_cols * (i + 0)) + (j + 1) + (0 * pattern_offset))
 
-               idx = tl.load(indices_ptr + (i * k_cols) + j)
-               B_row = tl.load(B + (idx * N) + tl.arange(0, N))
+                idx_1 = tl.load(indices_ptr + ((i + 0) * k_cols) + (j + 1))
+                B_row_1 = tl.load(B + (idx_1 * N) + tl.arange(0, N))
 
-               C_2 = tl.zeros((N,), dtype=tl.float32)
-               C_2 = A_2 * B_row
-               tl.atomic_add(C + ((row_idx + 2) * N) + tl.arange(0, N), C_2)
+                C_2_1 = tl.zeros((N,), dtype=tl.float32)
+                C_2_1 = A_2_1 * B_row_1
+                tl.atomic_add(C + ((row_idx + 2) * N) + tl.arange(0, N), C_2_1)
+
+
+            for j in range(k_cols - k_cols % 2, k_cols):
+                A_2 = tl.load(values_ptr + (num_ones * k_cols * (i + 0)) + (j) + (0 * pattern_offset))
+
+                idx = tl.load(indices_ptr + ((i + 0) * k_cols) + j)
+                B_row = tl.load(B + (idx * N) + tl.arange(0, N))
+
+                C_2 = tl.zeros((N,), dtype=tl.float32)
+                C_2 = A_2 * B_row
+                tl.atomic_add(C + ((row_idx + 2) * N) + tl.arange(0, N), C_2)
+
+
+            for j in range(0, k_cols - k_cols % 2, 2):
+                A_2_0 = tl.load(values_ptr + (num_ones * k_cols * (i + 1)) + (j + 0) + (0 * pattern_offset))
+
+                idx_0 = tl.load(indices_ptr + ((i + 1) * k_cols) + (j + 0))
+                B_row_0 = tl.load(B + (idx_0 * N) + tl.arange(0, N))
+
+                C_2_0 = tl.zeros((N,), dtype=tl.float32)
+                C_2_0 = A_2_0 * B_row_0
+                tl.atomic_add(C + ((row_idx + 2) * N) + tl.arange(0, N), C_2_0)
+
+
+                A_2_1 = tl.load(values_ptr + (num_ones * k_cols * (i + 1)) + (j + 1) + (0 * pattern_offset))
+
+                idx_1 = tl.load(indices_ptr + ((i + 1) * k_cols) + (j + 1))
+                B_row_1 = tl.load(B + (idx_1 * N) + tl.arange(0, N))
+
+                C_2_1 = tl.zeros((N,), dtype=tl.float32)
+                C_2_1 = A_2_1 * B_row_1
+                tl.atomic_add(C + ((row_idx + 2) * N) + tl.arange(0, N), C_2_1)
+
+
+            for j in range(k_cols - k_cols % 2, k_cols):
+                A_2 = tl.load(values_ptr + (num_ones * k_cols * (i + 1)) + (j) + (0 * pattern_offset))
+
+                idx = tl.load(indices_ptr + ((i + 1) * k_cols) + j)
+                B_row = tl.load(B + (idx * N) + tl.arange(0, N))
+
+                C_2 = tl.zeros((N,), dtype=tl.float32)
+                C_2 = A_2 * B_row
+                tl.atomic_add(C + ((row_idx + 2) * N) + tl.arange(0, N), C_2)
+
+
+        for i in range(num_kernels - num_kernels % 2, num_kernels):
+            for j in range(0, k_cols - k_cols % 2, 2):
+                A_2_0 = tl.load(values_ptr + (num_ones * k_cols * (i + 0)) + (j + 0) + (0 * pattern_offset))
+
+                idx_0 = tl.load(indices_ptr + ((i + 0) * k_cols) + (j + 0))
+                B_row_0 = tl.load(B + (idx_0 * N) + tl.arange(0, N))
+
+                C_2_0 = tl.zeros((N,), dtype=tl.float32)
+                C_2_0 = A_2_0 * B_row_0
+                tl.atomic_add(C + ((row_idx + 2) * N) + tl.arange(0, N), C_2_0)
+
+
+                A_2_1 = tl.load(values_ptr + (num_ones * k_cols * (i + 0)) + (j + 1) + (0 * pattern_offset))
+
+                idx_1 = tl.load(indices_ptr + ((i + 0) * k_cols) + (j + 1))
+                B_row_1 = tl.load(B + (idx_1 * N) + tl.arange(0, N))
+
+                C_2_1 = tl.zeros((N,), dtype=tl.float32)
+                C_2_1 = A_2_1 * B_row_1
+                tl.atomic_add(C + ((row_idx + 2) * N) + tl.arange(0, N), C_2_1)
+
+
+            for j in range(k_cols - k_cols % 2, k_cols):
+                A_2 = tl.load(values_ptr + (num_ones * k_cols * (i + 0)) + (j) + (0 * pattern_offset))
+
+                idx = tl.load(indices_ptr + ((i + 0) * k_cols) + j)
+                B_row = tl.load(B + (idx * N) + tl.arange(0, N))
+
+                C_2 = tl.zeros((N,), dtype=tl.float32)
+                C_2 = A_2 * B_row
+                tl.atomic_add(C + ((row_idx + 2) * N) + tl.arange(0, N), C_2)
+
 
 
