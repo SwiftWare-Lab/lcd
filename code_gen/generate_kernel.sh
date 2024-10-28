@@ -155,7 +155,7 @@ def main():
     A_np = A_sp.toarray()
 
     mmwrite("A.mtx", A_sp)
-    os.system("python3 ../utils/compressed_format_generator.py A.mtx 3 4")
+    os.system("python3 ../utils/compressed_format_generator.py A.mtx 2 4")
     A_cf = read_compressed_matrix("A.cfmtx")
 
     B = np.random.randint(1, 11, (512, 32)).astype(np.float32)

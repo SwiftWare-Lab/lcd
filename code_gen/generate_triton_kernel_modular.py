@@ -189,8 +189,15 @@ patterns = {
     5: [1],        # Corresponds to pattern 010
     6: [2]         # Corresponds to pattern 001
 }
+
+patterns2 = {
+    0: [0, 1],
+    1: [0],
+    2: [1]
+}
+
 # Unroll 'j' by a factor of 2 and change loop order
-unroll_factors = {'i': 2, 'j': 2}
+unroll_factors = {'i': 1, 'j': 1}
 loop_order = ['i', 'j']
 
 # Define access functions
@@ -204,7 +211,7 @@ codelet = TritonCodelet(
     name="unroll_coarsen",
     iteration_space=iteration_space,
     access_funcs=[access_A_0, access_A_1, access_A_2, access_B_row],
-    patterns=patterns,
+    patterns=patterns2,
     unroll_factors=unroll_factors,
     loop_order=loop_order
 )
