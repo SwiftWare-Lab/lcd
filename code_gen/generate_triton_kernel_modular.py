@@ -177,6 +177,27 @@ class TritonCodelet:
 
         return code
 
+def generate_kernel(patterns, unroll_factors, loop_order):
+    iteration_space = {'i': [0, 'num_kernels', 1], 'j': [0, 'k_cols', 1]}
+
+    # Define access functions
+    access_A_0 = TritonAccessFunction("A_0", "values_ptr", "(num_ones * k_cols * i) + j_unroll")
+    access_A_1 = TritonAccessFunction("A_1", "values_ptr", "(num_ones * k_cols * i) + j_unroll + pattern_offset")
+    access_A_2 = TritonAccessFunction("A_2", "values_ptr", "(num_ones * k_cols * i) + j_unroll + (2 * pattern_offset)")
+    access_B_row = TritonAccessFunction("B_row", "B + (idx * N)", "tl.arange(0, N)")
+
+    # Combine everything into a codelet with unrolling and loop exchange
+    codelet = TritonCodelet(
+    name="unroll_coarsen",
+    iteration_space=iteration_space,
+    access_funcs=[access_A_0, access_A_1, access_A_2, access_B_row],
+    patterns=patterns2,
+    unroll_factors=unroll_factors,
+    loop_order=loop_order
+    )
+
+    return codelet.gen_code()
+
 
 # Example usage of the new class
 iteration_space = {'i': [0, 'num_kernels', 1], 'j': [0, 'k_cols', 1]}

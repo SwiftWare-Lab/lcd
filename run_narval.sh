@@ -23,4 +23,4 @@ source venv/bin/activate
 
 cd ./benchmark_kernels
 
-python3 run_experiment2.py
+python3 run_experiment3.py
