@@ -191,7 +191,7 @@ def generate_kernel(patterns, unroll_factors, loop_order):
     name="unroll_coarsen",
     iteration_space=iteration_space,
     access_funcs=[access_A_0, access_A_1, access_A_2, access_B_row],
-    patterns=patterns2,
+    patterns=patterns,
     unroll_factors=unroll_factors,
     loop_order=loop_order
     )

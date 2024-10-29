@@ -29,6 +29,14 @@ def get_patterns(kernel_m):
 
     return patterns
 
+def convert_patterns(patterns):
+    converted_patterns = {}
+    for pattern_tuple, num in patterns.items():
+        indices = [i for i, val in enumerate(pattern_tuple) if val]
+        converted_patterns[num] = indices
+    return converted_patterns
+
+
 # Script for generating plots for benchmarking the kernels
 
 imports = """
@@ -101,7 +109,7 @@ kernel_n = 4
 pattern_sizes = np.arange(2, 7, 1)
 unroll_factors_i = [2]
 unroll_factors_j = [2]
-rows= 1000
+rows= 1024
 cols = 512
 densities = np.arange(0.1, 0.8, 0.1)
 k = 20  # Number of iterations to average
@@ -192,14 +200,16 @@ for pattern_size in pattern_sizes:
             with open(output_file, "w") as f:
                 f.write(gen_file)
 
-            spec = importlib.util.spec_from_file_location("gen_code", gen_file)
+            spec = importlib.util.spec_from_file_location("gen_code", output_file)
             gen_code = importlib.util.module_from_spec(spec)
             spec.loader.exec_module(gen_code)
 
             return gen_code.benchmark_unroll_coarsen(A_cf, B)
         
         def generate_kernel_file(patterns, unroll_factors, loop_order):
-            gen_code = generate_kernel(patterns, unroll_factors, loop_order)
+            transformed_patterns = convert_patterns(patterns)
+
+            gen_code = generate_kernel(transformed_patterns, unroll_factors, loop_order)
 
             # Split into lines and remove the first two lines
             code_lines = gen_code.splitlines()
