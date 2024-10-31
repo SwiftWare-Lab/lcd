@@ -6,7 +6,7 @@
 #SBATCH --job-name="compressed"
 #SBATCH --mail-type=begin  # email me when the job starts
 #SBATCH --mail-type=end    # email me when the job finishes
-#SBATCH --mail-user=hosseinalbakri3@gmail.com
+#SBATCH --mail-user=prachyosarker565@gmail.com
 #SBATCH --nodes=1
 #SBATCH --output="compressed.%j.%N.out"
 #SBATCH -t 1:00:00
