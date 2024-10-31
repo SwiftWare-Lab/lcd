@@ -1,6 +1,6 @@
 #!/bin/bash
 
-#SBATCH --gpus-per-node=1
+#SBATCH --gres=gpu:v100:1  # Request 1 V100 GPU
 #SBATCH --cpus-per-task=1
 #SBATCH --export=ALL
 #SBATCH --job-name="compressed"
@@ -9,16 +9,16 @@
 #SBATCH --mail-user=prachyosarker565@gmail.com
 #SBATCH --nodes=1
 #SBATCH --output="compressed.%j.%N.out"
-#SBATCH -t 1:00:00
+#SBATCH -t 0:01:00
 #SBATCH --mem=50G  # Request 32 GB of memory
 
-module load StdEnv/2020
-module load intel/2022.2.1
-module load cmake
+
+module load StdEnv/2023
 module load gcc
 module load python
 module load cuda/12.2
 
 source venv/bin/activate
 
-python3 out.py
+
+python3 -u gen_code_test1.py

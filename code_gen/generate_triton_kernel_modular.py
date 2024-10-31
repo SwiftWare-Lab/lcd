@@ -63,22 +63,6 @@ class TritonCodelet:
         code += f"{indent}Aip_start_idx = tl.load(Aip_offsets + pattern_id)  # Index of the first index in the indices array for the entire pattern\n"
         code += f"{indent}indices_ptr = Aip + Aip_start_idx + panel_start  # Points to the first index in the indices array for this row panel\n\n"
         return code
-
-    def gen_loop_nest(self, base_indent):
-        code = ""
-        indent = base_indent
-
-        # Iterate over loop_order to generate loops in the specified order
-        for var in self.loop_order:
-            start, end, step = self.iteration_space[var]
-            unroll_factor = self.unroll_factors.get(var, 1)
-            end = f"{end} - {end} % {unroll_factor}"
-
-            # Create a loop that steps by the unroll factor
-            code += f"{indent}for {var} in range({start}, {end}, {step * unroll_factor}):\n"
-            indent += '    '
-
-        return code
     
     def gen_outer_loop(self, indent, active_rows):
 
@@ -107,7 +91,7 @@ class TritonCodelet:
         unroll_factor = self.unroll_factors.get(var, 1)
         end = f"{end_m} - {end_m} % {unroll_factor}"
 
-        code += f"{indent}for {var} in range({start}, {end}, {step * unroll_factor}):\n"
+        code += f"{indent}for {var} in tl.range({start}, {end}, {step * unroll_factor}, num_stages=3):\n"
         inner_indent = indent + "    "
         # main unroll loop
         for i in range(unroll_factor):
@@ -137,7 +121,7 @@ class TritonCodelet:
 
         # remainder of unroll
         start_r = end
-        code += f"{indent}for {var} in range({start_r}, {end_m}):\n"
+        code += f"{indent}for {var} in tl.range({start_r}, {end_m}, num_stages=3):\n"
         # Retrieve A's values
         value_idx = 0
         for row in active_rows:
@@ -163,20 +147,6 @@ class TritonCodelet:
 
         return code
 
-    
-    def gen_loop_unroll_remainder(self, var, base_indent):
-        code = ""
-        indent = base_indent
-
-        unroll_factor = self.unroll_factors.get(var, 1)
-
-        start, end, _ = self.iteration_space[var]
-        start = f"{end} - {end} % {unroll_factor}"
-
-        code += f"{indent}for {var} in range({start}, {end}):\n"
-
-        return code
-
 def generate_kernel(patterns, unroll_factors, loop_order):
     iteration_space = {'i': [0, 'num_kernels', 1], 'j': [0, 'k_cols', 1]}
 
@@ -197,3 +167,14 @@ def generate_kernel(patterns, unroll_factors, loop_order):
     )
 
     return codelet.gen_code()
+
+def main():
+    patterns = {0: [1,0], 1: [1], 2: [0]}
+    unroll_factors = {'i': 1, 'j': 1}
+    loop_order = ['i', 'j']
+
+    kernel = generate_kernel(patterns, unroll_factors, loop_order)
+    print(kernel)
+
+if __name__ == '__main__':
+    main()
