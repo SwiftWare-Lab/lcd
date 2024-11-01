@@ -57,9 +57,7 @@ def benchmark_unroll_coarsen(A_cf, B):
                                 B_ptr, C_ptr,
                                 patterns_ptr, Avp_offsets_ptr, Aip_offsets_ptr,
                                 A_cf.kernel_rows, A_cf.kernel_cols,
-                                B.shape[1],
-                                num_warps=8,
-                                num_stages=3)
+                                B.shape[1])
     stop.record()
 
     torch.cuda.synchronize()

@@ -21,4 +21,4 @@ module load cuda/12.2
 source venv/bin/activate
 
 
-python3 -u gen_code_test1.py
+python3 -u code_gen_experiment.py
