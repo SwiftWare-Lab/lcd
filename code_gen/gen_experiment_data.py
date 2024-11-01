@@ -29,9 +29,16 @@ def generate_cftmx_matrix(A_sp, kernel_m, kernel_n, name):
     os.system(f"rm {dir_name + file_name}.mtx")
 
 def generate_batch_cfmtx_matrices(mat_sizes, kernel_sizes, density):
+    dir_name = "mtx_matrices/"
+
+    # Create the directory if it does not exist
+    if not os.path.exists(dir_name):
+        os.makedirs(dir_name)
+
     for mat_size in mat_sizes:
+        M_sp = gen_sp_matrix(mat_size[0], mat_size[1], density)
+        mmwrite(dir_name + f"A_{mat_size[0]}x{mat_size[1]}.mtx", M_sp)
         for kernel_size in kernel_sizes:
-            M_sp = gen_sp_matrix(mat_size[0], mat_size[1], density)
             generate_cftmx_matrix(M_sp, kernel_size[0], kernel_size[1], "A")
 
 def main():
