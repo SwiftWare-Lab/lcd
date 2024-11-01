@@ -78,6 +78,12 @@ def benchmark_cuBLAS(A, B):
         results.append(cuBLAS_instance(A, B))
     return np.mean(results)
 
+def benchmark_triton(A_cf, B):
+    results = []
+    for _ in range(k):
+        results.append(benchmark_unroll_coarsen(A_cf, B))
+    return np.mean(results)
+
 A_dim = (768, 768)
 A_density = 0.5
 
@@ -87,21 +93,21 @@ B_density = 1.0
 kernel_m = 2
 kernel_n = 4
 
-A_sp = gen_sp_matrix(A_dim[0], A_dim[1], A_density)
-B_sp = gen_sp_matrix(A_dim[1], B_col, B_density)
-A = A_sp.toarray()
-B  = B_sp.toarray()
+for i in range(10):
+    A_sp = gen_sp_matrix(A_dim[0], A_dim[1], A_density)
+    B_sp = gen_sp_matrix(A_dim[1], B_col, B_density)
+    A = A_sp.toarray()
+    B  = B_sp.toarray()
 
-A_cf = csr_to_cfmtx(A_sp, kernel_m, kernel_n)
+    A_cf = csr_to_cfmtx(A_sp, kernel_m, kernel_n)
 
-triton_time = benchmark_unroll_coarsen(A_cf, B)
-cuSPARSE_time = benchmark_cuSPARSE(A, B)
-cuBLAS_time = benchmark_cuBLAS(A, B)
+    triton_time = benchmark_triton(A_cf, B)
+    cuSPARSE_time = benchmark_cuSPARSE(A, B)
+    cuBLAS_time = benchmark_cuBLAS(A, B)
 
-
-print(f"Triton time: {triton_time}")
-print(f"cuSPARSE time: {cuSPARSE_time}")
-print(f"cuBLAS time: {cuBLAS_time}")
+    print(f"Triton time: {triton_time}")
+    print(f"cuSPARSE time: {cuSPARSE_time}")
+    print(f"cuBLAS time: {cuBLAS_time}\n")
 
 
 

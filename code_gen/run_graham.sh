@@ -9,7 +9,7 @@
 #SBATCH --mail-user=prachyosarker565@gmail.com
 #SBATCH --nodes=1
 #SBATCH --output="compressed.%j.%N.out"
-#SBATCH -t 0:01:00
+#SBATCH -t 0:02:00
 #SBATCH --mem=50G  # Request 32 GB of memory
 
 

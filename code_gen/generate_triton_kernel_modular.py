@@ -170,7 +170,7 @@ def generate_kernel(patterns, unroll_factors, loop_order):
 
 def main():
     patterns = {0: [1,0], 1: [1], 2: [0]}
-    unroll_factors = {'i': 1, 'j': 1}
+    unroll_factors = {'i': 1, 'j': 2}
     loop_order = ['i', 'j']
 
     kernel = generate_kernel(patterns, unroll_factors, loop_order)

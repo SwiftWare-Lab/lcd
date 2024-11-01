@@ -46,7 +46,7 @@ def unroll_coarsen_kernel(Avp, Aip, Arp, B, C, patterns, Avp_offsets, Aip_offset
 
     if pattern_id == 0:
         for i in range(0, num_kernels - num_kernels % 1, 1):
-            for j in tl.range(0, k_cols - k_cols % 1, 1, num_stages=3):
+            for j in tl.range(0, k_cols - k_cols % 2, 2, num_stages=3):
                 A_1_0 = tl.load(values_ptr + (num_ones * k_cols * (i + 0)) + (j + 0) + (0 * pattern_offset))
                 A_0_0 = tl.load(values_ptr + (num_ones * k_cols * (i + 0)) + (j + 0) + (1 * pattern_offset))
 
@@ -62,7 +62,22 @@ def unroll_coarsen_kernel(Avp, Aip, Arp, B, C, patterns, Avp_offsets, Aip_offset
                 tl.atomic_add(C + ((row_idx + 0) * N) + tl.arange(0, N), C_0_0)
 
 
-            for j in tl.range(k_cols - k_cols % 1, k_cols, num_stages=3):
+                A_1_1 = tl.load(values_ptr + (num_ones * k_cols * (i + 0)) + (j + 1) + (0 * pattern_offset))
+                A_0_1 = tl.load(values_ptr + (num_ones * k_cols * (i + 0)) + (j + 1) + (1 * pattern_offset))
+
+                idx_1 = tl.load(indices_ptr + ((i + 0) * k_cols) + (j + 1))
+                B_row_1 = tl.load(B + (idx_1 * N) + tl.arange(0, N))
+
+                C_1_1 = tl.zeros((N,), dtype=tl.float32)
+                C_1_1 = A_1_1 * B_row_1
+                tl.atomic_add(C + ((row_idx + 1) * N) + tl.arange(0, N), C_1_1)
+
+                C_0_1 = tl.zeros((N,), dtype=tl.float32)
+                C_0_1 = A_0_1 * B_row_1
+                tl.atomic_add(C + ((row_idx + 0) * N) + tl.arange(0, N), C_0_1)
+
+
+            for j in tl.range(k_cols - k_cols % 2, k_cols, num_stages=3):
                 A_1 = tl.load(values_ptr + (num_ones * k_cols * (i + 0)) + (j) + (0 * pattern_offset))
                 A_0 = tl.load(values_ptr + (num_ones * k_cols * (i + 0)) + (j) + (1 * pattern_offset))
 
@@ -79,7 +94,7 @@ def unroll_coarsen_kernel(Avp, Aip, Arp, B, C, patterns, Avp_offsets, Aip_offset
 
 
         for i in range(num_kernels - num_kernels % 1, num_kernels):
-            for j in tl.range(0, k_cols - k_cols % 1, 1, num_stages=3):
+            for j in tl.range(0, k_cols - k_cols % 2, 2, num_stages=3):
                 A_1_0 = tl.load(values_ptr + (num_ones * k_cols * (i + 0)) + (j + 0) + (0 * pattern_offset))
                 A_0_0 = tl.load(values_ptr + (num_ones * k_cols * (i + 0)) + (j + 0) + (1 * pattern_offset))
 
@@ -95,7 +110,22 @@ def unroll_coarsen_kernel(Avp, Aip, Arp, B, C, patterns, Avp_offsets, Aip_offset
                 tl.atomic_add(C + ((row_idx + 0) * N) + tl.arange(0, N), C_0_0)
 
 
-            for j in tl.range(k_cols - k_cols % 1, k_cols, num_stages=3):
+                A_1_1 = tl.load(values_ptr + (num_ones * k_cols * (i + 0)) + (j + 1) + (0 * pattern_offset))
+                A_0_1 = tl.load(values_ptr + (num_ones * k_cols * (i + 0)) + (j + 1) + (1 * pattern_offset))
+
+                idx_1 = tl.load(indices_ptr + ((i + 0) * k_cols) + (j + 1))
+                B_row_1 = tl.load(B + (idx_1 * N) + tl.arange(0, N))
+
+                C_1_1 = tl.zeros((N,), dtype=tl.float32)
+                C_1_1 = A_1_1 * B_row_1
+                tl.atomic_add(C + ((row_idx + 1) * N) + tl.arange(0, N), C_1_1)
+
+                C_0_1 = tl.zeros((N,), dtype=tl.float32)
+                C_0_1 = A_0_1 * B_row_1
+                tl.atomic_add(C + ((row_idx + 0) * N) + tl.arange(0, N), C_0_1)
+
+
+            for j in tl.range(k_cols - k_cols % 2, k_cols, num_stages=3):
                 A_1 = tl.load(values_ptr + (num_ones * k_cols * (i + 0)) + (j) + (0 * pattern_offset))
                 A_0 = tl.load(values_ptr + (num_ones * k_cols * (i + 0)) + (j) + (1 * pattern_offset))
 
@@ -113,7 +143,7 @@ def unroll_coarsen_kernel(Avp, Aip, Arp, B, C, patterns, Avp_offsets, Aip_offset
 
     if pattern_id == 1:
         for i in range(0, num_kernels - num_kernels % 1, 1):
-            for j in tl.range(0, k_cols - k_cols % 1, 1, num_stages=3):
+            for j in tl.range(0, k_cols - k_cols % 2, 2, num_stages=3):
                 A_1_0 = tl.load(values_ptr + (num_ones * k_cols * (i + 0)) + (j + 0) + (0 * pattern_offset))
 
                 idx_0 = tl.load(indices_ptr + ((i + 0) * k_cols) + (j + 0))
@@ -124,7 +154,17 @@ def unroll_coarsen_kernel(Avp, Aip, Arp, B, C, patterns, Avp_offsets, Aip_offset
                 tl.atomic_add(C + ((row_idx + 1) * N) + tl.arange(0, N), C_1_0)
 
 
-            for j in tl.range(k_cols - k_cols % 1, k_cols, num_stages=3):
+                A_1_1 = tl.load(values_ptr + (num_ones * k_cols * (i + 0)) + (j + 1) + (0 * pattern_offset))
+
+                idx_1 = tl.load(indices_ptr + ((i + 0) * k_cols) + (j + 1))
+                B_row_1 = tl.load(B + (idx_1 * N) + tl.arange(0, N))
+
+                C_1_1 = tl.zeros((N,), dtype=tl.float32)
+                C_1_1 = A_1_1 * B_row_1
+                tl.atomic_add(C + ((row_idx + 1) * N) + tl.arange(0, N), C_1_1)
+
+
+            for j in tl.range(k_cols - k_cols % 2, k_cols, num_stages=3):
                 A_1 = tl.load(values_ptr + (num_ones * k_cols * (i + 0)) + (j) + (0 * pattern_offset))
 
                 idx = tl.load(indices_ptr + ((i + 0) * k_cols) + j)
@@ -136,7 +176,7 @@ def unroll_coarsen_kernel(Avp, Aip, Arp, B, C, patterns, Avp_offsets, Aip_offset
 
 
         for i in range(num_kernels - num_kernels % 1, num_kernels):
-            for j in tl.range(0, k_cols - k_cols % 1, 1, num_stages=3):
+            for j in tl.range(0, k_cols - k_cols % 2, 2, num_stages=3):
                 A_1_0 = tl.load(values_ptr + (num_ones * k_cols * (i + 0)) + (j + 0) + (0 * pattern_offset))
 
                 idx_0 = tl.load(indices_ptr + ((i + 0) * k_cols) + (j + 0))
@@ -147,7 +187,17 @@ def unroll_coarsen_kernel(Avp, Aip, Arp, B, C, patterns, Avp_offsets, Aip_offset
                 tl.atomic_add(C + ((row_idx + 1) * N) + tl.arange(0, N), C_1_0)
 
 
-            for j in tl.range(k_cols - k_cols % 1, k_cols, num_stages=3):
+                A_1_1 = tl.load(values_ptr + (num_ones * k_cols * (i + 0)) + (j + 1) + (0 * pattern_offset))
+
+                idx_1 = tl.load(indices_ptr + ((i + 0) * k_cols) + (j + 1))
+                B_row_1 = tl.load(B + (idx_1 * N) + tl.arange(0, N))
+
+                C_1_1 = tl.zeros((N,), dtype=tl.float32)
+                C_1_1 = A_1_1 * B_row_1
+                tl.atomic_add(C + ((row_idx + 1) * N) + tl.arange(0, N), C_1_1)
+
+
+            for j in tl.range(k_cols - k_cols % 2, k_cols, num_stages=3):
                 A_1 = tl.load(values_ptr + (num_ones * k_cols * (i + 0)) + (j) + (0 * pattern_offset))
 
                 idx = tl.load(indices_ptr + ((i + 0) * k_cols) + j)
@@ -160,7 +210,7 @@ def unroll_coarsen_kernel(Avp, Aip, Arp, B, C, patterns, Avp_offsets, Aip_offset
 
     if pattern_id == 2:
         for i in range(0, num_kernels - num_kernels % 1, 1):
-            for j in tl.range(0, k_cols - k_cols % 1, 1, num_stages=3):
+            for j in tl.range(0, k_cols - k_cols % 2, 2, num_stages=3):
                 A_0_0 = tl.load(values_ptr + (num_ones * k_cols * (i + 0)) + (j + 0) + (0 * pattern_offset))
 
                 idx_0 = tl.load(indices_ptr + ((i + 0) * k_cols) + (j + 0))
@@ -171,7 +221,17 @@ def unroll_coarsen_kernel(Avp, Aip, Arp, B, C, patterns, Avp_offsets, Aip_offset
                 tl.atomic_add(C + ((row_idx + 0) * N) + tl.arange(0, N), C_0_0)
 
 
-            for j in tl.range(k_cols - k_cols % 1, k_cols, num_stages=3):
+                A_0_1 = tl.load(values_ptr + (num_ones * k_cols * (i + 0)) + (j + 1) + (0 * pattern_offset))
+
+                idx_1 = tl.load(indices_ptr + ((i + 0) * k_cols) + (j + 1))
+                B_row_1 = tl.load(B + (idx_1 * N) + tl.arange(0, N))
+
+                C_0_1 = tl.zeros((N,), dtype=tl.float32)
+                C_0_1 = A_0_1 * B_row_1
+                tl.atomic_add(C + ((row_idx + 0) * N) + tl.arange(0, N), C_0_1)
+
+
+            for j in tl.range(k_cols - k_cols % 2, k_cols, num_stages=3):
                 A_0 = tl.load(values_ptr + (num_ones * k_cols * (i + 0)) + (j) + (0 * pattern_offset))
 
                 idx = tl.load(indices_ptr + ((i + 0) * k_cols) + j)
@@ -183,7 +243,7 @@ def unroll_coarsen_kernel(Avp, Aip, Arp, B, C, patterns, Avp_offsets, Aip_offset
 
 
         for i in range(num_kernels - num_kernels % 1, num_kernels):
-            for j in tl.range(0, k_cols - k_cols % 1, 1, num_stages=3):
+            for j in tl.range(0, k_cols - k_cols % 2, 2, num_stages=3):
                 A_0_0 = tl.load(values_ptr + (num_ones * k_cols * (i + 0)) + (j + 0) + (0 * pattern_offset))
 
                 idx_0 = tl.load(indices_ptr + ((i + 0) * k_cols) + (j + 0))
@@ -194,7 +254,17 @@ def unroll_coarsen_kernel(Avp, Aip, Arp, B, C, patterns, Avp_offsets, Aip_offset
                 tl.atomic_add(C + ((row_idx + 0) * N) + tl.arange(0, N), C_0_0)
 
 
-            for j in tl.range(k_cols - k_cols % 1, k_cols, num_stages=3):
+                A_0_1 = tl.load(values_ptr + (num_ones * k_cols * (i + 0)) + (j + 1) + (0 * pattern_offset))
+
+                idx_1 = tl.load(indices_ptr + ((i + 0) * k_cols) + (j + 1))
+                B_row_1 = tl.load(B + (idx_1 * N) + tl.arange(0, N))
+
+                C_0_1 = tl.zeros((N,), dtype=tl.float32)
+                C_0_1 = A_0_1 * B_row_1
+                tl.atomic_add(C + ((row_idx + 0) * N) + tl.arange(0, N), C_0_1)
+
+
+            for j in tl.range(k_cols - k_cols % 2, k_cols, num_stages=3):
                 A_0 = tl.load(values_ptr + (num_ones * k_cols * (i + 0)) + (j) + (0 * pattern_offset))
 
                 idx = tl.load(indices_ptr + ((i + 0) * k_cols) + j)
@@ -244,7 +314,9 @@ def benchmark_unroll_coarsen(A_cf, B):
                                 B_ptr, C_ptr,
                                 patterns_ptr, Avp_offsets_ptr, Aip_offsets_ptr,
                                 A_cf.kernel_rows, A_cf.kernel_cols,
-                                B.shape[1])
+                                B.shape[1],
+                                num_warps=8,
+                                num_stages=3)
     stop.record()
 
     torch.cuda.synchronize()
@@ -252,5 +324,4 @@ def benchmark_unroll_coarsen(A_cf, B):
     elapsed_time_ms = start.elapsed_time(stop)
 
     return elapsed_time_ms
-
 
