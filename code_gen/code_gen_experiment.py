@@ -17,6 +17,12 @@ def load_function(pattern_size, unroll_factor):
     func = getattr(module, "benchmark_unroll_coarsen")
     return func
 
+def benchmark_func(func, A_cf, B):
+    results = []
+    for _ in range(10):
+        results.append(func(A_cf, B))
+    return np.mean(results)
+
 def main():
     pattern_size = 2
     unroll_factor = (1, 2)
@@ -31,7 +37,7 @@ def main():
     B = B_sp.toarray()
 
     for _ in range(10):
-        print(func(A_cf, B))
+        print(benchmark_func(func, A_cf, B))
 
 if __name__ == "__main__":
     main()
