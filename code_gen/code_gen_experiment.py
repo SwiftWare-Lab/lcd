@@ -7,6 +7,22 @@ from read_compressed_format import read_compressed_matrix # type: ignore
 
 import scipy.sparse as sp
 
+class CodeGenPlot:
+    def __init__(self, dim, b_col, pattern_sizes, unroll_factors):
+        self.dim = dim
+        self.b_col = b_col
+        self.pattern_sizes = pattern_sizes
+        self.unroll_factors = unroll_factors
+        self.loop_order = ['i', 'j']
+
+    def get_title(self):
+        return f"A_dim: {self.dim} B_col: {self.b_col} loop_order: {self.loop_order}"
+
+    def get_x_label(self):
+        return "Sweep On M"
+    
+    def get_y_label(self):
+        return "Execution Time (ms)"
 
 dir_name = 'experiment_kernels'
 
