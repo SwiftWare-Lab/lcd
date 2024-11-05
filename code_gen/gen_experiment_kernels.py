@@ -23,8 +23,8 @@ def generate_kernel_file_contents(kernel_m,  unroll_factor, loop_order):
 
 def main():
 
-    pattern_sizes = [1, 2, 3, 4, 5]
-    unroll_factors = [(1, 1), (1, 2), (1, 4), (2, 1), (4, 1)]
+    pattern_sizes = [1, 2, 3, 4, 5, 6]
+    unroll_factors = [(1, 1), (1, 2), (1, 4), (2, 1), (4, 1), (1, 8), (1, 16), (8, 1), (16, 1)]
     loop_order = ['i', 'j']
 
     dir_name = "experiment_kernels/"

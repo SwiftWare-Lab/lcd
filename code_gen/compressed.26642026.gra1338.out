@@ -1,0 +1,22 @@
+/A_7000x7000_4x4.cfmtx 260.6015426635742 0.0030084242479412773
+/A_7000x7000_4x4.cfmtx 11.459071922302247 0.13683481617287663
+/A_7000x7000_4x4.cfmtx 11.811532878875733 0.2655032189436276
+/A_7000x28000_4x4.cfmtx 46.88097305297852 0.06689280950837172
+/A_7000x28000_4x4.cfmtx 47.67098884582519 0.13156848959614717
+/A_7000x28000_4x4.cfmtx 49.53599967956543 0.2532299757982808
+/A_9000x9000_4x4.cfmtx 17.341337776184083 0.07473471866627705
+/A_9000x9000_4x4.cfmtx 17.659596824645995 0.14677571780022558
+/A_9000x9000_4x4.cfmtx 18.2296573638916 0.28437177378156375
+Traceback (most recent call last):
+  File "/home/prachyo/dev/gpu-backend/code_gen/code_gen_experiment.py", line 246, in <module>
+    gen_data_large()
+  File "/home/prachyo/dev/gpu-backend/code_gen/code_gen_experiment.py", line 138, in gen_data_large
+    A_cf = load_cfmtx_from_path(full_cfmtx_path)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/prachyo/dev/gpu-backend/code_gen/code_gen_experiment.py", line 35, in load_cfmtx_from_path
+    M_cf = read_compressed_matrix(full_cfmtx_path)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/prachyo/dev/gpu-backend/code_gen/../utils/read_compressed_format.py", line 41, in read_compressed_matrix
+    with open(file_path, 'r') as file:
+         ^^^^^^^^^^^^^^^^^^^^
+FileNotFoundError: [Errno 2] No such file or directory: 'cfmtx_matrices/A_9000x360000_4x4.cfmtx'

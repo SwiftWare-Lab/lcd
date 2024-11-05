@@ -1,4 +1,5 @@
 import importlib
+import os
 import sys
 import cupy as cp
 from matplotlib import pyplot as plt
@@ -22,13 +23,17 @@ def load_function(pattern_size, unroll_factor):
 
 def benchmark_func(func, A_cf, B):
     results = []
-    for _ in range(10):
+    for _ in range(k):
         results.append(func(A_cf, B))
     return np.mean(results)
 
 def load_matrix(matrix_name, shape, kernel_m, kernel_n):
     A_cf = read_compressed_matrix(f"cfmtx_matrices/{matrix_name}_{shape[0]}x{shape[1]}_{kernel_m}x{kernel_n}.cfmtx")
     return A_cf
+
+def load_cfmtx_from_path(full_cfmtx_path):
+    M_cf = read_compressed_matrix(full_cfmtx_path)
+    return M_cf
 
 def gen_sp_matrix(n_rows, n_cols, d):
     mat_sp = sp.random(n_rows, n_cols,
@@ -86,6 +91,59 @@ def benchmark_cuBLAS(A, B):
         results.append(cuBLAS_instance(A, B))
     return np.mean(results)
 
+def get_TFLOPs(shape, b_col, exec_time_ms):
+    M, K = shape
+    total_ops = 2 * M * K * b_col
+    exec_time_s = exec_time_ms / 1000.0
+    tflops = (total_ops / 1e12) / exec_time_s
+
+    return tflops
+
+def gen_data_extracted():
+    b_cols = [8, 16, 32]
+    pattern_size = 4
+    unroll_factor = (1, 1)
+    func = load_function(pattern_size, unroll_factor)
+    dir_name = 'cfmtx_matrices'
+
+    selected_matrices_file = 'mtx_matrices/selected_matrices.txt'
+    with open(selected_matrices_file, 'r') as f:
+        selected_matrices = [line.strip() for line in f]
+
+    for rel_path in selected_matrices:
+        rel_cfmtx_path = os.path.splitext(rel_path)[0] + '.cfmtx'
+        full_cfmtx_path = dir_name + rel_cfmtx_path
+        A_cf = load_cfmtx_from_path(full_cfmtx_path)
+        n_cols = A_cf.num_col
+        for b_col in b_cols:
+            B_sp = gen_sp_matrix(n_cols, b_col, 1.0)
+            B = B_sp.toarray()
+            avg_time = benchmark_func(func, A_cf, B)
+            avg_tflops = get_TFLOPs((A_cf.num_row, A_cf.num_col), b_col, avg_time)
+            print(f"{rel_path} {avg_time} {avg_tflops}")
+
+def gen_data_large():
+    pattern_size = 4
+    unroll_factor = (1, 1)
+    A_dims = [(7000, 7000), (7000, 28000), (9000, 9000), (9000, 36000), (12000, 12000), (21000, 7000), (27000, 9000), (28000, 7000), (36000, 9000), (36000, 12000), (48000, 12000)]
+    b_cols = [8, 16, 32]
+
+    dir_name = 'cfmtx_matrices'
+
+    func = load_function(pattern_size, unroll_factor)
+
+    for A_dim in A_dims:
+        rel_cfmtx_path = f"/A_{A_dim[0]}x{A_dim[1]}_{pattern_size}x4.cfmtx"
+        full_cfmtx_path = dir_name + rel_cfmtx_path
+        A_cf = load_cfmtx_from_path(full_cfmtx_path)
+        n_cols = A_cf.num_col
+        for b_col in b_cols:
+            B_sp = gen_sp_matrix(n_cols, b_col, 1.0)
+            B = B_sp.toarray()
+            avg_time = benchmark_func(func, A_cf, B)
+            avg_tflops = get_TFLOPs((A_cf.num_row, A_cf.num_col), b_col, avg_time)
+            print(f"{rel_cfmtx_path} {avg_time} {avg_tflops}")
+
 class CodeGenPlot:
     def __init__(self, dim, b_col, pattern_sizes, unroll_factors):
         self.dim = dim
@@ -104,7 +162,7 @@ class CodeGenPlot:
         return "Sweep On M"
     
     def get_y_label(self):
-        return "Execution Time (ms)"
+        return "TFLOP/s"
     
     def generate_data(self):
         A_sp = mmread(f"mtx_matrices/A_{self.dim[0]}x{self.dim[1]}.mtx").tocsr()
@@ -126,10 +184,13 @@ class CodeGenPlot:
 
                 # Benchmark the kernel
                 average_time = benchmark_func(func, A_cf, B)
-                self.data[unroll_factor].append(average_time)
+                triton_tflops = get_TFLOPs(self.dim, self.b_col, average_time)
+                self.data[unroll_factor].append(triton_tflops)
 
-        self.cuBLAS_res = benchmark_cuBLAS(A, B)
-        self.cuSPARSE_res = benchmark_cuSPARSE(A, B)
+        cuBLAS_time = benchmark_cuBLAS(A, B)
+        self.cuBLAS_res = get_TFLOPs(self.dim, self.b_col, cuBLAS_time)
+        cuSPARSE_time = benchmark_cuSPARSE(A, B)
+        self.cuSPARSE_res = get_TFLOPs(self.dim, self.b_col, cuSPARSE_time)
 
     def gen_plot(self, ax):
 
@@ -137,7 +198,7 @@ class CodeGenPlot:
             label = f"Unroll i: {unroll_i}, Unroll j: {unroll_j}"
             ax.plot(self.pattern_sizes, y_values, label=label, marker=markers[i % len(markers)], color=colors[i % len(colors)])
 
-        ax.axhline(y=self.cuSPARSE_res, color='gray', linestyle='--', linewidth=1, label=f'cuSPARSE')
+        ax.axhline(y=self.cuSPARSE_res, color='red', linestyle='--', linewidth=1, label=f'cuSPARSE')
         ax.axhline(y=self.cuBLAS_res, color='blue', linestyle='--', linewidth=1, label=f'cuBLAS')
 
         ax.set_title(self.get_title())
@@ -150,19 +211,21 @@ class CodeGenPlot:
 
 
 def main():
-    pattern_sizes = [1, 2, 3, 4, 5]
-    unroll_factors = [(1, 1), (1, 2), (1, 4), (2, 1), (4, 1)]
-    A_dims = [(768, 768)]
-    b_cols = [32, 64, 128, 256]
+    pattern_sizes = [4]
+    unroll_factors = [(1, 1)]
+    A_dims = [(7000, 7000)]
+    b_cols = [8, 16, 32]
 
-    plots = [CodeGenPlot(A_dims[0], b_col, pattern_sizes, unroll_factors) for b_col in b_cols]
+    plots = [CodeGenPlot(A_dim, b_col, pattern_sizes, unroll_factors) 
+         for A_dim in A_dims 
+         for b_col in b_cols]
 
     for plot in plots:
         plot.generate_data()
 
-    plot_r = 1
+    plot_r = len(A_dims)
     plot_c = len(b_cols)
-    fig, axes = plt.subplots(plot_r, plot_c, figsize=(10, 8))
+    _, axes = plt.subplots(plot_r, plot_c, figsize=(25, 6))
 
     if isinstance(axes, np.ndarray):
         axes_flat = axes.flat
@@ -171,12 +234,13 @@ def main():
         axes_flat = [axes]
 
     idx = 0
-    for b_col in b_cols:
-        plots[idx].gen_plot(axes_flat[idx])
-        idx += 1
+    for _ in b_cols:
+        for _ in A_dims:
+            plots[idx].gen_plot(axes_flat[idx])
+            idx += 1
 
     plt.tight_layout()
     plt.savefig("output.png", dpi=300)
 
 if __name__ == "__main__":
-    main()
+    gen_data_large()

@@ -1,3 +1,4 @@
+import shutil
 import scipy.sparse as sp
 import numpy as np
 
@@ -28,6 +29,24 @@ def generate_cftmx_matrix(A_sp, kernel_m, kernel_n, name):
     # remove .mtx file
     os.system(f"rm {dir_name + file_name}.mtx")
 
+def generate_cfmtx_from_mtx_path(mtx_full_path, kernel_sizes):
+    dir_name = 'cfmtx_matrices'
+    # Create the directory if it does not exist
+    if not os.path.exists(dir_name):
+        os.makedirs(dir_name)
+
+    kernel_m = kernel_sizes[0]    
+    kernel_n = kernel_sizes[1]
+    os.system(f"python3 ../utils/compressed_format_generator.py {mtx_full_path} {kernel_m} {kernel_n} > /dev/null 2>&1")
+
+    cfmtx_path = mtx_full_path.replace('.mtx', '.cfmtx')
+
+    relative_path = os.path.relpath(cfmtx_path, start='mtx_matrices')
+    target_path = os.path.join('cfmtx_matrices', relative_path)
+
+    os.makedirs(os.path.dirname(target_path), exist_ok=True)
+    shutil.move(cfmtx_path, target_path)
+
 def generate_batch_cfmtx_matrices(mat_sizes, kernel_sizes, density):
     dir_name = "mtx_matrices/"
 
@@ -41,9 +60,23 @@ def generate_batch_cfmtx_matrices(mat_sizes, kernel_sizes, density):
         for kernel_size in kernel_sizes:
             generate_cftmx_matrix(M_sp, kernel_size[0], kernel_size[1], "A")
 
+def generate_cfmtx_extracted():
+    selected_matrices_file = 'mtx_matrices/selected_matrices.txt'
+    base_dir = 'mtx_matrices'
+
+    with open(selected_matrices_file, 'r') as f:
+        for line in f:
+            relative_path = line.strip()
+            full_path = os.path.join(base_dir, relative_path)
+
+            kernel_sizes = (4, 4)
+            generate_cfmtx_from_mtx_path(full_path, kernel_sizes)
+
+    print("Finished generating all cfmtx matrices")
+
 def main():
-    mat_sizes = [(768, 768)]
-    kernel_sizes = [(1, 4), (2, 4), (3, 4), (4, 4), (5, 4)]
+    mat_sizes = [(12000, 48000)]
+    kernel_sizes = [(4, 4)]
     density = 0.5
     generate_batch_cfmtx_matrices(mat_sizes, kernel_sizes, density)
 
