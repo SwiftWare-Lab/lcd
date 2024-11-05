@@ -3,6 +3,7 @@ import os
 import sys
 import cupy as cp
 from matplotlib import pyplot as plt
+import re
 import numpy as np
 sys.path.insert(1, '../utils')
 from read_compressed_format import read_compressed_matrix # type: ignore
@@ -34,6 +35,10 @@ def load_matrix(matrix_name, shape, kernel_m, kernel_n):
 def load_cfmtx_from_path(full_cfmtx_path):
     M_cf = read_compressed_matrix(full_cfmtx_path)
     return M_cf
+
+def load_mtx_from_path(full_mtx_path):
+    A_sp = mmread(full_mtx_path)
+    return A_sp
 
 def gen_sp_matrix(n_rows, n_cols, d):
     mat_sp = sp.random(n_rows, n_cols,
@@ -144,6 +149,81 @@ def gen_data_large():
             avg_tflops = get_TFLOPs((A_cf.num_row, A_cf.num_col), b_col, avg_time)
             print(f"{rel_cfmtx_path} {avg_time} {avg_tflops}")
 
+def plot_large_set():
+    
+    # Sample data file (replace this with the actual path to your data file)
+    data_file = 'large_matrices_data.out'
+
+    # Initialize dictionaries to store data
+    sizes = []
+    tflops_data = {8: [], 16: [], 32: []}
+    b_cols = [8, 16, 32]  # Define the repeating pattern for b_col
+
+    # Read and parse the data file
+    with open(data_file, 'r', encoding='utf-8') as file:
+        lines = file.readlines()
+        for i, line in enumerate(lines):
+            parts = line.split()
+            path = parts[0]
+            tflops = float(parts[2])
+
+            mtx_dir = "mtx_matrices"
+            full_mtx_path = mtx_dir + path.replace(".cfmtx", ".mtx")
+            A_sp = load_mtx_from_path(full_mtx_path)
+            A = A_sp.toarray()
+
+            # Extract matrix size from the path
+            match = re.search(r'A_(\d+)x(\d+)_4x4\.cfmtx', path)
+            if match:
+                size_a = f"{match.group(1)}x{match.group(2)}"
+                if size_a not in sizes:
+                    sizes.append(size_a)
+                
+                # Determine the b_col based on the position in the group (0 -> 8, 1 -> 16, 2 -> 32)
+                b_col = b_cols[i % 3]
+
+                B_sp = gen_sp_matrix(A_sp.shape[1], b_col)
+                B = B_sp.toarray()
+                avg_cuSPARSE_time = benchmark_cuSPARSE(A, B)
+                avg_cuBLAS_time = benchmark_cuBLAS(A, B)
+
+                avg_cuSPARSE_tflops = get_TFLOPs(A_sp.shape, b_col, avg_cuSPARSE_time)
+                avg_cuBLAS_tflops = get_TFLOPs(A_sp.shape, b_col, avg_cuBLAS_time)
+                
+                # Store TFLOPS data for each b_col
+                tflops_data[b_col].append(tflops)
+                tflops_data[b_col].append(avg_cuSPARSE_tflops)
+                tflops_data[b_col].append(avg_cuBLAS_tflops)
+
+
+    # Set up the bar chart
+    _, ax = plt.subplots(figsize=(14, 6))
+    bar_width = 0.25  # Width of each bar
+    index = range(len(sizes))  # X-axis positions for each group
+
+    # Plot bars for each b_col value
+    for j, b_col in enumerate(b_cols):
+        offset = j * bar_width
+        ax.bar(
+            [x + offset for x in index],
+            tflops_data[b_col],
+            bar_width,
+            label=f'b_col = {b_col}'
+        )
+
+    # Labeling
+    ax.set_xlabel('Matrix Size of A')
+    ax.set_ylabel('TFLOPS')
+    ax.set_title('TFLOPS for Different Matrix Sizes and b_col Values')
+    ax.set_xticks([x + bar_width for x in index])  # Adjust x-axis ticks to the middle of each group
+    ax.set_xticklabels(sizes, rotation=45, ha="right")
+    ax.legend()
+
+    plt.tight_layout()
+
+    # Save plot to file
+    plt.savefig("output_large_set.png")
+
 class CodeGenPlot:
     def __init__(self, dim, b_col, pattern_sizes, unroll_factors):
         self.dim = dim
@@ -243,4 +323,4 @@ def main():
     plt.savefig("output.png", dpi=300)
 
 if __name__ == "__main__":
-    gen_data_large()
+    plot_large_set()
