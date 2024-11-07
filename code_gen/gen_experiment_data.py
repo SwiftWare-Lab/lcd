@@ -67,10 +67,11 @@ def generate_cfmtx_extracted():
     with open(selected_matrices_file, 'r') as f:
         for line in f:
             relative_path = line.strip()
-            full_path = os.path.join(base_dir, relative_path)
+            full_path = base_dir + relative_path
 
             kernel_sizes = (4, 4)
             generate_cfmtx_from_mtx_path(full_path, kernel_sizes)
+            print(full_path)
 
     print("Finished generating all cfmtx matrices")
 
@@ -81,4 +82,4 @@ def main():
     generate_batch_cfmtx_matrices(mat_sizes, kernel_sizes, density)
 
 if __name__ == "__main__":
-    main()
+    generate_cfmtx_extracted()

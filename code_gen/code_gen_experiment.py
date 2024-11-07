@@ -9,6 +9,8 @@ sys.path.insert(1, '../utils')
 from read_compressed_format import read_compressed_matrix # type: ignore
 from scipy.io import mmread
 import scipy.sparse as sp
+import torch
+import time
 
 dir_name = 'experiment_kernels'
 markers = ['o', 's', '^', 'D', 'p', '*', 'x']
@@ -96,6 +98,37 @@ def benchmark_cuBLAS(A, B):
         results.append(cuBLAS_instance(A, B))
     return np.mean(results)
 
+def torch_instance(A_tensor, B_tensor):
+    execution_time = 0
+
+    # Check if tensors are on a GPU
+    if A_tensor.is_cuda and B_tensor.is_cuda:
+        # GPU timing using torch.cuda.Event
+        start = torch.cuda.Event(enable_timing=True)
+        end = torch.cuda.Event(enable_timing=True)
+        
+        start.record()
+        _ = torch.matmul(A_tensor, B_tensor)
+        end.record()
+        
+        # Waits for everything to finish running
+        torch.cuda.synchronize()
+        
+        # Get elapsed time in milliseconds
+        execution_time = start.elapsed_time(end)
+
+    return execution_time
+
+
+def benchmark_torch(A, B):
+    A_tensor = torch.from_numpy(A).float().to(device='cuda')
+    B_tensor = torch.from_numpy(B).float().to(device='cuda')
+
+    results = []
+    for _ in range(k):
+        results.append(torch_instance(A_tensor, B_tensor))
+    return np.mean(results)
+
 def get_TFLOPs(shape, b_col, exec_time_ms):
     M, K = shape
     total_ops = 2 * M * K * b_col
@@ -109,23 +142,49 @@ def gen_data_extracted():
     pattern_size = 4
     unroll_factor = (1, 1)
     func = load_function(pattern_size, unroll_factor)
-    dir_name = 'cfmtx_matrices'
 
     selected_matrices_file = 'mtx_matrices/selected_matrices.txt'
     with open(selected_matrices_file, 'r') as f:
         selected_matrices = [line.strip() for line in f]
 
     for rel_path in selected_matrices:
-        rel_cfmtx_path = os.path.splitext(rel_path)[0] + '.cfmtx'
-        full_cfmtx_path = dir_name + rel_cfmtx_path
+
+        rel_path = os.path.splitext(rel_path)[0]
+        cfmtx_dir = 'cfmtx_matrices'
+        mtx_dir = 'mtx_matrices'
+
+        full_cfmtx_path = cfmtx_dir + rel_path + '.cfmtx'
         A_cf = load_cfmtx_from_path(full_cfmtx_path)
         n_cols = A_cf.num_col
+
+        full_mtx_path = mtx_dir + rel_path + '.mtx'
+        A_sp = load_mtx_from_path(full_mtx_path)
+        A = A_sp.toarray()
+
         for b_col in b_cols:
             B_sp = gen_sp_matrix(n_cols, b_col, 1.0)
             B = B_sp.toarray()
-            avg_time = benchmark_func(func, A_cf, B)
-            avg_tflops = get_TFLOPs((A_cf.num_row, A_cf.num_col), b_col, avg_time)
-            print(f"{rel_path} {avg_time} {avg_tflops}")
+
+            # Triton
+            triton_time = benchmark_func(func, A_cf, B)
+            triton_tflops = get_TFLOPs((A_cf.num_row, A_cf.num_col), b_col, triton_time)
+
+            # cuSPARSE
+            cuSPARSE_time = benchmark_cuSPARSE(A, B)
+            cuSPARSE_tflops = get_TFLOPs(A.shape, b_col, cuSPARSE_time)
+
+            # cuBLAS
+            cuBLAS_time = benchmark_cuBLAS(A, B)
+            cuBLAS_tflops = get_TFLOPs(A.shape, b_col, cuBLAS_time)
+
+            # torch matmul
+            torch_time = benchmark_torch(A, B)
+            torch_tflops = get_TFLOPs(A.shape, b_col, torch_time)
+
+            print(f"Triton {rel_path} {b_col} {triton_time} {triton_tflops}")
+            print(f"cuSPARSE {rel_path} {b_col} {cuSPARSE_time} {cuSPARSE_tflops}")
+            print(f"cuBLAS {rel_path} {b_col} {cuBLAS_time} {cuBLAS_tflops}")
+            print(f"torch {rel_path} {b_col} {torch_time} {torch_tflops}")
 
 def gen_data_large():
     pattern_size = 4
@@ -137,19 +196,119 @@ def gen_data_large():
 
     func = load_function(pattern_size, unroll_factor)
 
+     # warm up
+    warmup_mtx_path = f"cfmtx_matrices/A_1024x1024_4x4.cfmtx"
+    A_cf = load_cfmtx_from_path(warmup_mtx_path)
+    B_sp = gen_sp_matrix(1024, 64, 1.0)
+    B = B_sp.toarray()
+    for _ in range(10):
+        benchmark_func(func, A_cf, B)
+
     for A_dim in A_dims:
+        rel_mtx_path = f"/A_{A_dim[0]}x{A_dim[1]}.mtx"
         rel_cfmtx_path = f"/A_{A_dim[0]}x{A_dim[1]}_{pattern_size}x4.cfmtx"
+        mtx_dir = 'mtx_matrices'
+        full_mtx_path = mtx_dir + rel_mtx_path
         full_cfmtx_path = dir_name + rel_cfmtx_path
         A_cf = load_cfmtx_from_path(full_cfmtx_path)
+        A_sp = load_mtx_from_path(full_mtx_path)
+        A = A_sp.toarray()
         n_cols = A_cf.num_col
         for b_col in b_cols:
             B_sp = gen_sp_matrix(n_cols, b_col, 1.0)
             B = B_sp.toarray()
             avg_time = benchmark_func(func, A_cf, B)
             avg_tflops = get_TFLOPs((A_cf.num_row, A_cf.num_col), b_col, avg_time)
-            print(f"{rel_cfmtx_path} {avg_time} {avg_tflops}")
+            cuSPARSE_time = benchmark_cuSPARSE(A, B)
+            cuBLAS_time = benchmark_cuBLAS(A, B)
+            cuSPARSE_tflops = get_TFLOPs(A.shape, b_col, cuSPARSE_time)
+            cuBLAS_tflops = get_TFLOPs(A.shape, b_col, cuBLAS_time)
+            torch_time = benchmark_torch(A, B)
+            torch_tflops = get_TFLOPs(A.shape, b_col, torch_time)
+            print(f"Triton {rel_cfmtx_path} {b_col} {avg_time} {avg_tflops}")
+            print(f"cuSPARSE {rel_mtx_path} {b_col} {cuSPARSE_time} {cuSPARSE_tflops}")
+            print(f"cuBLAS {rel_mtx_path} {b_col} {cuBLAS_time} {cuBLAS_tflops}")
+            print(f"torch {rel_mtx_path} {b_col} {torch_time} {torch_tflops}")
 
-def plot_large_set():
+def gen_plot_large(data_out):
+    output_dir =  'output/'
+    data_path = output_dir + data_out
+
+    data = {}
+    b_cols = [8, 16, 32]
+
+    triton_pattern = re.compile(r'A_(\d+x\d+)_\d+x\d+\.cfmtx')
+    other_pattern = re.compile(r'A_(\d+x\d+)\.mtx')
+
+    with open(data_path, 'r', encoding='utf-8') as file:
+        lines = file.readlines()
+        for line in lines:
+            parts = line.split()
+            kernel = parts[0]
+            path = parts[1]
+            b_col = int(parts[2])
+            tflops = float(parts[4])
+
+            if kernel == "Triton":
+                match = triton_pattern.search(path)
+            else:
+                match = other_pattern.search(path)
+
+            if match:
+                matrix_size = match.group(1)
+            
+            # Organize by matrix size and b_col
+                if matrix_size not in data:
+                    data[matrix_size] = {8: {}, 16: {}, 32: {}}
+                data[matrix_size][b_col][kernel] = tflops
+
+        libraries = ['Triton', 'cuSPARSE', 'cuBLAS']
+        colors = ['#1f77b4', '#ff7f0e', '#2ca02c']
+
+        fig, axes = plt.subplots(1, 3, figsize=(18, 6), sharey=True)
+        fig.suptitle(data_out.split('.')[0], fontsize=16)
+
+        # Plot for each b_col in a separate subplot
+        for idx, b_col in enumerate(b_cols):
+            ax = axes[idx]
+            
+            # Prepare data for this b_col
+            matrix_sizes = list(data.keys())  # List of matrix sizes for the x-axis
+            num_matrices = len(matrix_sizes)
+            bar_width = 0.2
+            x = np.arange(num_matrices)  # the label locations
+            
+            # Plot each library as a set of bars within each b_col plot
+            for i, library in enumerate(libraries):
+                # Collect TFLOPS values for the current library across all matrix sizes for this b_col
+                tflops_values = [
+                    data[matrix_size].get(b_col, {}).get(library, 0) for matrix_size in matrix_sizes
+                ]
+                
+                # Plot bars for the current library
+                ax.bar(x + i * bar_width, tflops_values, bar_width, label=library, color=colors[i])
+        
+            # Labels and titles
+            ax.set_title(f'Performance Comparison for b_col = {b_col}')
+            ax.set_xlabel('Matrix Size')
+            ax.set_xticks(x + bar_width)
+            ax.set_xticklabels(matrix_sizes, rotation=60)
+
+        # Set the y-axis label for the first plot
+        axes[0].set_ylabel('TFLOPS')
+
+        # Add a single legend for all subplots
+        axes[1].legend(loc='upper center', bbox_to_anchor=(0.5, 1.25), ncol=3)
+
+        # Adjust layout to prevent overlap
+        plt.tight_layout()
+
+        # Save the figure to a PNG file
+        output_png_path = os.path.join(output_dir, f"{data_out.split('.')[0]}.png")
+        plt.savefig(output_png_path, format='png')
+
+
+def plot_large_set(data_out):
     
     # Sample data file (replace this with the actual path to your data file)
     data_file = 'large_matrices_data.out'
@@ -323,4 +482,4 @@ def main():
     plt.savefig("output.png", dpi=300)
 
 if __name__ == "__main__":
-    plot_large_set()
+    gen_data_large()

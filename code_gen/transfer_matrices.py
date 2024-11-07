@@ -24,11 +24,14 @@ with open(selected_matrices_file, 'r') as f:
     selected_matrices = [line.strip() for line in f]
 
 for matrix_path in selected_matrices:
-    full_source_path = os.path.join(source_dir, matrix_path)
+    full_source_path = source_dir + matrix_path
 
     if os.path.isfile(full_source_path):
-        shutil.move(full_source_path, target_dir)
+        full_target_path = target_dir + matrix_path
+        os.makedirs(os.path.dirname(full_target_path), exist_ok=True)
+        shutil.move(full_source_path, full_target_path)
     else:
-        print(f"File {matrix_path} not found in {source_dir}")
+        #print(f"File {matrix_path} not found in {source_dir}")
+        print(f"No file {full_source_path}")
 
 print("Transfer complete")
