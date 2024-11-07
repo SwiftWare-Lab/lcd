@@ -10,7 +10,7 @@ from read_compressed_format import read_compressed_matrix # type: ignore
 from scipy.io import mmread
 import scipy.sparse as sp
 import torch
-import time
+import triton
 
 dir_name = 'experiment_kernels'
 markers = ['o', 's', '^', 'D', 'p', '*', 'x']
@@ -25,10 +25,8 @@ def load_function(pattern_size, unroll_factor):
     return func
 
 def benchmark_func(func, A_cf, B):
-    results = []
-    for _ in range(k):
-        results.append(func(A_cf, B))
-    return np.mean(results)
+
+    return func(A_cf, B)
 
 def load_matrix(matrix_name, shape, kernel_m, kernel_n):
     A_cf = read_compressed_matrix(f"cfmtx_matrices/{matrix_name}_{shape[0]}x{shape[1]}_{kernel_m}x{kernel_n}.cfmtx")
@@ -124,10 +122,9 @@ def benchmark_torch(A, B):
     A_tensor = torch.from_numpy(A).float().to(device='cuda')
     B_tensor = torch.from_numpy(B).float().to(device='cuda')
 
-    results = []
-    for _ in range(k):
-        results.append(torch_instance(A_tensor, B_tensor))
-    return np.mean(results)
+    median_time = triton.testing.do_bench(lambda: torch.matmul(A_tensor, B_tensor), quantiles=[0.5])
+
+    return median_time
 
 def get_TFLOPs(shape, b_col, exec_time_ms):
     M, K = shape
@@ -307,6 +304,72 @@ def gen_plot_large(data_out):
         output_png_path = os.path.join(output_dir, f"{data_out.split('.')[0]}.png")
         plt.savefig(output_png_path, format='png')
 
+def gen_plot_dlmc(data_out, matrix_dir):
+    output_dir = 'output/'
+    data_path = output_dir + data_out
+
+    data = {}
+    b_cols = [8, 16, 32]
+    
+    # Read data file and organize by matrix size, nnz, and b_col
+    with open(data_path, 'r', encoding='utf-8') as file:
+        lines = file.readlines()
+        for line in lines:
+            parts = line.split()
+            kernel = parts[0]
+            path = matrix_dir + parts[1] + '.mtx'
+            b_col = int(parts[2])
+            tflops = float(parts[4])
+
+            # Read matrix file to get size and nnz
+            matrix = mmread(path).tocsc()
+            nnz = matrix.nnz
+            matrix_size = f"{matrix.shape[0]}x{matrix.shape[1]}"
+            
+            # Organize data by matrix size and b_col
+            if matrix_size not in data:
+                data[matrix_size] = {8: [], 16: [], 32: []}
+            data[matrix_size][b_col].append((nnz, kernel, tflops))
+    
+    libraries = ['Triton', 'cuSPARSE', 'cuBLAS', 'torch']
+    colors = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728']  # Colors for the libraries
+    matrix_sizes = list(data.keys())
+    
+    # Set up a grid for the plots
+    fig, axes = plt.subplots(len(matrix_sizes), len(b_cols), figsize=(18, 6 * len(matrix_sizes)), sharey=True)
+    fig.suptitle("Performance Comparison by Matrix Size and b_col", fontsize=16)
+
+    # Generate subplots for each matrix size and b_col
+    for row_idx, matrix_size in enumerate(matrix_sizes):
+        for col_idx, b_col in enumerate(b_cols):
+            ax = axes[row_idx, col_idx]
+            ax.set_title(f"{matrix_size}, b_col = {b_col}")
+
+            # Sort data by nnz for the current matrix size and b_col
+            sorted_data = sorted(data[matrix_size][b_col], key=lambda x: x[0])
+            library_data = {lib: [] for lib in libraries}
+
+            # Organize TFLOPS by library for sorted nnz values
+            for nnz, kernel, tflops in sorted_data:
+                library_data[kernel].append((nnz, tflops))
+
+            # Plot each library's TFLOPS data
+            for i, library in enumerate(libraries):
+                if library in library_data and library_data[library]:
+                    x_vals, y_vals = zip(*library_data[library])
+                    ax.plot(x_vals, y_vals, label=library, color=colors[i])
+
+            # Labels and formatting
+            ax.set_xlabel('Number of Non-Zero Elements (nnz)')
+            if col_idx == 0:
+                ax.set_ylabel('TFLOPS')
+            ax.set_xscale('log')  # Use logarithmic scale for nnz
+            ax.legend()
+
+    plt.tight_layout(rect=[0, 0, 1, 0.96])  # Adjust layout to fit title
+    output_png_path = os.path.join(output_dir, f"{data_out.split('.')[0]}_combined.png")
+    plt.savefig(output_png_path, format='png')
+
 
 def plot_large_set(data_out):
     
@@ -482,4 +545,6 @@ def main():
     plt.savefig("output.png", dpi=300)
 
 if __name__ == "__main__":
-    gen_plot_large('data_large_a100_071124_0248.out')
+    #gen_data_large()
+    out_file = 'data_large_a100_071124_1352.out'
+    gen_plot_large(out_file)

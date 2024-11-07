@@ -1089,6 +1089,19 @@ def unroll_coarsen_kernel(Avp, Aip, Arp, B, C, patterns, Avp_offsets, Aip_offset
                 C_3 = A_3 * B_row
                 tl.atomic_add(C + ((row_idx + 3) * N) + tl.arange(0, N), C_3)
 
+def run_unroll_corasen(A_vp, A_ip, A_rp,
+                                B_ptr, C_ptr,
+                                patterns_ptr, Avp_offsets_ptr, Aip_offsets_ptr,
+                                kernel_rows, kernel_cols,
+                                B_col,
+                                grid):
+    
+    unroll_coarsen_kernel[grid](A_vp, A_ip, A_rp,
+                                B_ptr, C_ptr,
+                                patterns_ptr, Avp_offsets_ptr, Aip_offsets_ptr,
+                                kernel_rows, kernel_cols,
+                                B_col)
+    
 
 def benchmark_unroll_coarsen(A_cf, B):
     # Convert the patterns dict to a list for the GPU
@@ -1119,22 +1132,15 @@ def benchmark_unroll_coarsen(A_cf, B):
     num_row_panels = len(A_cf.row_panels_pointer[0]) - 1
     grid = (num_row_panels, len(A_cf.patterns))
 
-    # Create CUDA events to record the time
-    start = torch.cuda.Event(enable_timing=True)
-    stop = torch.cuda.Event(enable_timing=True)
+    kernel_launcher = lambda: run_unroll_corasen(
+        A_vp, A_ip, A_rp,
+        B_ptr, C_ptr,
+        patterns_ptr, Avp_offsets_ptr, Aip_offsets_ptr,
+        A_cf.kernel_rows,  A_cf.kernel_cols,
+        B.shape[1],
+        grid
+    )
 
-    # Launch Triton kernel (or any CUDA operation)
-    start.record()
+    median_time = triton.testing.do_bench(kernel_launcher, quantiles=[0.5])
 
-    unroll_coarsen_kernel[grid](A_vp, A_ip, A_rp,
-                                B_ptr, C_ptr,
-                                patterns_ptr, Avp_offsets_ptr, Aip_offsets_ptr,
-                                A_cf.kernel_rows, A_cf.kernel_cols,
-                                B.shape[1])
-    stop.record()
-
-    torch.cuda.synchronize()
-
-    elapsed_time_ms = start.elapsed_time(stop)
-
-    return elapsed_time_ms
+    return median_time
