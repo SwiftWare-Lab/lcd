@@ -1,16 +1,21 @@
+import matplotlib.pyplot as plt
 import numpy as np
 import scipy.sparse as sp
 import scipy.io as spio
-import scipy.sparse.linalg as spla
+from sksparse.cholmod import cholesky, analyze
+from sympy import factor
 
 #from sksparse.cholmod import cholesky, analyze, Factor
 
-from utils.symbolic_cholesky_csc import etree, post_order, row_col_counts
+from utils.symbolic_cholesky_csc import etree, post_order, row_col_counts, \
+    detect_supernodes
 
 mtx_list = [
-    "/Users/kazem/UFDB/LFAT5/LFAT5.mtx",
-    "/home/kazem/Downloads/LFAT5/LFAT5.mtx", "/home/kazem/Downloads/ex5/ex5.mtx", "/home/kazem/Downloads/mesh1e1/mesh1e1.mtx","/home/kazem/Downloads/nos4/nos4.mtx",
-    # "/home/kazem/Downloads/bcsstk03/bcsstk03.mtx",
+    #"/Users/kazem/UFDB/LFAT5/LFAT5.mtx",
+    "/home/kazem/Downloads/LFAT5/LFAT5.mtx",
+    "/home/kazem/Downloads/ex5/ex5.mtx",
+    "/home/kazem/Downloads/mesh1e1/mesh1e1.mtx","/home/kazem/Downloads/nos4/nos4.mtx",
+    "/home/kazem/Downloads/bcsstk03/bcsstk03.mtx",
     "/home/kazem/UFDB/Trefethen_20000b/Trefethen_20000b.mtx",
     "/home/kazem/Downloads/msc23052/msc23052.mtx",
     "/home/kazem/Downloads/olafu/olafu.mtx",
@@ -19,20 +24,57 @@ mtx_list = [
             ]
 
 for mtx in mtx_list:
-    A = spio.mmread(mtx)
+    Ao = spio.mmread(mtx)
+    Ao_csc = Ao.tocsc()
     # lower part
-    Au = sp.triu(A).tocsc()
-    A = sp.tril(A).tocsc()
-    parent = np.array(A.shape[0]*[0], dtype=np.int32)
-    common = {}
-    post_order_array = np.array(A.shape[0]*[0], dtype=np.int32)
-    row_count, col_count = np.array(A.shape[0]*[0], dtype=np.int32), np.array(A.shape[0]*[0], dtype=np.int32)
+    Au = sp.triu(Ao).tocsc()
+    A = sp.tril(Ao).tocsc()
 
-    e_ret = etree(A, parent, common)
-    print("ETREE: ", parent+1)
-    p_o_ret = post_order(parent, A.shape[0], None, post_order_array, common)
-    print("P_ORDER: ", post_order_array+1)
-    rc_ret = row_col_counts(A, None, None, parent, post_order_array, row_count, col_count, common)
+    factor = cholesky(Ao)
+    L = factor.LD()
+    P = factor.P()
+    b = np.random.rand(Ao.shape[0])
+    # Solve the linear system Ax = b
+    #x = factor(b)
+    x = factor.solve_A(b)
+    print("nnz L: ", L.nnz)
+    #L = factor.L()
+    #factor = analyze(A)
+    #factor.cholesky(A)
+    #print("nz A: ", A.nnz, " nz L: ", L.nnz)
+
+    #x = factor.solve_A(b)
+    print("norm: ", np.linalg.norm(b-Ao.dot(x)))
+    # permute the matrix Ao
+    Aperm = Ao_csc[P, :][:, P]
+
+    parent = np.array(A.shape[0] * [0], dtype=np.int32)
+    common = {}
+
+    # Compute the etree
+    Aper_u = sp.triu(Aperm).tocsc()
+    etree_A = etree(Aper_u, parent, common)
+
+    parent2 = np.array(A.shape[0] * [0], dtype=np.int32)
+    etree_2 = etree(L, parent2, common)
+    snodes = detect_supernodes(L, 2)
+    print("snodes: ", snodes)
+    #plt.spy(L, markersize=1)
+    #plt.show()
+
+    # make sure parent and parent2 are the same
+    print("diffs", np.sum(parent != parent2))
+
+    # parent = np.array(A.shape[0]*[0], dtype=np.int32)
+    # common = {}
+    # post_order_array = np.array(A.shape[0]*[0], dtype=np.int32)
+    # row_count, col_count = np.array(A.shape[0]*[0], dtype=np.int32), np.array(A.shape[0]*[0], dtype=np.int32)
+    #
+    # e_ret = etree(A, parent, common)
+    # print("ETREE: ", parent+1)
+    # p_o_ret = post_order(parent, A.shape[0], None, post_order_array, common)
+    # print("P_ORDER: ", post_order_array+1)
+    # rc_ret = row_col_counts(A, None, None, parent, post_order_array, row_count, col_count, common)
 
     # etree_A = etree(Au)
     # print("ETREE: ", etree_A+1)
