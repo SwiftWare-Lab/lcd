@@ -838,8 +838,7 @@ def CHOLMOD_analyze_p2(for_whom, A, UserPerm, fset, fsize, Common):
             continue
 
         if not skip_analysis:
-            # Call to analyze_ordering function
-            pass
+            analyze_ordering(A, ordering, Perm, fset, fsize, Parent, L['Post'], Lcolcount, L['First'], L['Level'], Common)
 
         if Common['selected'] is None or Common['lnz'] < lnz_best:
             Common['selected'] = method
@@ -864,8 +863,7 @@ def CHOLMOD_analyze_p2(for_whom, A, UserPerm, fset, fsize, Common):
     Common['lnz'] = Common['method'][Common['selected']]['lnz']
 
     if skip_best:
-        # Call to analyze_ordering function
-        pass
+        analyze_ordering(A, L['ordering'], Lperm, fset, fsize, Lparent, L['Post'], Lcolcount, L['First'], L['Level'], Common)
 
     if Common['postorder']:
         # Call to postorder function
@@ -878,193 +876,85 @@ def CHOLMOD_analyze_p2(for_whom, A, UserPerm, fset, fsize, Common):
     return L
 
 
+def detect_supernodes(L, relaxation):
+    """
+    Detect supernodes in the elimination by
+    comparing column patterns to be the same approximately.
+    Parameters
+    ----------
+    etree
+    L
+    relaxation
+
+    Returns
+    -------
+
+    """
+    n = L.shape[0]
+    supernodes, cur_sn = [], []
+    for i in range(n-1):
+        col_i_p = L.indices[L.indptr[i]:L.indptr[i+1]]
+        col_ipone_p = L.indices[L.indptr[i+1]:L.indptr[i+2]]
+        # union of two sets
+        union = set(col_i_p).union(set(col_ipone_p))
+        intersect = set(col_i_p).intersection(set(col_ipone_p))
+        # if len(union) < len(col_i_p) + len(col_ipone_p) - 1 - relaxation:
+        if len(union) - len(intersect) <= relaxation + 1:
+            cur_sn.append(i)
+        else:
+            if len(cur_sn) > 0:
+                cur_sn.append(i)
+                supernodes.append(cur_sn)
+                cur_sn = []
+            else:
+                supernodes.append([i])
+    if len(cur_sn) > 0:
+        cur_sn.append(n-1)
+        supernodes.append(cur_sn)
+    else:
+        supernodes.append([n-1])
+    assert len(set([item for sublist in supernodes for item in sublist])) == n
+    return supernodes
+
+
+def convert_csc_to_supernodal(L, relaxation):
+    Ls = {}
+    n = L.shape[0]
+    supernodes = detect_supernodes(L, relaxation)
+    row_patterns, Li, Lip, Lp = [], [], [], []
+    Lip.append(0)
+    Lp.append(0)
+    for sn in supernodes:
+        rp_union = set()
+        for i in sn:
+            rp_union = rp_union.union(set(L.indices[L.indptr[i]:L.indptr[i+1]]))
+            Lp.append(Lp[-1] + L.indptr[i+1] - L.indptr[i])
+        row_patterns.append(rp_union)
+        Li.extend(list(rp_union))
+        Lip.append(len(Li))
+    # find the begining of each supernode
+    super_begin = np.array(len(supernodes)+1, dtype=int)
+    for i, sn in enumerate(supernodes):
+        super_begin[i] = sn[0]
+    super_begin[-1] = n
+    lnnz = Lp[-1]
+    data = np.zeros(lnnz, dtype=L.data.dtype)
+    for i in range(len(supernodes)):
+        for j in range(super_begin[i], super_begin[i+1]):
+            for k in range(L.indptr[j], L.indptr[j+1]):
+                row_idx= L.indices[k]
+                for m in range(Lip[i], Lip[i+1]):
+                    if row_idx == Li[m]:
+                        offset = m - Lip[i]
+                        data[Lp[j] + offset] = L.data[k]
+
+    Ls['data'] = data
+    Ls['indices'] = Li
+    Ls['indices_ptr'] = Lip
+    Ls['indptr'] = Lp
+    Ls['supernodes'] = super_begin
+    return Ls
 
 
 
-
-
-
-# def etree(A):
-#     n = A.shape[0]
-#     parent = np.full(n, -1, dtype=int)
-#     ancestor = np.full(n, -1, dtype=int)
-#     for k in range(n):
-#         for i in range(A.indptr[k], A.indptr[k+1]):
-#             j = A.indices[i]
-#             while j != -1 and j < k:
-#                 next_j = ancestor[j]
-#                 ancestor[j] = k
-#                 if next_j == -1:
-#                     parent[j] = k
-#                 j = next_j
-#     return parent
-#
-#
-# def cs_leaf(i, j, first, maxfirst, prevleaf, ancestor):
-#     """
-#     Consider A(i,j), node j in ith row subtree and return lca(jprev,j)
-#     """
-#     if first is None or maxfirst is None or prevleaf is None or ancestor is None:
-#         return -1, 0
-#
-#     jleaf = 0
-#     if i <= j or first[j] <= maxfirst[i]:
-#         return -1, jleaf  # j not a leaf
-#
-#     maxfirst[i] = first[j]  # update max first[j] seen so far
-#     jprev = prevleaf[i]  # jprev = previous leaf of ith subtree
-#     prevleaf[i] = j
-#     jleaf = 1 if jprev == -1 else 2  # j is first or subsequent leaf
-#
-#     if jleaf == 1:
-#         return i, jleaf  # if 1st leaf, q = root of ith subtree
-#
-#     q = jprev
-#     while q != ancestor[q]:
-#         q = ancestor[q]
-#
-#     s = jprev
-#     while s != q:
-#         sparent = ancestor[s]  # path compression
-#         ancestor[s] = q
-#         s = sparent
-#
-#     return q, jleaf  # q = least common ancestor (jprev, j)
-#
-#
-# def dfs_post_tree(j, k, head, next, post, stack):
-#     """
-#     Depth-first search from node j in etree with postordering
-#     """
-#     """
-#     Depth-first search from node j in etree with postordering
-#     """
-#     top = 0
-#     if head is None or next is None or post is None or stack is None:
-#         return -1  # check inputs
-#     stack[0] = j  # place j on the stack
-#     while top >= 0:  # while stack is not empty
-#         p = stack[top]  # p = top of stack
-#         i = head[p]  # i = youngest child of p
-#         if i == -1:
-#             top -= 1  # p has no unordered children left
-#             post[k] = p  # node p is the kth postordered node
-#             k += 1
-#         else:
-#             head[p] = next[i]  # remove i from children of p
-#             top += 1
-#             stack[top] = i  # start dfs on child node i
-#     return k
-#
-#
-# def post_order(parent):
-#     n = len(parent)
-#     post = np.full(n, -1, dtype=int)
-#     stack = np.zeros(n, dtype=int)
-#     k = 0
-#     head = np.full(n, -1, dtype=int)
-#     next = np.full(n, -1, dtype=int)
-#
-#     for j in range(n-1, -1, -1):
-#         if parent[j] == -1:
-#             continue
-#         next[j] = head[parent[j]]
-#         head[parent[j]] = j
-#     for j in range(n):
-#         if parent[j] != -1:
-#             continue  # skip j if it is not a root
-#         k = dfs_post_tree(j, k, head, next, post, stack)
-#
-#     return post
-#
-#
-# def column_count(A, parent, post, ata=False):
-#     n = A.shape[0]
-#     col_count = np.zeros(n, dtype=int)
-#     delta = np.zeros(n, dtype=int)
-#     first = np.full(n, -1, dtype=int)
-#     ancestor = np.arange(n, dtype=int)
-#     maxfirst = np.full(n, -1, dtype=int)
-#     prevleaf = np.full(n, -1, dtype=int)
-#     head = np.full(n, -1, dtype=int) if ata else None
-#     next = np.full(n, -1, dtype=int) if ata else None
-#     AT = A #.T.tocsc()
-#     for k in range(n):
-#         j = post[k]
-#         delta[j] = 1 if first[j] == -1 else 0
-#         while j != -1 and first[j] == -1:
-#             first[j] = k
-#             j = parent[j]
-#
-#     if ata:
-#         for i in range(A.shape[1]):
-#             k = n
-#             for p in range(A.indptr[i], A.indptr[i + 1]):
-#                 k = min(k, post[A.indices[p]])
-#             next[i] = head[k]
-#             head[k] = i
-#
-#     for k in range(n):
-#         j = post[k]
-#         if parent[j] != -1:
-#             delta[parent[j]] -= 1
-#         J = head[k] if ata else j
-#         while J != -1:
-#             for p in range(AT.indptr[J], AT.indptr[J + 1]):
-#                 i = AT.indices[p]
-#                 q, jleaf = cs_leaf(i, j, first, maxfirst, prevleaf,
-#                                    ancestor)
-#                 if jleaf >= 1:
-#                     delta[j] += 1
-#                 if jleaf == 2:
-#                     delta[q] -= 1
-#             J = next[J] if ata else -1
-#         if parent[j] != -1:
-#             ancestor[j] = parent[j]
-#
-#     for j in range(n):
-#         col_count[j] = delta[j]
-#         if parent[j] != -1:
-#             col_count[parent[j]] += col_count[j]
-#
-#     return col_count
-#
-#
-# def row_pattern(A, parent):
-#     n = A.shape[0]
-#     row_pattern = [set() for _ in range(n)]
-#     for j in range(n):
-#         row_pattern[j].add(j)
-#         for i in range(A.indptr[j], A.indptr[j+1]):
-#             k = A.indices[i]
-#             while k != -1 and k < j:
-#                 row_pattern[j].add(k)
-#                 k = parent[k]
-#     return row_pattern
-#
-#
-# def compute_supernodes(A, parent, col_count):
-#     n = A.shape[0]
-#     visited = np.zeros(n, dtype=bool)
-#     supernodes = []
-#     for j in range(n):
-#         if visited[j]:
-#             continue
-#         supernode = [j]
-#         visited[j] = True
-#         k = parent[j]
-#         while k != -1 and not visited[k]:
-#             supernode.append(k)
-#             visited[k] = True
-#             k = parent[k]
-#         supernodes.append(supernode)
-#     return supernodes
-#
-#
-#
-# def symbolic_cholesky(A):
-#     parent = etree(A)
-#     col_count = column_count(A, parent)
-#     ro_pattern = row_pattern(A, parent)
-#     return parent, col_count, ro_pattern
 
