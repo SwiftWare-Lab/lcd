@@ -1,5 +1,31 @@
 import sympy
 from sympy import And, Eq, Symbol, GreaterThan, LessThan, Function, Gt
+
+class Schedule:
+
+    def __init__(self, schedule):
+        self.schedule = schedule
+
+    def occurs_in(self, iter_var: str) -> bool:
+        return iter_var in self.schedule
+
+    def __str__(self):
+        return '(' + ', '.join(self.schedule) + ')'
+
+    def __repr__(self):
+        return str(self)
+
+    def __hash__(self):
+        return hash(str(self))
+
+    def __eq__(self, other):
+        return hash(self) == hash(other)
+
+    def __copy__(self):
+        new_sched = [s for s in self.schedule]
+        return Schedule(new_sched)
+
+
 class Access:
     def __init__(self, var, index):
         self.var = var
@@ -61,3 +87,37 @@ class Expression:
 
     def get_sympy_expr(self):
         return sympy.parse_expr(str(self).replace(".", "").replace('[', '(').replace(']', ')'))
+
+
+class DataDependence:
+    def __init__(self, from_si, to_si, data, from_ind, to_ind, type):
+        self.from_si = from_si
+        self.to_si = to_si
+        self.data = data
+        self.from_ind = from_ind
+        self.to_ind = to_ind
+        self.type = type
+        assert len(from_ind) == len(to_ind)
+
+    def has_condition(self, i1, i2):
+        for i in range(len(self.from_ind)):
+            if (self.from_ind[i] == i1 and self.to_ind[i] == i2) or (self.from_ind[i] == i2 and self.to_ind[i] == i1):
+                return True
+        return False
+
+    def get_condition_statement_sympy(self):
+        condition = sympy.true
+        for i in range(len(self.from_ind)):
+            from_sym = Symbol(str(self.from_ind[i]).replace(".", ""))
+            to_sym = Symbol(str(self.to_ind[i]).replace(".", ""))
+            condition = And(Eq(from_sym, to_sym), condition)
+        return condition
+
+    def __repr__(self):
+        conditions = []
+        for i in range(len(self.from_ind)):
+            conditions.append('{} == {}'.format(self.from_ind[i], self.to_ind[i]))
+        condition = ' and '.join(conditions)
+        return str(self.from_si) + '->' + str(
+            self.to_si) + '\ndata: `' + self.data.__repr__() + '`\ncondition: ' + condition
+

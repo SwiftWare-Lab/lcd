@@ -9,7 +9,8 @@ from numba.core.untyped_passes import IRProcessing, FixupArgs, TranslateByteCode
 import numpy as np
 import numba
 from numba.core.analysis import compute_live_map, compute_dead_maps, compute_live_variables
-from compiler.analysis import extract_data_value, extract_read_write_accesses
+from compiler.analysis import (extract_data_value, extract_read_write_accesses, extract_data_dependences,
+                               create_statement_schedule, find_all_loop_bodies)
 
 config.DEBUG_ARRAY_OPT = 3
 
@@ -55,8 +56,13 @@ class LoopFusion1(FunctionPass):
         print("Live Map:", raw_dependencies)
 
         # This is like use_defs from numba but with symbolised values
-        accesses = extract_read_write_accesses(blocks, data_values)
+
+        loop_bodies, lp_pars = find_all_loop_bodies(cfg)
+        accesses, stmnt_labels = extract_read_write_accesses(blocks, data_values, loop_bodies, lp_pars)
         print("Symbolic Accesses: ", accesses)
+        schedule = create_statement_schedule(blocks, cfg, stmnt_labels, loop_bodies, lp_pars)
+        dependences = extract_data_dependences(accesses['reads'], accesses['writes'], schedule)
+        print(dependences)
 
         # dot.render("cfg_diagram", view=True)
 
