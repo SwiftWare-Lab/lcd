@@ -917,6 +917,32 @@ def detect_supernodes(L, relaxation):
     return supernodes
 
 
+def convert_supernodal_to_csc(Ls):
+    Lx = Ls['data']
+    Lp = Ls['indptr']
+    Li = Ls['indices']
+    Lip = Ls['indices_ptr']
+    n = Ls['rows']
+    col_to_super = Ls['col_to_super']
+    nnz_l = np.sum(Lx != 0)
+    new_x = np.zeros(nnz_l, dtype=Lx.dtype)
+    new_i = np.zeros(nnz_l, dtype=int)
+    new_p = np.zeros(n+1, dtype=int)
+    new_p[0] = 0
+    for i in range(n):
+        col_cnt = new_p[i]
+        super, cnt = col_to_super[i], 0
+        for j in range(Lp[i], Lp[i+1]):
+            row_id = Li[Lip[super] + cnt]
+            cnt+=1
+            if Lx[j] != 0:
+                new_x[col_cnt] = Lx[j]
+                new_i[col_cnt] = row_id
+                col_cnt += 1
+        new_p[i+1] = col_cnt
+    return {'data': new_x, 'indices': new_i, 'indptr': new_p, 'rows': n, 'cols': n}
+
+
 def convert_csc_to_supernodal(L, relaxation=0):
     Ls = {}
     n = L.shape[0]
@@ -938,6 +964,10 @@ def convert_csc_to_supernodal(L, relaxation=0):
     for i, sn in enumerate(supernodes):
         super_begin[i] = sn[0]
     super_begin[-1] = n
+    col_to_super = np.zeros(n, dtype=int)
+    for i, sn in enumerate(supernodes):
+        for j in sn:
+            col_to_super[j] = i
     lnnz = Lp[-1]
     data = np.zeros(lnnz, dtype=L.data.dtype)
     for i in range(len(supernodes)):
@@ -954,7 +984,14 @@ def convert_csc_to_supernodal(L, relaxation=0):
     Ls['indices_ptr'] = np.array(Lip)
     Ls['indptr'] = np.array(Lp)
     Ls['supernodes'] = np.array(super_begin)
+    Ls['col_to_super'] = col_to_super
+    Ls['rows'] = n
+    Ls['cols'] = n
+    if True:
+        L_test = convert_supernodal_to_csc(Ls)
+        assert np.all(L_test['data'] == L.data)
     return Ls
+
 
 
 
