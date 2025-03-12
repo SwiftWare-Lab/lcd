@@ -476,3 +476,60 @@ def subscript_dependence(dependence):
     dependence.to_si = new_to_sched
     dependence.from_ind = tuple(new_from_ind)
     dependence.to_ind = tuple(new_to_ind)
+
+def convert_get_item_to_access(statement, data_values):
+    if not statement.value.name.startswith("$"):
+        arr = statement.value.name
+    else:
+        # Works when we have multidimensional array
+        arr_p = []
+        translate_read_access_expressions(data_values, statement.value, arr_p)
+        arr = arr_p[0]
+    # arr = statement.value
+    untranslated_index = statement.index
+    vars = []
+    symbolize_index(data_values, untranslated_index, vars)
+    if len(vars) == 1:  # TODO: For now I assume that accesses are either access arrays or affine functions of loop bounds
+        ind_var = vars[0]
+        return Access(arr, ind_var)
+    elif len(vars) > 1:
+        return Access(arr, Expression(vars))
+
+def symbolize_index(data_value, var, symbols_list):
+    # print(data_value)
+    if isinstance(var, ir.Expr) and var.op == 'getitem':
+        symbols_list.append(convert_get_item_to_access(var, data_value))
+    elif isinstance(var, ir.Expr) and (var.op == 'binop' or var.op == 'inplace_binop'):
+        symbolize_index(data_value, var.lhs, symbols_list)
+        symbols_list.append(symbolize_operator(var.fn))
+        symbolize_index(data_value, var.rhs, symbols_list)
+    elif isinstance(var, ir.Assign):
+        symbolize_index(data_value, var.value, symbols_list)
+    elif isinstance(var, ir.Var):
+        if not var.name.startswith('$'):
+            symbols_list.append(var.name)
+        elif var.name in data_value:
+            symbolize_index(data_value, data_value[var.name], symbols_list)
+    elif isinstance(var, ir.Const):
+        symbols_list.append(var.value)
+
+def symbolize_operator(fn):
+    operator_to_string = {
+        operator.add: '+',
+        operator.sub: '-',
+        operator.mul: '*',
+        operator.truediv: '/',
+        operator.floordiv: '//',
+        operator.mod: '%',
+        operator.pow: '**',
+        operator.and_: '&',
+        operator.or_: '|',
+        operator.xor: '^',
+        operator.eq: '==',
+        operator.ne: '!=',
+        operator.lt: '<',
+        operator.le: '<=',
+        operator.gt: '>',
+        operator.ge: '>='
+    }
+    return operator_to_string[fn]

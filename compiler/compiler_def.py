@@ -43,12 +43,10 @@ class Access:
     def __eq__(self, other):
         # if type(self.index) is type(other.index) or type(self.var) is type(other.var):
         #     return False
-        if isinstance(other, Access):
-            if type(self.index) is list and type(other.index) is list:
-                self.index.sort()
-                other.index.sort()
-            return self.var == other.var and self.index == other.index
-        return False
+        if type(self.index) is list and type(other.index) is list:
+            self.index.sort()
+            other.index.sort()
+        return self.var == other.var and self.index == other.index
 
     def __str__(self):
         return f"{self.var}[{self.index}]" if self.index is not None else self.var
