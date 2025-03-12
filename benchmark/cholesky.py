@@ -13,8 +13,8 @@ from sptrsv_supernodal import sptrv_csc_supernodal
 
 mtx_list = [
     #"/Users/kazem/UFDB/LFAT5/LFAT5.mtx",
-    "/home/kazem/Downloads/LFAT5/LFAT5.mtx",
-    "/home/kazem/Downloads/ex5/ex5.mtx",
+    #"/home/kazem/Downloads/LFAT5/LFAT5.mtx",
+    #"/home/kazem/Downloads/ex5/ex5.mtx",
     "/home/kazem/Downloads/mesh1e1/mesh1e1.mtx","/home/kazem/Downloads/nos4/nos4.mtx",
     "/home/kazem/Downloads/bcsstk03/bcsstk03.mtx",
     "/home/kazem/UFDB/Trefethen_20000b/Trefethen_20000b.mtx",
@@ -34,7 +34,7 @@ for mtx in mtx_list:
     factor = cholesky(Ao)
     L = factor.LD()
     P = factor.P()
-    b = np.random.rand(Ao.shape[0])
+    b = L.dot(np.ones(L.shape[0]))  #np.random.rand(Ao.shape[0])
     # Solve the linear system Ax = b
     #x = factor(b)
     x = factor.solve_A(b)
@@ -56,9 +56,9 @@ for mtx in mtx_list:
 
     x_sup_csc = sptrv_csc_supernodal(Ls, b)
 
-    x_csc = L.solve(b)
+    #x_csc = L.solve(b)
 
-    print("norm: ", np.linalg.norm(x_sup_csc-x_csc))
+    print("norm: ", np.linalg.norm(x_sup_csc-np.ones(L.shape[0])))
 
     #plt.spy(Ls, markersize=1)
     #plt.show()
