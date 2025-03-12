@@ -96,6 +96,7 @@ class LoopFusion1(FunctionPass):
         return mutate  # the pass has not mutated the IR
 
 
+
 class MyCompiler(CompilerBase):  # custom compiler extends from CompilerBase
 
     def define_pipelines(self):
