@@ -26,19 +26,18 @@ def lsolve_dense_col_order(ldm, col, M, rhs):
             rhs[j] -= tmp
 
 
-def dense_matvec_col_order(A, x):
+def dense_matvec_col_order(ldm, row, col, M, x):
     """
-    Perform dense matrix-vector multiplication in column order.
+    Compute a dense matrix-vector product in column order with synchronization.
 
     Parameters:
-    A (numpy.ndarray): The dense matrix.
-    x (numpy.ndarray): The vector to be multiplied.
-
-    Returns:
-    numpy.ndarray: The result of the matrix-vector multiplication.
+    ldm (int): offset to the next col.
+    col (int): Number of columns.
+    M (numpy.ndarray): The matrix M.
+    x (numpy.ndarray): The vector x.
     """
-    n = A.shape[1]
-    result = np.zeros_like(x)
-    for j in range(n):
-        result += A[:, j] * x[j]
-    return result
+    y = np.zeros(row)
+    for i in range(col):
+        for j in range(row):
+            y[j] += M[i * ldm + j] * x[i]
+    return y

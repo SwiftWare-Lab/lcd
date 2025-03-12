@@ -917,7 +917,7 @@ def detect_supernodes(L, relaxation):
     return supernodes
 
 
-def convert_csc_to_supernodal(L, relaxation):
+def convert_csc_to_supernodal(L, relaxation=0):
     Ls = {}
     n = L.shape[0]
     supernodes = detect_supernodes(L, relaxation)
@@ -928,12 +928,13 @@ def convert_csc_to_supernodal(L, relaxation):
         rp_union = set()
         for i in sn:
             rp_union = rp_union.union(set(L.indices[L.indptr[i]:L.indptr[i+1]]))
-            Lp.append(Lp[-1] + L.indptr[i+1] - L.indptr[i])
+        for i in sn:
+            Lp.append(Lp[-1] + len(rp_union))
         row_patterns.append(rp_union)
         Li.extend(list(rp_union))
         Lip.append(len(Li))
     # find the begining of each supernode
-    super_begin = np.array(len(supernodes)+1, dtype=int)
+    super_begin = np.array((len(supernodes)+1) * [0], dtype=int)
     for i, sn in enumerate(supernodes):
         super_begin[i] = sn[0]
     super_begin[-1] = n
@@ -949,10 +950,10 @@ def convert_csc_to_supernodal(L, relaxation):
                         data[Lp[j] + offset] = L.data[k]
 
     Ls['data'] = data
-    Ls['indices'] = Li
-    Ls['indices_ptr'] = Lip
-    Ls['indptr'] = Lp
-    Ls['supernodes'] = super_begin
+    Ls['indices'] = np.array(Li)
+    Ls['indices_ptr'] = np.array(Lip)
+    Ls['indptr'] = np.array(Lp)
+    Ls['supernodes'] = np.array(super_begin)
     return Ls
 
 
