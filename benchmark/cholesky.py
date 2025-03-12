@@ -8,7 +8,8 @@ from sympy import factor
 #from sksparse.cholmod import cholesky, analyze, Factor
 
 from utils.symbolic_cholesky_csc import etree, post_order, row_col_counts, \
-    detect_supernodes
+    detect_supernodes, convert_csc_to_supernodal
+from sptrsv_supernodal import sptrv_csc_supernodal
 
 mtx_list = [
     #"/Users/kazem/UFDB/LFAT5/LFAT5.mtx",
@@ -51,19 +52,30 @@ for mtx in mtx_list:
     parent = np.array(A.shape[0] * [0], dtype=np.int32)
     common = {}
 
-    # Compute the etree
-    Aper_u = sp.triu(Aperm).tocsc()
-    etree_A = etree(Aper_u, parent, common)
+    Ls = convert_csc_to_supernodal(L)
 
-    parent2 = np.array(A.shape[0] * [0], dtype=np.int32)
-    etree_2 = etree(L, parent2, common)
-    snodes = detect_supernodes(L, 2)
-    print("snodes: ", snodes)
+    x_sup_csc = sptrv_csc_supernodal(Ls, b)
+
+    x_csc = L.solve(b)
+
+    print("norm: ", np.linalg.norm(x_sup_csc-x_csc))
+
+    #plt.spy(Ls, markersize=1)
+    #plt.show()
+
+    # Compute the etree
+    # Aper_u = sp.triu(Aperm).tocsc()
+    # etree_A = etree(Aper_u, parent, common)
+    #
+    # parent2 = np.array(A.shape[0] * [0], dtype=np.int32)
+    # etree_2 = etree(L, parent2, common)
+    # snodes = detect_supernodes(L, 2)
+    # print("snodes: ", snodes)
     #plt.spy(L, markersize=1)
     #plt.show()
 
     # make sure parent and parent2 are the same
-    print("diffs", np.sum(parent != parent2))
+    #print("diffs", np.sum(parent != parent2))
 
     # parent = np.array(A.shape[0]*[0], dtype=np.int32)
     # common = {}
