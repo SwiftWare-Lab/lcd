@@ -9,7 +9,7 @@ from numba.core.untyped_passes import IRProcessing, FixupArgs, TranslateByteCode
 import numpy as np
 import numba
 from numba.core.analysis import compute_live_map, compute_dead_maps, compute_live_variables
-
+from compiler.analysis import extract_data_value, extract_read_write_accesses
 
 config.DEBUG_ARRAY_OPT = 3
 
@@ -38,6 +38,7 @@ class LoopFusion1(FunctionPass):
         graphiz_digraph.format = "pdf"
         #graphiz_digraph.view()
         cfg.dump()
+        data_values, data_blocks = extract_data_value(blocks)
 
         live_map = compute_live_map(cfg, func_ir.blocks, use_defs.usemap, use_defs.defmap)
         dead_map = compute_dead_maps(cfg, func_ir.blocks, live_map, use_defs.defmap)
@@ -53,8 +54,9 @@ class LoopFusion1(FunctionPass):
 
         print("Live Map:", raw_dependencies)
 
-
-
+        # This is like use_defs from numba but with symbolised values
+        accesses = extract_read_write_accesses(blocks, data_values)
+        print("Symbolic Accesses: ", accesses)
 
         # dot.render("cfg_diagram", view=True)
 
