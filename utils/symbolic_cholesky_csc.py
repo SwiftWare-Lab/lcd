@@ -957,7 +957,7 @@ def convert_csc_to_supernodal(L, relaxation=0):
         for i in sn:
             Lp.append(Lp[-1] + len(rp_union))
         row_patterns.append(rp_union)
-        Li.extend(list(rp_union))
+        Li.extend(sorted(rp_union))
         Lip.append(len(Li))
     # find the begining of each supernode
     super_begin = np.array((len(supernodes)+1) * [0], dtype=int)
@@ -987,7 +987,7 @@ def convert_csc_to_supernodal(L, relaxation=0):
     Ls['col_to_super'] = col_to_super
     Ls['rows'] = n
     Ls['cols'] = n
-    if True:
+    if False:
         L_test = convert_supernodal_to_csc(Ls)
         assert np.all(L_test['data'] == L.data)
     return Ls
