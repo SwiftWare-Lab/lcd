@@ -1,13 +1,8 @@
 from utils.dense_blas import lsolve_dense_col_order, dense_matvec_col_order
 
 
-def sptrv_csc_supernodal(L, b):
+def sptrv_csc_supernodal(sn_begin, Lip, Li, Lp, Lx, b):
     x = b.copy()
-    sn_begin = L['supernodes']
-    Lip = L['indices_ptr']
-    Lp = L['indptr']
-    Lx = L['data']
-    Li = L['indices']
     for i in range(len(sn_begin)-1):
         col_b = sn_begin[i]
         col_e = sn_begin[i+1]

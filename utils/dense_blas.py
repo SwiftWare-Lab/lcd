@@ -9,6 +9,13 @@ def lsolve(L, x, b):
         x[i] = (b[i] - L[i, :i] @ x[:i]) / L[i, i]
     return x
 
+import triton
+import triton.language as tl
+import numpy as np
+
+
+
+
 def lsolve_dense_col_order(ldm, col, M, rhs):
     """
     Solve a dense lower triangular system in column order with synchronization.
@@ -41,3 +48,18 @@ def dense_matvec_col_order(ldm, row, col, M, x):
         for j in range(row):
             y[j] += M[i * ldm + j] * x[i]
     return y
+
+
+@triton.jit
+def dense_matvec_col_order_kernel(M, x, y, ldm, row, col, BLOCK_SIZE: tl.constexpr):
+    pid = tl.program_id(0)
+    block_start = pid * BLOCK_SIZE
+    offsets = block_start + tl.arange(0, BLOCK_SIZE)
+    mask = offsets < row
+
+    y_block = tl.zeros([BLOCK_SIZE], dtype=tl.float32)
+    for i in range(col):
+        M_block = tl.load(M + i * ldm + offsets, mask=mask)
+        x_val = tl.load(x + i)
+        y_block += M_block * x_val
+    tl.store(y + offsets, y_block, mask=mask)
