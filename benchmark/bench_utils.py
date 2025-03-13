@@ -2,7 +2,7 @@ import numpy as np
 import scipy.io as sio
 import os
 
-# compute wavefronts of sparse matrix L
+# compute wavefronts of sparse matrix L (CSC)
 def compute_wavefront(L):
     wavefront_list = []
     incoming_edges = np.zeros(L.shape[0], dtype=int)

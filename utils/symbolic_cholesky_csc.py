@@ -1,5 +1,9 @@
+import time
+
 import numpy as np
 import scipy.sparse as sp
+import scipy
+from benchmark.bench_utils import compact_2d_list
 
 EMPTY = -1
 
@@ -946,7 +950,11 @@ def convert_supernodal_to_csc(Ls):
 def convert_csc_to_supernodal(L, relaxation=0):
     Ls = {}
     n = L.shape[0]
+    t = {}
+    t['step 1'] = time.time()
     supernodes = detect_supernodes(L, relaxation)
+    t['step 1'] = time.time() - t['step 1']
+    t['step 2'] = time.time()
     row_patterns, Li, Lip, Lp = [], [], [], []
     Lip.append(0)
     Lp.append(0)
@@ -959,6 +967,8 @@ def convert_csc_to_supernodal(L, relaxation=0):
         row_patterns.append(rp_union)
         Li.extend(sorted(rp_union))
         Lip.append(len(Li))
+    t['step 2'] = time.time() - t['step 2']
+    t['step 3'] = time.time()
     # find the begining of each supernode
     super_begin = np.array((len(supernodes)+1) * [0], dtype=int)
     for i, sn in enumerate(supernodes):
@@ -970,27 +980,74 @@ def convert_csc_to_supernodal(L, relaxation=0):
             col_to_super[j] = i
     lnnz = Lp[-1]
     data = np.zeros(lnnz, dtype=L.data.dtype)
+    lookup_table = np.zeros(n, dtype=int)
     for i in range(len(supernodes)):
+        for m in range(Lip[i], Lip[i + 1]):
+            lookup_table[Li[m]] = m - Lip[i]
         for j in range(super_begin[i], super_begin[i+1]):
             for k in range(L.indptr[j], L.indptr[j+1]):
                 row_idx= L.indices[k]
-                for m in range(Lip[i], Lip[i+1]):
-                    if row_idx == Li[m]:
-                        offset = m - Lip[i]
-                        data[Lp[j] + offset] = L.data[k]
+                data[Lp[j] + lookup_table[row_idx]] = L.data[k]
 
-    Ls['data'] = data
-    Ls['indices'] = np.array(Li)
-    Ls['indices_ptr'] = np.array(Lip)
-    Ls['indptr'] = np.array(Lp)
+
+                # for m in range(Lip[i], Lip[i + 1]):
+                #     lookup_table[Li[m]] = m - Lip[i]
+                # for m in range(Lip[i], Lip[i + 1]):
+                #     if row_idx == Li[m]:
+                #         data[Lp[j] + lookup_table[row_idx]] = L.data[k]
+
+
+                # for m in range(Lip[i], Lip[i+1]):
+                #     if row_idx == Li[m]:
+                #         offset = m - Lip[i]
+                #         data[Lp[j] + offset] = L.data[k]
+
+    t['step 3'] = time.time() - t['step 3']
+    print(t)
+    Ls['x'] = data
+    Ls['i'] = np.array(Li) # atual row indices
+    Ls['ip'] = np.array(Lip) # row pointer for each supernode
+    Ls['p'] = np.array(Lp) # column pointer for each column
     Ls['supernodes'] = np.array(super_begin)
     Ls['col_to_super'] = col_to_super
     Ls['rows'] = n
     Ls['cols'] = n
+    Ls['nSuper'] = len(supernodes)
     if False:
         L_test = convert_supernodal_to_csc(Ls)
         assert np.all(L_test['data'] == L.data)
     return Ls
+
+
+def get_supernodal_dag(Ls):
+    sup_begin = Ls['supernodes']
+    col_to_super = Ls['col_to_super']
+    Lip, Li, Lp = Ls['ip'], Ls['i'], Ls['p']
+    m = Ls['nSuper']
+    nnz = 0
+    DAG = []
+    for i in range(m):
+        DAG.append([])
+        for k in range(Lip[i], Lip[i+1]):
+            row_idx = Li[k]
+            dest_sup = col_to_super[row_idx]
+            if dest_sup not in DAG[i]:
+                DAG[i].append(dest_sup)
+            nnz += 1
+        # sort DAG[i]
+        DAG[i] = sorted(DAG[i])
+    # convert DAG to CSC
+    Dp = np.zeros(m + 1, dtype=int)
+    Di = np.zeros(nnz, dtype=int)
+    for i in range(0, m):
+        Dp[i+1] = Dp[i] + len(DAG[i])
+    for i in range(0, m):
+        Di[Dp[i]:Dp[i+1]] = DAG[i]
+    # convert it scipy csc
+    L_d = sp.csc_matrix((np.ones(nnz), Di, Dp), shape=(m, m))
+    return L_d
+
+
 
 
 
