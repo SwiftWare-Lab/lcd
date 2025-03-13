@@ -54,11 +54,11 @@ for mtx in mtx_list:
 
     Ls = convert_csc_to_supernodal(L)
 
-    x_sup_csc = sptrv_csc_supernodal(L['supernodes'],
-                                     L['indices_ptr'],
-                                     L['indptr'],
-                                     L['data'],
-                                     L['indices'], b)
+    x_sup_csc = sptrv_csc_supernodal(Ls['supernodes'],
+                                     Ls['ip'],
+                                     Ls['p'],
+                                     Ls['x'],
+                                     Ls['i'], b)
 
     #x_csc = L.solve(b)
 
