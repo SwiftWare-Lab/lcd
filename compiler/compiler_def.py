@@ -43,10 +43,12 @@ class Access:
     def __eq__(self, other):
         # if type(self.index) is type(other.index) or type(self.var) is type(other.var):
         #     return False
-        if type(self.index) is list and type(other.index) is list:
-            self.index.sort()
-            other.index.sort()
-        return self.var == other.var and self.index == other.index
+        if isinstance(other, Access):
+            if type(self.index) is list and type(other.index) is list:
+                self.index.sort()
+                other.index.sort()
+            return self.var == other.var and self.index == other.index
+        return False
 
     def __str__(self):
         return f"{self.var}[{self.index}]" if self.index is not None else self.var
@@ -100,9 +102,11 @@ class DataDependence:
         assert len(from_ind) == len(to_ind)
 
     def has_condition(self, i1, i2):
+
         for i in range(len(self.from_ind)):
-            if (self.from_ind[i] == i1 and self.to_ind[i] == i2) or (self.from_ind[i] == i2 and self.to_ind[i] == i1):
-                return True
+            if not isinstance(self.from_ind[i], Access) and not isinstance(self.to_ind[i], Access):
+                if (self.from_ind[i] == i1 and self.to_ind[i] == i2) or (self.from_ind[i] == i2 and self.to_ind[i] == i1):
+                    return True
         return False
 
     def get_condition_statement_sympy(self):
@@ -119,5 +123,5 @@ class DataDependence:
             conditions.append('{} == {}'.format(self.from_ind[i], self.to_ind[i]))
         condition = ' and '.join(conditions)
         return str(self.from_si) + '->' + str(
-            self.to_si) + '\ndata: `' + self.data.__repr__() + '`\ncondition: ' + condition
+            self.to_si) + '\ndata: `' + self.data.__repr__() + '`\ncondition: ' + condition + '\ntype: ' + self.type
 

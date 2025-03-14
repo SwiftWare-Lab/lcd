@@ -9,8 +9,8 @@ from numba.core.untyped_passes import IRProcessing, FixupArgs, TranslateByteCode
 import numpy as np
 import numba
 from numba.core.analysis import compute_live_map, compute_dead_maps, compute_live_variables
-from compiler.analysis import (extract_data_value, extract_read_write_accesses, extract_data_dependences,
-                               create_statement_schedule, find_all_loop_bodies)
+from compiler.analysis import (extract_data_value, extract_read_write_accesses, extract_raw_data_dependences,
+                               create_statement_schedule, find_all_loop_bodies, refine_dependences)
 
 config.DEBUG_ARRAY_OPT = 3
 
@@ -61,8 +61,14 @@ class LoopFusion1(FunctionPass):
         accesses, stmnt_labels = extract_read_write_accesses(blocks, data_values, loop_bodies, lp_pars)
         print("Symbolic Accesses: ", accesses)
         schedule = create_statement_schedule(blocks, cfg, stmnt_labels, loop_bodies, lp_pars)
-        dependences = extract_data_dependences(accesses['reads'], accesses['writes'], schedule)
-        print(dependences)
+        raw_dependencies = extract_raw_data_dependences(accesses['reads'], accesses['writes'], schedule)
+        dependencies, ex_cons = refine_dependences(raw_dependencies)
+
+        for i, dependence in enumerate(dependencies):
+            print(dependence)
+            print(ex_cons[i])
+            print("-----------------")
+
 
         # dot.render("cfg_diagram", view=True)
 

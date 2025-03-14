@@ -2,6 +2,7 @@ from numba.core import ir
 from compiler.compiler_def import *
 import operator
 from copy import deepcopy
+from sympy import Symbol, Eq, GreaterThan, Lt, And, Or, Not
 
 def extract_data_value(blocks):
     data_values = {}
@@ -19,7 +20,7 @@ def extract_data_value(blocks):
 def extract_read_write_accesses(blocks,data_values, loop_bodies, lp_pars):
     reads = {}
     writes = {}
-    accesses = {'reads':reads, 'writes': writes}
+    accesses = {'reads': reads, 'writes': writes}
     stmnts_label = {}
     s_counter = 0
     loop_header_bodies = extract_loop_header_body_map(loop_bodies, lp_pars)
@@ -250,7 +251,7 @@ def create_spf_tree(lp_pars, lp_headers):
 
 
 # TODO: Fix this function to extract all the dependences
-def extract_data_dependences(reads, writes, schedule):
+def extract_raw_data_dependences(reads, writes, schedule):
     sched_writes = {}
     sched_reads = {}
     dependences = []
@@ -269,7 +270,78 @@ def extract_data_dependences(reads, writes, schedule):
                 w_arr = w_access.get_data_array()
                 r_index = r_access.get_index()
                 w_index = w_access.get_index()
-                if r_arr == w_arr and ri != wi:
-                    dependence = DataDependence(wi, ri, r_arr, w_index, r_index,'flow')
-                    dependences.append(dependence)
+                if r_arr == w_arr:
+                    raw_dependence = DataDependence(wi, ri, r_arr, w_index, r_index, 'RAW')
+                    dependences.append(raw_dependence)
+                    war_dependence = DataDependence(ri, wi, r_arr, w_index, r_index, 'WAR')
+                    dependences.append(war_dependence)
+    for wi, w_access in sched_writes.items():
+        for wj, w_access2 in sched_writes.items():
+            if wi != wj:
+                w_arr = w_access.get_data_array()
+                w_index = w_access.get_index()
+                w_index2 = w_access2.get_index()
+                if w_arr == w_access2.get_data_array():
+                    waw_dependence = DataDependence(wi, wj, w_arr, w_index, w_index2, 'WAW')
+                    dependences.append(waw_dependence)
     return dependences
+
+def refine_dependences(dependences):
+    refined_dependences = []
+    extra_constrains = []
+    for dep in dependences:
+        subscript_dependence(dep)
+        dep_cond = check_if_dependence_holds(dep)
+        if dep_cond != sympy.false:
+            refined_dependences.append(dep)
+            extra_constrains.append(dep_cond)
+    return refined_dependences, extra_constrains
+
+def check_if_dependence_holds(dependence):
+    from_sched = dependence.from_si
+    to_sched = dependence.to_si
+    conditions = sympy.false
+    base_cond = sympy.true
+    for i,s in enumerate(from_sched.schedule):
+        if s.isnumeric():
+            assert(to_sched.schedule[i].isnumeric())
+            if int(to_sched.schedule[i]) > int(from_sched.schedule[i]):
+                return Or(conditions, base_cond)
+            elif int(to_sched.schedule[i]) < int(from_sched.schedule[i]): #TODO: Think how I can fix this.
+                return conditions
+        else:
+            if not dependence.has_condition(from_sched.schedule[i], to_sched.schedule[i]):
+                from_sym = Symbol(from_sched.schedule[i].replace(".", ""))
+                to_sym = Symbol(to_sched.schedule[i].replace(".", ""))
+                conditions = Or(And(base_cond, GreaterThan(to_sym, from_sym)), conditions)
+                base_cond = And(Eq(from_sym, to_sym), base_cond)
+    return conditions
+
+def subscript_dependence(dependence):
+    from_sched = dependence.from_si
+    to_sched = dependence.to_si
+    new_from_sched = deepcopy(from_sched)
+    new_to_sched = deepcopy(to_sched)
+    new_from_ind = []
+    new_to_ind = []
+    for i, s in enumerate(from_sched.schedule):
+        if not s.isnumeric():
+            new_from_sched.schedule[i] = s + "1"
+    for k, fi in enumerate(dependence.from_ind):
+        if fi in from_sched.schedule:
+            new_from_ind.append(fi + "1")
+        else:
+            new_from_ind.append(fi)
+    for j, s in enumerate(to_sched.schedule):
+        if not s.isnumeric():
+            new_to_sched.schedule[j] = s + "2"
+    for k, ti in enumerate(dependence.to_ind):
+        if ti in to_sched.schedule:
+            new_to_ind.append(ti + "2")
+        else:
+            new_to_ind.append(ti)
+    dependence.from_si = new_from_sched
+    dependence.to_si = new_to_sched
+    dependence.from_ind = tuple(new_from_ind)
+    dependence.to_ind = tuple(new_to_ind)
+
