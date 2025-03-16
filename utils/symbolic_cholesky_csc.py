@@ -948,6 +948,7 @@ def convert_supernodal_to_csc(Ls):
 
 
 def convert_csc_to_supernodal(L, relaxation=0):
+    int_type = np.int32
     Ls = {}
     n = L.shape[0]
     t = {}
@@ -974,13 +975,13 @@ def convert_csc_to_supernodal(L, relaxation=0):
     for i, sn in enumerate(supernodes):
         super_begin[i] = sn[0]
     super_begin[-1] = n
-    col_to_super = np.zeros(n, dtype=int)
+    col_to_super = np.zeros(n, dtype=int_type)
     for i, sn in enumerate(supernodes):
         for j in sn:
             col_to_super[j] = i
     lnnz = Lp[-1]
     data = np.zeros(lnnz, dtype=L.data.dtype)
-    lookup_table = np.zeros(n, dtype=int)
+    lookup_table = np.zeros(n, dtype=int_type)
     for i in range(len(supernodes)):
         for m in range(Lip[i], Lip[i + 1]):
             lookup_table[Li[m]] = m - Lip[i]
@@ -989,13 +990,11 @@ def convert_csc_to_supernodal(L, relaxation=0):
                 row_idx= L.indices[k]
                 data[Lp[j] + lookup_table[row_idx]] = L.data[k]
 
-
                 # for m in range(Lip[i], Lip[i + 1]):
                 #     lookup_table[Li[m]] = m - Lip[i]
                 # for m in range(Lip[i], Lip[i + 1]):
                 #     if row_idx == Li[m]:
                 #         data[Lp[j] + lookup_table[row_idx]] = L.data[k]
-
 
                 # for m in range(Lip[i], Lip[i+1]):
                 #     if row_idx == Li[m]:
@@ -1004,11 +1003,12 @@ def convert_csc_to_supernodal(L, relaxation=0):
 
     t['step 3'] = time.time() - t['step 3']
     print(t)
+
     Ls['x'] = data
-    Ls['i'] = np.array(Li) # atual row indices
-    Ls['ip'] = np.array(Lip) # row pointer for each supernode
-    Ls['p'] = np.array(Lp) # column pointer for each column
-    Ls['supernodes'] = np.array(super_begin)
+    Ls['i'] = np.array(Li, dtype=int_type) # atual row indices
+    Ls['ip'] = np.array(Lip, dtype=int_type) # row pointer for each supernode
+    Ls['p'] = np.array(Lp, dtype=int_type) # column pointer for each column
+    Ls['supernodes'] = np.array(super_begin, dtype=int_type)
     Ls['col_to_super'] = col_to_super
     Ls['rows'] = n
     Ls['cols'] = n
