@@ -49,7 +49,7 @@ mtx_list = [
     "/home/kazem/Downloads/olafu/olafu.mtx",
     "/home/kazem/Downloads/gyro_k/gyro_k.mtx",
     "/home/kazem/Downloads/cant/cant.mtx",
-    "/home/kazem/UFDB/Trefethen_20000b/Trefethen_20000b.mtx"
+    #"/home/kazem/UFDB/Trefethen_20000b/Trefethen_20000b.mtx"
             ]
 method_list = ["python-sptrsv-csc-super", "numba-sptrsv-csc-super", "cholmod"]
 #mtx_list = get_matrix_list("/home/kazem/UFDB/spd_list.txt", "/home/kazem/UFDB/")
@@ -146,6 +146,7 @@ configs.append(
         args={}
     ))
 
+#method_list = ["python-sptrsv-csc-super", "numba-sptrsv-csc-super", "cholmod"]
 
 # use triton benchmark
 @triton.testing.perf_report(configs)
@@ -153,83 +154,30 @@ def benchmark(matrices, provider):
 #    for mtx_matrix_path in mtx_list:
     # read matrix from file
     matrix = scio.mmread(matrices)
-    n = matrix.shape[0]
-    # convert matrix to csc
-    A = matrix.tocsc()
-    # makke it sparse lower triangular
-    A = tril(A, format="csc")
-    if A.data.dtype != np.float64:
-        print(f"Matrix {matrices} is not double precision")
-        A.data = A.data.astype(np.float64)
+    factor = cholesky(matrix)
+    L = factor.LD()
+    b = L.dot(np.ones(L.shape[0]))  # np.random.rand(Ao.shape[0])
+    Ls = convert_csc_to_supernodal(L)
+    # compute wavefronts of sparse matrix L (CSC)
+    dag_L_super = get_supernodal_dag(Ls)
+    wf_sup = compute_wavefront(dag_L_super)
+    wave_start_loc, waves = compact_2d_list(wf_sup)
 
-    # add diagonals with 100
-    A.setdiag(A.diagonal())
-    b = np.ones(n)  # Dense vector b
     quantiles = [0.5, 0.2, 0.8]
-    rep, warmpup = 100, 25
-    if provider == 'triton':
-        val_f32 = torch.tensor(A.data, dtype=REAL_TYPE, device=DEVICE)
-        b_f32 = torch.tensor(b, dtype=REAL_TYPE, device=DEVICE)
-        indices_i32 = torch.tensor(A.indices, dtype=torch.int32, device=DEVICE)
-        indptr_i32 = torch.tensor(A.indptr, dtype=torch.int32, device=DEVICE)
-        wavefronts = compute_wavefront(A)
-        wave_start_loc, waves = compact_2d_list(wavefronts)
-        waves_gpu = torch.tensor(waves, dtype=torch.int32, device=DEVICE)
-        ms, min_ms, max_ms = triton.testing.do_bench(lambda: sptrsv_triton(val_f32, indices_i32, indptr_i32, b_f32, A.shape[0], A.shape[1], A.nnz, wave_start_loc, waves_gpu), quantiles=quantiles, warmup=warmpup, rep=rep)
-    if provider == 'triton-sync-free':
-        val_f32 = torch.tensor(A.data, dtype=REAL_TYPE, device=DEVICE)
-        b_f32 = torch.tensor(b, dtype=REAL_TYPE, device=DEVICE)
-        indices_i32 = torch.tensor(A.indices, dtype=torch.int32, device=DEVICE)
-        indptr_i32 = torch.tensor(A.indptr, dtype=torch.int32, device=DEVICE)
-        dep_count = incoming_edge(A)
-        dep_count_gpu = torch.tensor(dep_count, dtype=torch.int32, device=DEVICE)
-        max_col_size = max(A.getnnz(axis=0))
-        if max_col_size < 63:
-            BLOCKSIZE = 64
-        elif max_col_size < 255:
-            BLOCKSIZE = 256
-        elif max_col_size < 511:
-            BLOCKSIZE = 512
-        else:
-            BLOCKSIZE = 1024
-            assert max_col_size < 1023
-        ms, min_ms, max_ms = triton.testing.do_bench(lambda: sptrsv_sync_free_triton(val_f32, indices_i32, indptr_i32, b_f32, A.shape[0], A.shape[1], A.nnz, dep_count_gpu, BLOCKSIZE), quantiles=quantiles, warmup=warmpup, rep=rep)
-    if provider == 'triton-spmv':
-        val_f32 = torch.tensor(A.data, dtype=REAL_TYPE, device=DEVICE)
-        b_f32 = torch.tensor(np.zeros(n), dtype=REAL_TYPE, device=DEVICE)
-        indices_i32 = torch.tensor(A.indices, dtype=torch.int32, device=DEVICE)
-        indptr_i32 = torch.tensor(A.indptr, dtype=torch.int32, device=DEVICE)
-        ms, min_ms, max_ms = triton.testing.do_bench(lambda: spmv_triton(val_f32, indices_i32, indptr_i32, b_f32, A.shape[0], A.shape[1], A.nnz), quantiles=quantiles, warmup=warmpup, rep=rep)
-    if provider == 'numba-sptrsv':
-        # Transfer data to the GPU
-        d_data = cuda.to_device(A.data)
-        d_indices = cuda.to_device(A.indices)
-        d_indptr = cuda.to_device(A.indptr)
-        d_x = cuda.to_device(np.zeros(n))
-        wavefronts = compute_wavefront(A)
-        wave_start_loc, waves = compact_2d_list(wavefronts)
-        waves_gpu = cuda.to_device(waves)
-        ms, min_ms, max_ms = triton.testing.do_bench(lambda: sptrsc_numba_csc(d_data, d_indices, d_indptr, d_x, A.shape[0], A.shape[1], A.nnz, wave_start_loc, waves_gpu), quantiles=quantiles, warmup=warmpup, rep=rep)
-    if provider == 'numba-sync-free':
-        # Transfer data to the GPU
-        d_data = cuda.to_device(A.data)
-        d_indices = cuda.to_device(A.indices)
-        d_indptr = cuda.to_device(A.indptr)
-        d_x = cuda.to_device(np.zeros(n))
-        dep_count = incoming_edge(A)
-        #dep_count_gpu = cuda.to_device(dep_count)
-        ms, min_ms, max_ms = triton.testing.do_bench(lambda: sptrsc_numba_csc_sync_free(d_data, d_indices, d_indptr, d_x, A.shape[0], A.shape[1], A.nnz, dep_count), quantiles=quantiles, warmup=warmpup, rep=rep)
-    if provider == 'cusparse':
-        matrix_gpu_csc = cp_csc_matrix(A.tocsc())
-        b_gpu = cp.array(b)  # Move dense vector to GPU
-        ms, min_ms, max_ms = triton.testing.do_bench(lambda: cusparse_solver(matrix_gpu_csc, b_gpu), quantiles=quantiles, warmup=warmpup, rep=rep)
+    rep, warmpup = 10, 2
+    if provider == 'python-sptrsv-csc-super':
+        ms, min_ms, max_ms = triton.testing.do_bench(lambda: sptrv_csc_supernodal(Ls['supernodes'], Ls['ip'], Ls['i'], Ls['p'], Ls['x'], b), quantiles=quantiles, warmup=warmpup, rep=rep)
+    if provider == 'numba-sptrsv-csc-super':
+        ms, min_ms, max_ms = triton.testing.do_bench(lambda: sptrsv_csc_supernodal_wavefront_numba(Ls['supernodes'], Ls['ip'], Ls['i'], Ls['p'], Ls['x'], b, wave_start_loc, waves), quantiles=quantiles, warmup=warmpup, rep=rep)
+    if provider == 'cholmod':
+        ms, min_ms, max_ms = triton.testing.do_bench(lambda: factor.solve_A(b), quantiles=quantiles, warmup=warmpup, rep=rep)
 
-    perf = lambda ms: (A.shape[0] + 2 * A.nnz) / (ms * 1e-3) / 1e9
+    perf = lambda ms: (L.shape[0] + 2 * L.nnz) / (ms * 1e-3) / 1e9
     #print(f"seconds: {ms}")
     #print(f"max: {perf(max_ms)}, min: {perf(min_ms)}, median: {perf(ms)}")
     print(f"{provider} -- {matrices} -- seconds: {ms}")
     return perf(ms), perf(min_ms), perf(max_ms)
 
 # Call the benchmark function
-#benchmark.run(print_data=True, save_path=".", show_plots=True)
+benchmark.run(print_data=True, save_path=".", show_plots=True)
 
