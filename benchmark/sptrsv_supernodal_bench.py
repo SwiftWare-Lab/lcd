@@ -14,7 +14,7 @@ from sympy import factor
 
 from utils.symbolic_cholesky_csc import etree, post_order, row_col_counts, \
     detect_supernodes, convert_csc_to_supernodal, get_supernodal_dag
-from sptrsv_supernodal import sptrv_csc_supernodal, sptrsv_csc_supernodal_wavefront
+from sptrsv_supernodal import *
 
 
 NUM_RUNS=30
@@ -34,6 +34,7 @@ DEVICE = torch.device("cuda:0")
 # import cuda
 
 from numba import cuda
+import numba
 device = cuda.get_current_device()
 print(f"Using GPU: {device.name}")
 print(f"Compute Capability: {device.compute_capability}")
@@ -50,7 +51,7 @@ mtx_list = [
     "/home/kazem/Downloads/cant/cant.mtx",
     "/home/kazem/UFDB/Trefethen_20000b/Trefethen_20000b.mtx"
             ]
-method_list = ["triton", "triton-sync-free", "cusparse",  "numba-sptrsv", "numba-sync-free", "triton-spmv"]
+method_list = ["python-sptrsv-csc-super", "numba-sptrsv-csc-super", "cholmod"]
 #mtx_list = get_matrix_list("/home/kazem/UFDB/spd_list.txt", "/home/kazem/UFDB/")
 #mtx_list = mtx_list[60:]
 
@@ -82,10 +83,10 @@ def correctness_test():
         # x = factor.solve_A(b)
         print("norm: ", np.linalg.norm(b - Ao.dot(x)))
         # permute the matrix Ao
-        Aperm = Ao_csc[P, :][:, P]
-
-        parent = np.array(A.shape[0] * [0], dtype=np.int32)
-        common = {}
+        # Aperm = Ao_csc[P, :][:, P]
+        #
+        # parent = np.array(A.shape[0] * [0], dtype=np.int32)
+        # common = {}
 
         Ls = convert_csc_to_supernodal(L)
 
@@ -108,18 +109,17 @@ def correctness_test():
                                          Ls['ip'],
                                          Ls['i'],
                                          Ls['p'],
-                                         Ls['x'], b, wf_sup)
+                                         Ls['x'], b, wave_start_loc, waves)
         print("norm: ", np.linalg.norm(x_sup_wf - np.ones(L.shape[0])))
+        x_sup_wf_numba = sptrsv_csc_supernodal_wavefront_numba(Ls['supernodes'],
+                                            Ls['ip'],
+                                            Ls['i'],
+                                            Ls['p'],
+                                            Ls['x'], b, wave_start_loc, waves)
+        #sptrsv_csc_supernodal_wavefront_numba.parallel_diagnostics(level=4)
+        print("norm: ", np.linalg.norm(x_sup_wf_numba - np.ones(L.shape[0])))
 
 
-
-
-        # print (x_cpu[:5])
-        # print (x_gpu[:5])
-        # print (y[:5])
-        # print ("Triton sync free", y_sync_free[:50])
-        # print (y_numba_cpu[:5])
-        # print ("numba synch-free", y_numba_cpu_sync_free[:5])
     return matrix_signtures, method_correctness
 
 
@@ -139,10 +139,10 @@ configs.append(
         x_vals=[mtx_list[i] for i in range(0, len(mtx_list))],  # Different possible values for `x_name`
         line_arg="provider",  # Argument name whose value corresponds to a different line in the plot
         line_vals=method_list,  # Label name for the lines
-        line_names=["Triton Wavefront", "Triton Sync-free", "Numba SpTRSV CSC", "Numba SpTRSV CSC Sync-Free", "cuSparse", "Triton SPMV-CSC Ref"],
+        line_names=["Python SpTRSV CSC", "Numba SpTRSV CSC Supernodal", "Cholmod Solve"],
         styles=[("green", "-"), ("blue", "-"), ("red", "-"), ("purple", "-"), ("yellow", "-"), ("orange", "--")],  # Visual styles for the lines
         ylabel="GFLOP/S",  # Label name for the y-axis
-        plot_name="sptrsv-performance",  # Name for the plot, used also as a file name for saving the plot.
+        plot_name="sptrsv supernodal performance",  # Name for the plot, used also as a file name for saving the plot.
         args={}
     ))
 
