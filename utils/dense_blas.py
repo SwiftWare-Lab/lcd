@@ -84,7 +84,7 @@ def dense_matvec_col_order_kernel(M, x, y, ldm, row, col, BLOCK_SIZE: tl.constex
 
 
 @njit(parallel=True, fastmath=True)
-def dense_matvec_col_order_numba(ldm, row, col, M, x):
+def dense_matvec_col_order_numba(ldm, row, col, M, x, y):
     """
     Compute a dense matrix-vector product in column order with synchronization.
 
@@ -94,8 +94,8 @@ def dense_matvec_col_order_numba(ldm, row, col, M, x):
     M (numpy.ndarray): The matrix M.
     x (numpy.ndarray): The vector x.
     """
-    y = np.zeros(row)
+    #y = np.zeros(row)
     for i in range(col):
         for j in range(row):
             y[j] += M[i * ldm + j] * x[i]
-    return y
+    #return y
