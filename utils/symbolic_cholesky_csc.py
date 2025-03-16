@@ -951,7 +951,7 @@ def convert_csc_to_supernodal(L, relaxation=0):
     int_type = np.int32
     Ls = {}
     n = L.shape[0]
-    t = {}
+    t, max_width = {}, 0
     t['step 1'] = time.time()
     supernodes = detect_supernodes(L, relaxation)
     t['step 1'] = time.time() - t['step 1']
@@ -960,6 +960,7 @@ def convert_csc_to_supernodal(L, relaxation=0):
     Lip.append(0)
     Lp.append(0)
     for sn in supernodes:
+        max_width = max(max_width, len(sn))
         rp_union = set()
         for i in sn:
             rp_union = rp_union.union(set(L.indices[L.indptr[i]:L.indptr[i+1]]))
@@ -1013,6 +1014,7 @@ def convert_csc_to_supernodal(L, relaxation=0):
     Ls['rows'] = n
     Ls['cols'] = n
     Ls['nSuper'] = len(supernodes)
+    Ls['max_width'] = max_width
     if False:
         L_test = convert_supernodal_to_csc(Ls)
         assert np.all(L_test['data'] == L.data)

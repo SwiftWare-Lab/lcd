@@ -39,10 +39,10 @@ device = cuda.get_current_device()
 print(f"Using GPU: {device.name}")
 print(f"Compute Capability: {device.compute_capability}")
 
-
+Relaxtion = 8
 
 mtx_list = [
-    "/home/kazem/Downloads/LFAT5/LFAT5.mtx", "/home/kazem/Downloads/ex5/ex5.mtx", "/home/kazem/Downloads/mesh1e1/mesh1e1.mtx","/home/kazem/Downloads/nos4/nos4.mtx",
+#    "/home/kazem/Downloads/LFAT5/LFAT5.mtx", "/home/kazem/Downloads/ex5/ex5.mtx", "/home/kazem/Downloads/mesh1e1/mesh1e1.mtx","/home/kazem/Downloads/nos4/nos4.mtx",
     # "/home/kazem/Downloads/bcsstk03/bcsstk03.mtx",
 
     "/home/kazem/Downloads/msc23052/msc23052.mtx",
@@ -68,8 +68,11 @@ def correctness_test():
         A = sp.tril(Ao).tocsc()
 
         factor = cholesky(Ao)
-        L = factor.LD()
+        L = factor.L()
         P = factor.P()
+        mat_name = mtx_matrix_path.split("/")[-1]
+        matrix_signtures.append(get_matrix_signature(A, mat_name))
+
         b = L.dot(np.ones(L.shape[0]))  # np.random.rand(Ao.shape[0])
         # Solve the linear system Ax = b
         # x = factor(b)
@@ -82,13 +85,19 @@ def correctness_test():
 
         # x = factor.solve_A(b)
         print("norm: ", np.linalg.norm(b - Ao.dot(x)))
+
+        x_chol = factor.solve_L(b, use_LDLt_decomposition=False)
+        print("norm: ", np.linalg.norm(x_chol - np.ones(L.shape[0])))
         # permute the matrix Ao
         # Aperm = Ao_csc[P, :][:, P]
         #
         # parent = np.array(A.shape[0] * [0], dtype=np.int32)
         # common = {}
 
-        Ls = convert_csc_to_supernodal(L)
+        Ls = convert_csc_to_supernodal(L, Relaxtion)
+        signature_l = get_L_signature(L, Ls, mat_name)
+        for k, v in signature_l.items():
+            matrix_signtures[-1][k] = v
 
         x_sup_csc = sptrv_csc_supernodal(Ls['supernodes'],
                                          Ls['ip'],
@@ -155,9 +164,9 @@ def benchmark(matrices, provider):
     # read matrix from file
     matrix = scio.mmread(matrices)
     factor = cholesky(matrix)
-    L = factor.LD()
+    L = factor.L()
     b = L.dot(np.ones(L.shape[0]))  # np.random.rand(Ao.shape[0])
-    Ls = convert_csc_to_supernodal(L)
+    Ls = convert_csc_to_supernodal(L, Relaxtion)
     # compute wavefronts of sparse matrix L (CSC)
     dag_L_super = get_supernodal_dag(Ls)
     wf_sup = compute_wavefront(dag_L_super)
@@ -170,7 +179,7 @@ def benchmark(matrices, provider):
     if provider == 'numba-sptrsv-csc-super':
         ms, min_ms, max_ms = triton.testing.do_bench(lambda: sptrsv_csc_supernodal_wavefront_numba(Ls['supernodes'], Ls['ip'], Ls['i'], Ls['p'], Ls['x'], b, wave_start_loc, waves), quantiles=quantiles, warmup=warmpup, rep=rep)
     if provider == 'cholmod':
-        ms, min_ms, max_ms = triton.testing.do_bench(lambda: factor.solve_A(b), quantiles=quantiles, warmup=warmpup, rep=rep)
+        ms, min_ms, max_ms = triton.testing.do_bench(lambda: factor.solve_L(b, use_LDLt_decomposition=False), quantiles=quantiles, warmup=warmpup, rep=rep)
 
     perf = lambda ms: (L.shape[0] + 2 * L.nnz) / (ms * 1e-3) / 1e9
     #print(f"seconds: {ms}")
