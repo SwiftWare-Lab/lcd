@@ -78,6 +78,22 @@ def get_matrix_signature(A, name):
     dict["wavefronts"] = len(compute_wavefront(A))
     return dict
 
+def get_L_signature(L, Ls, name):
+    dict = {}
+    dict['lname'] = name
+    dict['lnnz'] = L.nnz
+    dict['lnnz_per_row'] = L.nnz / L.shape[0]
+    dict['lnnz_per_col'] = L.nnz / L.shape[1]
+    dict['max lnnz per row'] = max(L.getnnz(axis=1))
+    dict['max lnnz per col'] = max(L.getnnz(axis=0))
+    dict['ldensity'] = L.nnz / (L.shape[0] * L.shape[1])
+    dict["lwavefronts"] = len(compute_wavefront(L))
+    dict['num supernodes'] = len(Ls['supernodes'])
+    dict['max supernode width'] = Ls['max_width']
+    dict['average supernode width'] = L.shape[0] / len(Ls['supernodes'])
+    return dict
+
+
 import scipy.sparse as sp
 
 def convert_csr_matrix_to_power2_dim(A):
