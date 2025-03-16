@@ -51,7 +51,7 @@ mtx_list = [
     "/home/kazem/Downloads/cant/cant.mtx",
     #"/home/kazem/UFDB/Trefethen_20000b/Trefethen_20000b.mtx"
             ]
-method_list = ["python-sptrsv-csc-super", "numba-sptrsv-csc-super", "cholmod"]
+method_list = ["python-sptrsv-csc-super", "numba-sptrsv-csc-super", "numba-sptrsv-csc-super-wavefront", "cholmod"]
 #mtx_list = get_matrix_list("/home/kazem/UFDB/spd_list.txt", "/home/kazem/UFDB/")
 #mtx_list = mtx_list[60:]
 
@@ -114,11 +114,11 @@ def correctness_test():
         wf_sup = compute_wavefront(dag_L_super)
         wave_start_loc, waves = compact_2d_list(wf_sup)
 
-        x_sup_wf = sptrsv_csc_supernodal_wavefront(Ls['supernodes'],
+        x_sup_wf = sptrsv_csc_supernodal_numba(Ls['supernodes'],
                                          Ls['ip'],
                                          Ls['i'],
                                          Ls['p'],
-                                         Ls['x'], b, wave_start_loc, waves)
+                                         Ls['x'], b)
         print("norm: ", np.linalg.norm(x_sup_wf - np.ones(L.shape[0])))
         x_sup_wf_numba = sptrsv_csc_supernodal_wavefront_numba(Ls['supernodes'],
                                             Ls['ip'],
@@ -148,7 +148,7 @@ configs.append(
         x_vals=[mtx_list[i] for i in range(0, len(mtx_list))],  # Different possible values for `x_name`
         line_arg="provider",  # Argument name whose value corresponds to a different line in the plot
         line_vals=method_list,  # Label name for the lines
-        line_names=["Python SpTRSV CSC", "Numba SpTRSV CSC Supernodal", "Cholmod Solve"],
+        line_names=["Python SpTRSV CSC", "Numba SpTRSV CSC Supernodal", "Numba SpTRSV CSC Supernodal Wavefront", "Cholmod Solve"],
         styles=[("green", "-"), ("blue", "-"), ("red", "-"), ("purple", "-"), ("yellow", "-"), ("orange", "--")],  # Visual styles for the lines
         ylabel="GFLOP/S",  # Label name for the y-axis
         plot_name="sptrsv supernodal performance",  # Name for the plot, used also as a file name for saving the plot.
@@ -177,6 +177,8 @@ def benchmark(matrices, provider):
     if provider == 'python-sptrsv-csc-super':
         ms, min_ms, max_ms = triton.testing.do_bench(lambda: sptrv_csc_supernodal(Ls['supernodes'], Ls['ip'], Ls['i'], Ls['p'], Ls['x'], b), quantiles=quantiles, warmup=warmpup, rep=rep)
     if provider == 'numba-sptrsv-csc-super':
+        ms, min_ms, max_ms = triton.testing.do_bench(lambda: sptrsv_csc_supernodal_numba(Ls['supernodes'], Ls['ip'], Ls['i'], Ls['p'], Ls['x'], b), quantiles=quantiles, warmup=warmpup, rep=rep)
+    if provider == 'numba-sptrsv-csc-super-wavefront':
         ms, min_ms, max_ms = triton.testing.do_bench(lambda: sptrsv_csc_supernodal_wavefront_numba(Ls['supernodes'], Ls['ip'], Ls['i'], Ls['p'], Ls['x'], b, wave_start_loc, waves), quantiles=quantiles, warmup=warmpup, rep=rep)
     if provider == 'cholmod':
         ms, min_ms, max_ms = triton.testing.do_bench(lambda: factor.solve_L(b, use_LDLt_decomposition=False), quantiles=quantiles, warmup=warmpup, rep=rep)
