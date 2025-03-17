@@ -128,6 +128,14 @@ def correctness_test():
         #sptrsv_csc_supernodal_wavefront_numba.parallel_diagnostics(level=4)
         print("norm: ", np.linalg.norm(x_sup_wf_numba - np.ones(L.shape[0])))
 
+        x_sup_cuda = np.zeros_like(b)
+        sptrsv_csc_supernodal_numba_cuda(Ls['supernodes'],
+                                         Ls['ip'],
+                                         Ls['i'],
+                                         Ls['p'],
+                                         Ls['x'], b)
+        print("norm: ", np.linalg.norm(x_sup_cuda - np.ones(L.shape[0])))
+
 
     return matrix_signtures, method_correctness
 
