@@ -12,17 +12,16 @@ def sptrsv_csc_supernodal_analysis_1(sn_begin, Lip, Li, x):
         col_b = sn_begin[i]
         col_e = sn_begin[ i + 1]
         sup_width = col_e - col_b
-        #flag[col_b:col_e] += 1
+        flag[col_b:col_e] += 1
         for j in range(Lip[i] + sup_width, Lip[i + 1]):
             flag[ Li[j] ] += 1
 
-    print("sum flag: ", np.sum(flag))
-    thread_flag = np.zeros(len(sn_begin ) -1, dtype=np.int32)
+    thread_flag = np.zeros(len(sn_begin ) -1)
     for i in range(len(sn_begin ) -1):
         col_b = sn_begin[i]
         col_e = sn_begin[ i +1]
         for kk in range(col_b, col_e):
-            thread_flag[i] +=  flag[kk]
+            thread_flag[i] = np.max([thread_flag[i], flag[kk]])
     return thread_flag
 
 
