@@ -9,12 +9,14 @@ from spmv import *
 
 from sksparse.cholmod import cholesky, analyze
 from sympy import factor
+import matplotlib.pyplot as plt
 
 #from sksparse.cholmod import cholesky, analyze, Factor
 
 from utils.symbolic_cholesky_csc import etree, post_order, row_col_counts, \
     detect_supernodes, convert_csc_to_supernodal, get_supernodal_dag
 from sptrsv_supernodal import *
+from utils.inspectors import sptrsv_csc_supernodal_analysis
 
 
 NUM_RUNS=30
@@ -39,10 +41,13 @@ device = cuda.get_current_device()
 print(f"Using GPU: {device.name}")
 print(f"Compute Capability: {device.compute_capability}")
 
+import os
+os.environ['NUMBA_CUDA_PTX_VERSION'] = '84'
+
 Relaxtion = 8
 
 mtx_list = [
-#    "/home/kazem/Downloads/LFAT5/LFAT5.mtx", "/home/kazem/Downloads/ex5/ex5.mtx", "/home/kazem/Downloads/mesh1e1/mesh1e1.mtx","/home/kazem/Downloads/nos4/nos4.mtx",
+    "/home/kazem/Downloads/LFAT5/LFAT5.mtx", "/home/kazem/Downloads/ex5/ex5.mtx", "/home/kazem/Downloads/mesh1e1/mesh1e1.mtx","/home/kazem/Downloads/nos4/nos4.mtx",
     # "/home/kazem/Downloads/bcsstk03/bcsstk03.mtx",
 
     "/home/kazem/Downloads/msc23052/msc23052.mtx",
@@ -128,13 +133,27 @@ def correctness_test():
         #sptrsv_csc_supernodal_wavefront_numba.parallel_diagnostics(level=4)
         print("norm: ", np.linalg.norm(x_sup_wf_numba - np.ones(L.shape[0])))
 
+
+        # spy plot of dag_l_super
+        # plt.spy(dag_L_super, markersize=2)
+        # plt.show()
+        #thread_flags = sptrsv_csc_supernodal_analysis(Ls['supernodes'], Ls['ip'], Ls['i'], Ls['col_to_super'])
+        incom_edges = incoming_edge(dag_L_super)
         x_sup_cuda = np.zeros_like(b)
-        sptrsv_csc_supernodal_numba_cuda(Ls['supernodes'],
-                                         Ls['ip'],
-                                         Ls['i'],
-                                         Ls['p'],
-                                         Ls['x'], b)
+        # Transfer data to the GPU
+        d_lx = cuda.to_device(Ls['x'])
+        d_super = cuda.to_device(Ls['supernodes'])
+        d_ip = cuda.to_device(Ls['ip'])
+        d_i = cuda.to_device(Ls['i'])
+        d_p = cuda.to_device(Ls['p'])
+        d_b = cuda.to_device(b)
+        d_in_edge = cuda.to_device(incom_edges)
+        d_x = cuda.to_device(b)
+        sptrsv_csc_supernodal_numba_cuda(d_super, d_ip, d_i, d_p, d_lx, d_x, d_in_edge)
         print("norm: ", np.linalg.norm(x_sup_cuda - np.ones(L.shape[0])))
+
+        #print(thread_flags)
+        print(wf_sup)
 
 
     return matrix_signtures, method_correctness
