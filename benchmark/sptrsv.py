@@ -35,7 +35,7 @@ DEVICE = torch.device("cuda:0")
 
 
 
-@njit(numba.int32[:](numba.float32[:], numba.int32[:], numba.int32[:], numba.float32[:]), pipeline_class=MyCompiler)
+@njit(numba.float64[:](numba.float32[:], numba.int32[:], numba.int32[:], numba.float32[:]), pipeline_class=MyCompiler)
 def sptrsv_csr_numba(A, IA, JA, b):
     n = len(IA) - 1
     x = np.zeros(n)

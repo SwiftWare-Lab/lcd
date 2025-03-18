@@ -54,26 +54,41 @@ def sptrsv_csc_supernodal_numba(sn_begin, Lip, Li, Lp, Lx, b):
 
 
 @cuda.jit
-def sptrsv_csc_supernodal_numba_cuda(sn_begin, Lip, Li, Lp, Lx, b, x):
-    x = b.copy()
-    sol = np.zeros(len(b), dtype=b.dtype)
-    for i in range(len(sn_begin)-1):
+def sptrsv_csc_supernodal_numba_cuda_kernel(sn_begin, Lip, Li, Lp, Lx, x, sol, flag_thread):
+    i = cuda.grid(1)
+    #col = cuda.blockIdx.x * cuda.blockDim.x + cuda.threadIdx.x
+    M = len(sn_begin) - 1
+    if i < M:
+        # while cuda.atomic.add(flag_thread, i, 0) != 1:
+        #     pass
+        #sol = np.zeros(len(x), dtype=x.dtype)
         col_b = sn_begin[i]
         col_e = sn_begin[i+1]
         sup_width = col_e - col_b
         sup_len = Lip[i+1] - Lip[i]
         val_beg = Lp[col_b]
-        lsolve_BLAS_python(sup_len, sup_width, Lx[val_beg:], x[col_b:col_e])
+        # lsolve_BLAS_python(sup_len, sup_width, Lx[val_beg:], x[col_b:col_e])
         off_diag_val = Lx[val_beg+sup_width:]
-        matvec_BLAS_python(sup_len, sup_len - sup_width,
-                           sup_width,
-                           off_diag_val, x[col_b:col_e], sol)
-        cnt = 0
-        for j in range(Lip[i] + sup_width, Lip[i + 1]):
-            x[Li[j]] -= sol[cnt]
-            # atomic_add(x[Li[j]], -sol[cnt])
-            sol[cnt] = 0
-            cnt += 1
+        # matvec_BLAS_python(sup_len, sup_len - sup_width,
+        #                    sup_width,
+        #                    off_diag_val, x[col_b:col_e], sol)
+        # cnt = 0
+        # for j in range(Lip[i] + sup_width, Lip[i + 1]):
+        #     #x[Li[j]] -= sol[cnt]
+        #     tmp = -sol[cnt]
+        #     idx = Li[j]
+        #     # cuda.atomic.add(x, idx, tmp)
+        #     # cuda.atomic.add[flag_thread, idx, -1]
+        #     sol[cnt] = 0
+        #     cnt += 1
+
+
+def sptrsv_csc_supernodal_numba_cuda(sn_begin, Lip, Li, Lp, Lx, x, flag_thread):
+    d_y = cuda.to_device(np.zeros(20, dtype=np.float64))
+    threads_per_block = 128
+    blocks_per_grid = (len(sn_begin) + threads_per_block - 1) // threads_per_block
+    sptrsv_csc_supernodal_numba_cuda_kernel[blocks_per_grid, threads_per_block](sn_begin, Lip, Li, Lp, Lx, x, d_y, flag_thread)
+    return x
 
 
 
