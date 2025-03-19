@@ -16,8 +16,8 @@ import matplotlib.pyplot as plt
 from utils.symbolic_cholesky_csc import etree, post_order, row_col_counts, \
     detect_supernodes, convert_csc_to_supernodal, get_supernodal_dag
 from sptrsv_supernodal import *
-from utils.inspectors import sptrsv_csc_supernodal_analysis
-
+from utils.inspectors import sptrsv_csc_supernodal_analysis, \
+    sptrsv_csc_supernodal_analysis_1
 
 NUM_RUNS=30
 
@@ -56,7 +56,7 @@ mtx_list = [
     "/home/kazem/Downloads/cant/cant.mtx",
     #"/home/kazem/UFDB/Trefethen_20000b/Trefethen_20000b.mtx"
             ]
-method_list = ["python-sptrsv-csc-super", "numba-sptrsv-csc-super", "numba-sptrsv-csc-super-wavefront", "cholmod"]
+method_list = ["python-sptrsv-csc-super", "numba-sptrsv-csc-super", "numba-sptrsv-csc-super-wavefront","cuda-numba-sptrsv-csc-super-syncfree", "cholmod"]
 #mtx_list = get_matrix_list("/home/kazem/UFDB/spd_list.txt", "/home/kazem/UFDB/")
 #mtx_list = mtx_list[60:]
 
@@ -89,10 +89,10 @@ def correctness_test():
         # print("nz A: ", A.nnz, " nz L: ", L.nnz)
 
         # x = factor.solve_A(b)
-        print("norm: ", np.linalg.norm(b - Ao.dot(x)))
+        print("norm cholesky: ", np.linalg.norm(b - Ao.dot(x), ord=np.inf))
 
         x_chol = factor.solve_L(b, use_LDLt_decomposition=False)
-        print("norm: ", np.linalg.norm(x_chol - np.ones(L.shape[0])))
+        print("norm cholmod: ", np.linalg.norm(x_chol - np.ones(L.shape[0]), ord=np.inf))
         # permute the matrix Ao
         # Aperm = Ao_csc[P, :][:, P]
         #
@@ -103,57 +103,63 @@ def correctness_test():
         signature_l = get_L_signature(L, Ls, mat_name)
         for k, v in signature_l.items():
             matrix_signtures[-1][k] = v
-
-        x_sup_csc = sptrv_csc_supernodal(Ls['supernodes'],
+        x_sup_csc = b.copy()
+        sptrv_csc_supernodal(Ls['supernodes'],
                                          Ls['ip'],
                                          Ls['i'],
                                          Ls['p'],
-                                         Ls['x'], b)
+                                         Ls['x'], b, x)
 
         # x_csc = L.solve(b)
 
-        print("norm: ", np.linalg.norm(x_sup_csc - np.ones(L.shape[0])))
+        print("norm python: ", np.linalg.norm(x_sup_csc - np.ones(L.shape[0]), ord=np.inf))
 
         # compute wavefronts of sparse matrix L (CSC)
         dag_L_super = get_supernodal_dag(Ls)
         wf_sup = compute_wavefront(dag_L_super)
         wave_start_loc, waves = compact_2d_list(wf_sup)
-
-        x_sup_wf = sptrsv_csc_supernodal_numba(Ls['supernodes'],
+        x_sup_wf = b.copy()
+        sptrsv_csc_supernodal_numba(Ls['supernodes'],
                                          Ls['ip'],
                                          Ls['i'],
                                          Ls['p'],
-                                         Ls['x'], b)
-        print("norm: ", np.linalg.norm(x_sup_wf - np.ones(L.shape[0])))
-        x_sup_wf_numba = sptrsv_csc_supernodal_wavefront_numba(Ls['supernodes'],
+                                         Ls['x'], b, x_sup_wf)
+        print("norm numba seq: ", np.linalg.norm(x_sup_wf - np.ones(L.shape[0])))
+        x_sup_wf_numba = b.copy()
+        sptrsv_csc_supernodal_wavefront_numba(Ls['supernodes'],
                                             Ls['ip'],
                                             Ls['i'],
                                             Ls['p'],
-                                            Ls['x'], b, wave_start_loc, waves)
+                                            Ls['x'], b, x_sup_wf_numba, wave_start_loc, waves)
         #sptrsv_csc_supernodal_wavefront_numba.parallel_diagnostics(level=4)
-        print("norm: ", np.linalg.norm(x_sup_wf_numba - np.ones(L.shape[0])))
+        print("norm numba wf: ", np.linalg.norm(x_sup_wf_numba - np.ones(L.shape[0]), ord=np.inf))
 
 
         # spy plot of dag_l_super
         # plt.spy(dag_L_super, markersize=2)
         # plt.show()
-        #thread_flags = sptrsv_csc_supernodal_analysis(Ls['supernodes'], Ls['ip'], Ls['i'], Ls['col_to_super'])
+        thread_flags = sptrsv_csc_supernodal_analysis_1(Ls['supernodes'], Ls['ip'], Ls['i'], Ls['col_to_super'])
         incom_edges = incoming_edge(dag_L_super)
         x_sup_cuda = np.zeros_like(b)
         # Transfer data to the GPU
         d_lx = cuda.to_device(Ls['x'])
         d_super = cuda.to_device(Ls['supernodes'])
+        col_to_sup = cuda.to_device(Ls['col_to_super'])
         d_ip = cuda.to_device(Ls['ip'])
         d_i = cuda.to_device(Ls['i'])
         d_p = cuda.to_device(Ls['p'])
         d_b = cuda.to_device(b)
         d_in_edge = cuda.to_device(incom_edges)
+        d_thread_flags = cuda.to_device(thread_flags)
         d_x = cuda.to_device(b)
-        sptrsv_csc_supernodal_numba_cuda(d_super, d_ip, d_i, d_p, d_lx, d_x, d_in_edge)
-        print("norm: ", np.linalg.norm(x_sup_cuda - np.ones(L.shape[0])))
+        max_width = Ls['max_width']
+        print("max width: ", max_width)
+        sptrsv_csc_supernodal_numba_cuda(d_super, col_to_sup, d_ip, d_i, d_p, d_lx, d_x, d_thread_flags, max_width)
+        x_sup_cuda = d_x.copy_to_host()
+        print("norm gpu: ", np.linalg.norm(x_sup_cuda - np.ones(L.shape[0]), ord=np.inf))
 
         #print(thread_flags)
-        print(wf_sup)
+        #print(wf_sup)
 
 
     return matrix_signtures, method_correctness
@@ -175,7 +181,7 @@ configs.append(
         x_vals=[mtx_list[i] for i in range(0, len(mtx_list))],  # Different possible values for `x_name`
         line_arg="provider",  # Argument name whose value corresponds to a different line in the plot
         line_vals=method_list,  # Label name for the lines
-        line_names=["Python SpTRSV CSC", "Numba SpTRSV CSC Supernodal", "Numba SpTRSV CSC Supernodal Wavefront", "Cholmod Solve"],
+        line_names=["Python SpTRSV CSC", "Numba SpTRSV CSC Supernodal", "Numba SpTRSV CSC Supernodal Wavefront", "CudaNumba SpTRSV CSC Supernodal SyncFree", "Cholmod Solve"],
         styles=[("green", "-"), ("blue", "-"), ("red", "-"), ("purple", "-"), ("yellow", "-"), ("orange", "--")],  # Visual styles for the lines
         ylabel="GFLOP/S",  # Label name for the y-axis
         plot_name="sptrsv supernodal performance",  # Name for the plot, used also as a file name for saving the plot.
@@ -198,15 +204,34 @@ def benchmark(matrices, provider):
     dag_L_super = get_supernodal_dag(Ls)
     wf_sup = compute_wavefront(dag_L_super)
     wave_start_loc, waves = compact_2d_list(wf_sup)
+    thread_flags = sptrsv_csc_supernodal_analysis_1(Ls['supernodes'], Ls['ip'],
+                                                            Ls['i'], Ls['col_to_super'])
 
     quantiles = [0.5, 0.2, 0.8]
     rep, warmpup = 10, 2
     if provider == 'python-sptrsv-csc-super':
-        ms, min_ms, max_ms = triton.testing.do_bench(lambda: sptrv_csc_supernodal(Ls['supernodes'], Ls['ip'], Ls['i'], Ls['p'], Ls['x'], b), quantiles=quantiles, warmup=warmpup, rep=rep)
+        x = b.copy()
+        ms, min_ms, max_ms = triton.testing.do_bench(lambda: sptrv_csc_supernodal(Ls['supernodes'], Ls['ip'], Ls['i'], Ls['p'], Ls['x'], b, x), quantiles=quantiles, warmup=warmpup, rep=rep)
     if provider == 'numba-sptrsv-csc-super':
-        ms, min_ms, max_ms = triton.testing.do_bench(lambda: sptrsv_csc_supernodal_numba(Ls['supernodes'], Ls['ip'], Ls['i'], Ls['p'], Ls['x'], b), quantiles=quantiles, warmup=warmpup, rep=rep)
+        x = b.copy()
+        ms, min_ms, max_ms = triton.testing.do_bench(lambda: sptrsv_csc_supernodal_numba(Ls['supernodes'], Ls['ip'], Ls['i'], Ls['p'], Ls['x'], b, x), quantiles=quantiles, warmup=warmpup, rep=rep)
     if provider == 'numba-sptrsv-csc-super-wavefront':
-        ms, min_ms, max_ms = triton.testing.do_bench(lambda: sptrsv_csc_supernodal_wavefront_numba(Ls['supernodes'], Ls['ip'], Ls['i'], Ls['p'], Ls['x'], b, wave_start_loc, waves), quantiles=quantiles, warmup=warmpup, rep=rep)
+        x= b.copy()
+        ms, min_ms, max_ms = triton.testing.do_bench(lambda: sptrsv_csc_supernodal_wavefront_numba(Ls['supernodes'], Ls['ip'], Ls['i'], Ls['p'], Ls['x'], b, x, wave_start_loc, waves), quantiles=quantiles, warmup=warmpup, rep=rep)
+    if provider == 'cuda-numba-sptrsv-csc-super-syncfree':
+        # Transfer data to the GPU
+        d_lx = cuda.to_device(Ls['x'])
+        d_super = cuda.to_device(Ls['supernodes'])
+        col_to_sup = cuda.to_device(Ls['col_to_super'])
+        d_ip = cuda.to_device(Ls['ip'])
+        d_i = cuda.to_device(Ls['i'])
+        d_p = cuda.to_device(Ls['p'])
+        d_thread_flags = cuda.to_device(thread_flags)
+        d_x = cuda.to_device(b)
+        max_width = Ls['max_width']
+        ms, min_ms, max_ms = triton.testing.do_bench(
+            lambda: sptrsv_csc_supernodal_numba_cuda(d_super, col_to_sup, d_ip, d_i, d_p, d_lx, d_x,
+                                         d_thread_flags, max_width), quantiles=quantiles, warmup=warmpup, rep=rep)
     if provider == 'cholmod':
         ms, min_ms, max_ms = triton.testing.do_bench(lambda: factor.solve_L(b, use_LDLt_decomposition=False), quantiles=quantiles, warmup=warmpup, rep=rep)
 
