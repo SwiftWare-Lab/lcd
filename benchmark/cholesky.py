@@ -1,104 +1,55 @@
-import matplotlib.pyplot as plt
+
+
 import numpy as np
-import scipy.sparse as sp
-import scipy.io as spio
-from sksparse.cholmod import cholesky, analyze
-from sympy import factor
+import math
 
-#from sksparse.cholmod import cholesky, analyze, Factor
+def cholesky_left_looking(n, c, r, values, lC, lR, lValues, prunePtr, pruneSet):
+    """
+    Performs a Cholesky decomposition on a given matrix (c, r, values), i.e.
+    stored in compressed column format, and produces L, which are
+    stored in column compressed format.
 
-from utils.symbolic_cholesky_csc import etree, post_order, row_col_counts, \
-    detect_supernodes, convert_csc_to_supernodal
-from sptrsv_supernodal import sptrv_csc_supernodal
+    Args:
+        n (int): Size of the matrix.
+        c (np.ndarray): Column pointers for the input matrix.
+        r (np.ndarray): Row indices for the input matrix.
+        values (np.ndarray): Values of the input matrix.
+        lC (np.ndarray): Column pointers for the L matrix.
+        lR (np.ndarray): Row indices for the L matrix.
+        lValues (np.ndarray): Values of the L matrix (modified in place).
+        prunePtr (np.ndarray): Prune pointers.
+        pruneSet (np.ndarray): Prune set.
 
-mtx_list = [
-    #"/Users/kazem/UFDB/LFAT5/LFAT5.mtx",
-    #"/home/kazem/Downloads/LFAT5/LFAT5.mtx",
-    #"/home/kazem/Downloads/ex5/ex5.mtx",
-    "/home/kazem/Downloads/mesh1e1/mesh1e1.mtx","/home/kazem/Downloads/nos4/nos4.mtx",
-    "/home/kazem/Downloads/bcsstk03/bcsstk03.mtx",
-    "/home/kazem/UFDB/Trefethen_20000b/Trefethen_20000b.mtx",
-    "/home/kazem/Downloads/msc23052/msc23052.mtx",
-    "/home/kazem/Downloads/olafu/olafu.mtx",
-    "/home/kazem/Downloads/gyro_k/gyro_k.mtx",
-    "/home/kazem/Downloads/cant/cant.mtx"
-            ]
+    Returns:
+        bool: True if successful, False if the matrix is not SPD.
+    """
 
-for mtx in mtx_list:
-    Ao = spio.mmread(mtx)
-    Ao_csc = Ao.tocsc()
-    # lower part
-    Au = sp.triu(Ao).tocsc()
-    A = sp.tril(Ao).tocsc()
+    f = np.zeros(n)
+    finger = np.array(lC, copy=True)  # Initialize finger with a copy of lC
 
-    factor = cholesky(Ao)
-    L = factor.LD()
-    P = factor.P()
-    b = L.dot(np.ones(L.shape[0]))  #np.random.rand(Ao.shape[0])
-    # Solve the linear system Ax = b
-    #x = factor(b)
-    x = factor.solve_A(b)
-    print("nnz L: ", L.nnz)
-    #L = factor.L()
-    #factor = analyze(A)
-    #factor.cholesky(A)
-    #print("nz A: ", A.nnz, " nz L: ", L.nnz)
+    for colNo in range(n):
+        # Uncompressing a col into a 1D array
+        for nzNo in range(c[colNo], c[colNo + 1]):
+            f[r[nzNo]] = values[nzNo]  # Copying nonzero of the col
 
-    #x = factor.solve_A(b)
-    print("norm: ", np.linalg.norm(b-Ao.dot(x)))
-    # permute the matrix Ao
-    Aperm = Ao_csc[P, :][:, P]
+        for i in range(prunePtr[colNo], prunePtr[colNo + 1] - 1):
+            spCol = pruneSet[i]
+            for l in range(lC[spCol], lC[spCol + 1]):
+                if lR[l] >= colNo:
+                    f[lR[l]] -= lValues[l] * lValues[finger[spCol]]
+            finger[spCol] += 1
 
-    parent = np.array(A.shape[0] * [0], dtype=np.int32)
-    common = {}
+        finger[colNo] += 1  # Skip diagonal row
 
-    Ls = convert_csc_to_supernodal(L)
+        if f[colNo] <= 0:
+            return False  # The matrix is not SPD
 
-    x_sup_csc = sptrv_csc_supernodal(Ls['supernodes'],
-                                     Ls['ip'],
-                                     Ls['p'],
-                                     Ls['x'],
-                                     Ls['i'], b)
+        tmpSqrt = math.sqrt(f[colNo])
+        f[colNo] = 0
+        lValues[lC[colNo]] = tmpSqrt
 
-    #x_csc = L.solve(b)
+        for j in range(lC[colNo] + 1, lC[colNo + 1]):
+            lValues[j] = f[lR[j]] / tmpSqrt
+            f[lR[j]] = 0
 
-    print("norm: ", np.linalg.norm(x_sup_csc-np.ones(L.shape[0])))
-
-    #plt.spy(Ls, markersize=1)
-    #plt.show()
-
-    # Compute the etree
-    # Aper_u = sp.triu(Aperm).tocsc()
-    # etree_A = etree(Aper_u, parent, common)
-    #
-    # parent2 = np.array(A.shape[0] * [0], dtype=np.int32)
-    # etree_2 = etree(L, parent2, common)
-    # snodes = detect_supernodes(L, 2)
-    # print("snodes: ", snodes)
-    #plt.spy(L, markersize=1)
-    #plt.show()
-
-    # make sure parent and parent2 are the same
-    #print("diffs", np.sum(parent != parent2))
-
-    # parent = np.array(A.shape[0]*[0], dtype=np.int32)
-    # common = {}
-    # post_order_array = np.array(A.shape[0]*[0], dtype=np.int32)
-    # row_count, col_count = np.array(A.shape[0]*[0], dtype=np.int32), np.array(A.shape[0]*[0], dtype=np.int32)
-    #
-    # e_ret = etree(A, parent, common)
-    # print("ETREE: ", parent+1)
-    # p_o_ret = post_order(parent, A.shape[0], None, post_order_array, common)
-    # print("P_ORDER: ", post_order_array+1)
-    # rc_ret = row_col_counts(A, None, None, parent, post_order_array, row_count, col_count, common)
-
-    # etree_A = etree(Au)
-    # print("ETREE: ", etree_A+1)
-    # p_order = post_order(etree_A)
-    # print("P_ORDER: ", p_order+1)
-    # A_post = A[p_order[:,None], p_order[None, :]].tocsc()
-    # col_count_A = column_count(A, etree_A, p_order)
-    # print("COL_COUNT: ", col_count_A)
-    # row_pattern_A = row_pattern(A, etree_A)
-
-    print("Matrix: ", mtx)
+    return True

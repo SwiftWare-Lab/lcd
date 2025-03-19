@@ -1050,7 +1050,83 @@ def get_supernodal_dag(Ls):
     return L_d
 
 
+import numpy as np
 
+def cs_mark(w, k):
+    """Marks or unmarks a node in the workspace array."""
+    w[k] ^= 1  # Toggle the bit at index k
+
+def cs_marked(w, k):
+    """Checks if a node is marked."""
+    return w[k] != 0
+
+def ereach(n, Ap, Ai, k, parent, s, w):
+    """
+    Computes the elimination tree reach (ereach) for a given column k.
+
+    Args:
+        n (int): Size of the matrix.
+        Ap (np.ndarray): Column pointers for the matrix A.
+        Ai (np.ndarray): Row indices for the matrix A.
+        k (int): Column index.
+        parent (np.ndarray): Parent array representing the elimination tree.
+        s (np.ndarray): Stack array.
+        w (np.ndarray): Workspace array for marking nodes.
+
+    Returns:
+        int: Top index of the stack s, or -1 if inputs are invalid.
+    """
+    if Ap is None or Ai is None or parent is None or s is None or w is None:
+        return -1
+
+    top = n
+    cs_mark(w, k)  # mark node k as visited
+
+    for p in range(Ap[k], Ap[k + 1]):
+        i = Ai[p]  # A(i,k) is nonzero
+        if i > k:
+            continue  # only use upper triangular part of A
+
+        len_ = 0
+        while not cs_marked(w, i):  # traverse up etree
+            s[len_] = i  # L(k,i) is nonzero
+            cs_mark(w, i)  # mark i as visited
+            i = parent[i]
+            len_ += 1
+
+        while len_ > 0:
+            top -= 1
+            len_ -= 1
+            s[top] = s[len_]  # push path onto stack
+
+    for p in range(top, n):
+        cs_mark(w, s[p])  # unmark all nodes
+
+    cs_mark(w, k)  # unmark node k
+    return top  # s [top..n-1] contains pattern of L(k,:)
+
+def pruning(n, c, r, ET, prunePtr, pruneSet):
+    """
+    Specifies the row patterns of L and pruneSet.
+
+    Args:
+        n (int): Size of the matrix.
+        c (np.ndarray): Column pointers for the matrix.
+        r (np.ndarray): Row indices for the matrix.
+        ET (np.ndarray): Elimination tree (parent array).
+        prunePtr (np.ndarray): Prune pointers (modified in place).
+        pruneSet (np.ndarray): Prune set (modified in place).
+    """
+
+    xi = np.zeros(2 * n, dtype=int)
+    prunePtr[0] = 0
+    prunePtr[1] = 0
+
+    for colNo in range(1, n):
+        top = ereach(n, c, r, colNo, ET, xi, xi + n)
+        prunePtr[colNo + 1] = prunePtr[colNo] + (n - top)
+        for i, cnt in zip(range(top, n), range(n - top)):
+            pruneSet[prunePtr[colNo] + cnt] = xi[i]
 
 
 
