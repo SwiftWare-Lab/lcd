@@ -5,10 +5,11 @@ import scipy.io as spio
 from sksparse.cholmod import cholesky, analyze
 from sympy import factor
 
-from benchmark.cholesky import cholesky_left_looking
+from benchmark.cholesky import cholesky_left_looking, \
+    cholesky_left_looking_coupled, cholesky_left_looking_numba
 
 from utils.symbolic_cholesky_csc import etree, post_order, row_col_counts, \
-    detect_supernodes, convert_csc_to_supernodal, pruning
+    detect_supernodes, convert_csc_to_supernodal, pruning, ereach
 from sptrsv_supernodal import sptrv_csc_supernodal
 
 
@@ -41,14 +42,18 @@ for mtx in mtx_list:
     #x = factor(b)
     x = factor.solve_A(b)
     print("nnz L: ", L.nnz)
+    print("norm cholesky: ", np.linalg.norm(b - Ao.dot(x), ord=np.inf))
+    print("norm cholesky csc: ", np.linalg.norm(b - Ao_csc.dot(x), ord=np.inf))
     #L = factor.L()
     #factor = analyze(A)
     #factor.cholesky(A)
     #print("nz A: ", A.nnz, " nz L: ", L.nnz)
     # reorder A
     A_p = A[P, :][:, P].tocsc(copy=True).sorted_indices()
-    #Au_p = Au[P, :][:, P]
-    Ao_p = Ao_csc[P, :][:, P].tocsc(copy=True).sorted_indices()
+    Au_p = Au[P, :][:, P].tocsc(copy=True).sorted_indices()
+    #Ao_p = Ao_csc[P, :][:, P].tocsc(copy=True).sorted_indices()
+    Ao_p = Ao_csc[P[:, np.newaxis], P[np.newaxis, :]].tocsc(copy=True).sorted_indices()
+    #Ao_pt = Ao_p.T.tocsc(copy=True).sorted_indices()
 
     L_copy = L.copy()
     L_copy.data[:] = 0
@@ -56,9 +61,18 @@ for mtx in mtx_list:
 
     prunePtr_r, pruneSet_r= np.zeros(L.shape[0]+1, dtype=np.int32), np.zeros(L.nnz, dtype=np.int32)
     parent, common = np.zeros(L.shape[0], dtype=np.int32), {}
-    etree(L, parent, common)
+    etree(Au_p, parent, common)
     #pruning(L.shape[0], Ao_p.indptr, Ao_p.indices, parent, prunePtr_r, pruneSet_r)
     Lt = L.T.tocsc()
+    n=L.shape[0]
+    # for i in range(n):
+    #     if i == 5:
+    #         print("dd")
+    #     xi = np.zeros(2 * n, dtype=int)
+    #     top = ereach(n, Ao_p.indptr, Ao_p.indices, i, parent, xi[0:n], xi[n:])
+    #     if len(xi[top:n]) + 1 !=  len(Lt.indices [Lt.indptr[i]:Lt.indptr[i+1]] ):
+    #         print(i, " : ", len( xi[top:n] ) + 1, " : ", len(Lt.indices [Lt.indptr[i]:Lt.indptr[i+1]] ))
+
     prunePtr, pruneSet = Lt.indptr, Lt.indices
 
     cholesky_left_looking(L_copy.shape[0], Ao_p.indptr, Ao_p.indices, Ao_p.data,
@@ -66,6 +80,16 @@ for mtx in mtx_list:
 
 #
     print("diff L: ", np.linalg.norm(L.data-L_copy.data, np.inf))
+
+    L_copy2 = L.copy()
+    L_copy2.data[:] = 0
+    L_copy2 = L_copy2.tocsc()
+
+    cholesky_left_looking_numba(L_copy2.shape[0], Ao_p.indptr, Ao_p.indices, Ao_p.data,
+                                L_copy2.indptr, L_copy2.indices, L_copy2.data, prunePtr, pruneSet)
+
+    print("diff L numba: ", np.linalg.norm(L.data-L_copy2.data, np.inf))
+
 
 
     #print("norm: ", np.linalg.norm(b-Ao.dot(x)))

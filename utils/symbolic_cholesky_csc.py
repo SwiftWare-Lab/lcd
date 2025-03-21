@@ -1054,11 +1054,11 @@ import numpy as np
 
 def cs_mark(w, k):
     """Marks or unmarks a node in the workspace array."""
-    w[k] ^= 1  # Toggle the bit at index k
+    w[k] = -w[k]-2  # Toggle the bit at index k
 
 def cs_marked(w, k):
     """Checks if a node is marked."""
-    return w[k] != 0
+    return w[k] < 0
 
 def ereach(n, Ap, Ai, k, parent, s, w):
     """
@@ -1093,6 +1093,7 @@ def ereach(n, Ap, Ai, k, parent, s, w):
             cs_mark(w, i)  # mark i as visited
             i = parent[i]
             len_ += 1
+            assert i>=0, "Parent array is invalid"
 
         while len_ > 0:
             top -= 1
