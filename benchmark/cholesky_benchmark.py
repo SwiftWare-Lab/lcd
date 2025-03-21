@@ -19,11 +19,11 @@ mtx_list = [
     "/home/kazem/Downloads/ex5/ex5.mtx",
     "/home/kazem/Downloads/mesh1e1/mesh1e1.mtx","/home/kazem/Downloads/nos4/nos4.mtx",
     "/home/kazem/Downloads/bcsstk03/bcsstk03.mtx",
-    "/home/kazem/UFDB/Trefethen_20000b/Trefethen_20000b.mtx",
     "/home/kazem/Downloads/msc23052/msc23052.mtx",
     "/home/kazem/Downloads/olafu/olafu.mtx",
     "/home/kazem/Downloads/gyro_k/gyro_k.mtx",
-    "/home/kazem/Downloads/cant/cant.mtx"
+    "/home/kazem/Downloads/cant/cant.mtx",
+    "/home/kazem/UFDB/Trefethen_20000b/Trefethen_20000b.mtx"
             ]
 
 for mtx in mtx_list:
@@ -54,10 +54,10 @@ for mtx in mtx_list:
     L_copy.data[:] = 0
     L_copy = L_copy.tocsc()
 
-    prunePtr, pruneSet= np.zeros(L.shape[0]+1, dtype=np.int32), np.zeros(L.nnz, dtype=np.int32)
+    prunePtr_r, pruneSet_r= np.zeros(L.shape[0]+1, dtype=np.int32), np.zeros(L.nnz, dtype=np.int32)
     parent, common = np.zeros(L.shape[0], dtype=np.int32), {}
     etree(L, parent, common)
-    pruning(L.shape[0], Ao_p.indptr, Ao_p.indices, parent, prunePtr, pruneSet)
+    #pruning(L.shape[0], Ao_p.indptr, Ao_p.indices, parent, prunePtr_r, pruneSet_r)
     Lt = L.T.tocsc()
     prunePtr, pruneSet = Lt.indptr, Lt.indices
 
