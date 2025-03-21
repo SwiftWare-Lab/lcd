@@ -3,6 +3,7 @@
 import numpy as np
 import math
 
+
 def cholesky_left_looking(n, c, r, values, lC, lR, lValues, prunePtr, pruneSet):
     """
     Performs a Cholesky decomposition on a given matrix (c, r, values), i.e.
@@ -26,7 +27,6 @@ def cholesky_left_looking(n, c, r, values, lC, lR, lValues, prunePtr, pruneSet):
 
     f = np.zeros(n)
     finger = np.array(lC, copy=True)  # Initialize finger with a copy of lC
-
     for colNo in range(n):
         # Uncompressing a col into a 1D array
         for nzNo in range(c[colNo], c[colNo + 1]):

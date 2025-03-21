@@ -5,16 +5,18 @@ import scipy.io as spio
 from sksparse.cholmod import cholesky, analyze
 from sympy import factor
 
-#from sksparse.cholmod import cholesky, analyze, Factor
+from benchmark.cholesky import cholesky_left_looking
 
 from utils.symbolic_cholesky_csc import etree, post_order, row_col_counts, \
-    detect_supernodes, convert_csc_to_supernodal
+    detect_supernodes, convert_csc_to_supernodal, pruning
 from sptrsv_supernodal import sptrv_csc_supernodal
 
+
+Relaxtion = 1
 mtx_list = [
     #"/Users/kazem/UFDB/LFAT5/LFAT5.mtx",
-    #"/home/kazem/Downloads/LFAT5/LFAT5.mtx",
-    #"/home/kazem/Downloads/ex5/ex5.mtx",
+    "/home/kazem/Downloads/LFAT5/LFAT5.mtx",
+    "/home/kazem/Downloads/ex5/ex5.mtx",
     "/home/kazem/Downloads/mesh1e1/mesh1e1.mtx","/home/kazem/Downloads/nos4/nos4.mtx",
     "/home/kazem/Downloads/bcsstk03/bcsstk03.mtx",
     "/home/kazem/UFDB/Trefethen_20000b/Trefethen_20000b.mtx",
@@ -31,8 +33,8 @@ for mtx in mtx_list:
     Au = sp.triu(Ao).tocsc()
     A = sp.tril(Ao).tocsc()
 
-    factor = cholesky(Ao)
-    L = factor.LD()
+    factor = cholesky(Ao_csc)
+    L = factor.L()
     P = factor.P()
     b = L.dot(np.ones(L.shape[0]))  #np.random.rand(Ao.shape[0])
     # Solve the linear system Ax = b
@@ -43,26 +45,30 @@ for mtx in mtx_list:
     #factor = analyze(A)
     #factor.cholesky(A)
     #print("nz A: ", A.nnz, " nz L: ", L.nnz)
+    # reorder A
+    A_p = A[P, :][:, P].tocsc(copy=True).sorted_indices()
+    #Au_p = Au[P, :][:, P]
+    Ao_p = Ao_csc[P, :][:, P].tocsc(copy=True).sorted_indices()
 
-    #x = factor.solve_A(b)
-    print("norm: ", np.linalg.norm(b-Ao.dot(x)))
-    # permute the matrix Ao
-    Aperm = Ao_csc[P, :][:, P]
+    L_copy = L.copy()
+    L_copy.data[:] = 0
+    L_copy = L_copy.tocsc()
 
-    parent = np.array(A.shape[0] * [0], dtype=np.int32)
-    common = {}
+    prunePtr, pruneSet= np.zeros(L.shape[0]+1, dtype=np.int32), np.zeros(L.nnz, dtype=np.int32)
+    parent, common = np.zeros(L.shape[0], dtype=np.int32), {}
+    etree(L, parent, common)
+    pruning(L.shape[0], Ao_p.indptr, Ao_p.indices, parent, prunePtr, pruneSet)
+    Lt = L.T.tocsc()
+    prunePtr, pruneSet = Lt.indptr, Lt.indices
 
-    Ls = convert_csc_to_supernodal(L)
+    cholesky_left_looking(L_copy.shape[0], Ao_p.indptr, Ao_p.indices, Ao_p.data,
+                          L_copy.indptr, L_copy.indices, L_copy.data, prunePtr, pruneSet)
 
-    x_sup_csc = sptrv_csc_supernodal(Ls['supernodes'],
-                                     Ls['ip'],
-                                     Ls['p'],
-                                     Ls['x'],
-                                     Ls['i'], b)
+#
+    print("diff L: ", np.linalg.norm(L.data-L_copy.data, np.inf))
 
-    #x_csc = L.solve(b)
 
-    print("norm: ", np.linalg.norm(x_sup_csc-np.ones(L.shape[0])))
+    #print("norm: ", np.linalg.norm(b-Ao.dot(x)))
 
 
     print("Matrix: ", mtx)
