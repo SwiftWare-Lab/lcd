@@ -1118,12 +1118,13 @@ def pruning(n, c, r, ET, prunePtr, pruneSet):
         pruneSet (np.ndarray): Prune set (modified in place).
     """
 
-    xi = np.zeros(2 * n, dtype=int)
+
     prunePtr[0] = 0
     prunePtr[1] = 0
 
     for colNo in range(1, n):
-        top = ereach(n, c, r, colNo, ET, xi, xi + n)
+        xi = np.zeros(2 * n, dtype=int)
+        top = ereach(n, c, r, colNo, ET, xi[0:n], xi[n:])
         prunePtr[colNo + 1] = prunePtr[colNo] + (n - top)
         for i, cnt in zip(range(top, n), range(n - top)):
             pruneSet[prunePtr[colNo] + cnt] = xi[i]
