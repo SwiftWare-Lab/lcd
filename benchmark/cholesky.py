@@ -125,16 +125,17 @@ def cholesky_left_looking_numba_parallel(n, c, r, values, lC, lR, lValues,
                                          prunePtr, pruneSet, thread_flags, ret_val):
     ret_val = True
     f = np.zeros(n)
-    #finger = np.array(lC, dtype=np.int32)  # Initialize finger with a copy of lC
-    finger = np.zeros(n+1, dtype=np.int32)
+    # finger = np.array(lC, dtype=np.int32)  # Initialize finger with a copy of lC
+    finger = np.zeros(n + 1, dtype=np.int32)
     # copy Lc to finger
-    for i in range(n+1):
+    for i in range(n + 1):
         finger[i] = lC[i]
     # finger = numba.typed.List(
     #     lC.tolist())  # Initialize finger with a copy of lC
     for colNo in prange(n):
         while thread_flags[colNo] > 0:
             pass
+        print("colNo: ", colNo)
         # Uncompressing a col into a 1D array
         for nzNo in range(c[colNo], c[colNo + 1]):
             f[r[nzNo]] = values[nzNo]  # Copying nonzero of the col

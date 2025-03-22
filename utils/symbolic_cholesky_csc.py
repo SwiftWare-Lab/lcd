@@ -1131,5 +1131,24 @@ def pruning(n, c, r, ET, prunePtr, pruneSet):
             pruneSet[prunePtr[colNo] + cnt] = xi[i]
 
 
+def cholesky_left_looking_numba_parallel_inspector(n, c, r, lC, lR,
+                                         prunePtr, pruneSet, thread_flags):
+    # finger = numba.typed.List(
+    #     lC.tolist())  # Initialize finger with a copy of lC
+    for colNo in range(n):
+        # Uncompressing a col into a 1D array
+        for nzNo in range(c[colNo], c[colNo + 1]):
+            f[r[nzNo]] = values[nzNo]  # Copying nonzero of the col
+        for i in range(prunePtr[colNo], prunePtr[colNo + 1] - 1):
+            spCol = pruneSet[i]
+            # with lock:
+            #     thread_flags[spCol] -= 1
+            for l in range(lC[spCol], lC[spCol + 1]):
+                if lR[l] >= colNo:
+                    f[lR[l]] -= lValues[l] * lValues[finger[spCol]]
+            finger[spCol] += 1
+        thread_flags[colNo] += 1
+        for j in range(lC[colNo] + 1, lC[colNo + 1]):
+            thread_flags[lR[j]] += 1
 
 
