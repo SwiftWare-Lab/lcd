@@ -6,10 +6,12 @@ from sksparse.cholmod import cholesky, analyze
 from sympy import factor
 
 from benchmark.cholesky import cholesky_left_looking, \
-    cholesky_left_looking_coupled, cholesky_left_looking_numba
+    cholesky_left_looking_coupled, cholesky_left_looking_numba, \
+    cholesky_left_looking_numba_parallel
 
 from utils.symbolic_cholesky_csc import etree, post_order, row_col_counts, \
-    detect_supernodes, convert_csc_to_supernodal, pruning, ereach
+    detect_supernodes, convert_csc_to_supernodal, pruning, ereach, \
+    cholesky_left_looking_numba_parallel_inspector
 from sptrsv_supernodal import sptrv_csc_supernodal
 
 
@@ -89,6 +91,17 @@ for mtx in mtx_list:
                                 L_copy2.indptr, L_copy2.indices, L_copy2.data, prunePtr, pruneSet)
 
     print("diff L numba: ", np.linalg.norm(L.data-L_copy2.data, np.inf))
+
+    thread_flags = np.zeros(L.shape[0], dtype=np.int32)
+    cholesky_left_looking_numba_parallel_inspector(L_copy2.shape[0], Ao_p.indptr, Ao_p.indices,
+                                L_copy2.indptr, L_copy2.indices, prunePtr, pruneSet, thread_flags)
+
+    ret_val = True
+    L_copy2.data[:] = 0
+    cholesky_left_looking_numba_parallel(L_copy2.shape[0], Ao_p.indptr, Ao_p.indices, Ao_p.data,
+                          L_copy2.indptr, L_copy2.indices, L_copy2.data, prunePtr, pruneSet, thread_flags, ret_val)
+
+    print("diff L numba parallel: ", np.linalg.norm(L.data-L_copy2.data, np.inf))
 
 
 
