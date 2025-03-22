@@ -4,7 +4,8 @@ import numpy as np
 import math
 
 import numba
-from numba import njit
+from numba import njit, prange
+import threading
 
 from utils.symbolic_cholesky_csc import ereach
 
@@ -96,28 +97,67 @@ def cholesky_left_looking_numba(n, c, r, values, lC, lR, lValues, prunePtr, prun
         # Uncompressing a col into a 1D array
         for nzNo in range(c[colNo], c[colNo + 1]):
             f[r[nzNo]] = values[nzNo]  # Copying nonzero of the col
-
         for i in range(prunePtr[colNo], prunePtr[colNo + 1] - 1):
             spCol = pruneSet[i]
             for l in range(lC[spCol], lC[spCol + 1]):
                 if lR[l] >= colNo:
                     f[lR[l]] -= lValues[l] * lValues[finger[spCol]]
             finger[spCol] += 1
-
         finger[colNo] += 1  # Skip diagonal row
-
         if f[colNo] <= 0:
             return False  # The matrix is not SPD
-
         tmpSqrt = math.sqrt(f[colNo])
         f[colNo] = 0
         lValues[lC[colNo]] = tmpSqrt
+        for j in range(lC[colNo] + 1, lC[colNo + 1]):
+            lValues[j] = f[lR[j]] / tmpSqrt
+            f[lR[j]] = 0
+    return True
 
+
+# Define a lock
+lock = threading.Lock()
+
+@njit(numba.void(numba.int32, numba.int32[:], numba.int32[:], numba.float64[:],
+                 numba.int32[:], numba.int32[:], numba.float64[:], numba.int32[:],
+                 numba.int32[:], numba.int32[:], numba.bool), parallel=True, fastmath=True)
+def cholesky_left_looking_numba_parallel(n, c, r, values, lC, lR, lValues,
+                                         prunePtr, pruneSet, thread_flags, ret_val):
+    ret_val = True
+    f = np.zeros(n)
+    #finger = np.array(lC, dtype=np.int32)  # Initialize finger with a copy of lC
+    finger = np.zeros(n+1, dtype=np.int32)
+    # copy Lc to finger
+    for i in range(n+1):
+        finger[i] = lC[i]
+    # finger = numba.typed.List(
+    #     lC.tolist())  # Initialize finger with a copy of lC
+    for colNo in prange(n):
+        while thread_flags[colNo] > 0:
+            pass
+        # Uncompressing a col into a 1D array
+        for nzNo in range(c[colNo], c[colNo + 1]):
+            f[r[nzNo]] = values[nzNo]  # Copying nonzero of the col
+        for i in range(prunePtr[colNo], prunePtr[colNo + 1] - 1):
+            spCol = pruneSet[i]
+            # with lock:
+            #     thread_flags[spCol] -= 1
+            for l in range(lC[spCol], lC[spCol + 1]):
+                if lR[l] >= colNo:
+                    f[lR[l]] -= lValues[l] * lValues[finger[spCol]]
+            finger[spCol] += 1
+            with numba.objmode():
+                thread_flags[spCol] -= 1
+        finger[colNo] += 1  # Skip diagonal row
+        if f[colNo] <= 0:
+            ret_val = False
+        tmpSqrt = math.sqrt(f[colNo])
+        f[colNo] = 0
+        lValues[lC[colNo]] = tmpSqrt
         for j in range(lC[colNo] + 1, lC[colNo + 1]):
             lValues[j] = f[lR[j]] / tmpSqrt
             f[lR[j]] = 0
 
-    return True
 
 
 def cholesky_left_looking_coupled(n, c, r, values, lC, lR, lValues, etree):
