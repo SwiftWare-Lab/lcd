@@ -43,6 +43,7 @@ def cholesky_left_looking(n, c, r, values, lC, lR, lValues, prunePtr, pruneSet):
             for l in range(lC[spCol], lC[spCol + 1]):
                 if lR[l] >= colNo:
                     f[lR[l]] -= lValues[l] * lValues[finger[spCol]]
+                    #print("in col: ", colNo, " for spcol: ", spCol, " row finger is:", lR[finger[spCol]])
             finger[spCol] += 1
 
         finger[colNo] += 1  # Skip diagonal row
@@ -86,24 +87,23 @@ def cholesky_left_looking_numba(n, c, r, values, lC, lR, lValues, prunePtr, prun
     """
 
     f = np.zeros(n)
-    #finger = np.array(lC, dtype=np.int32)  # Initialize finger with a copy of lC
-    finger = np.zeros(n+1, dtype=np.int32)
-    # copy Lc to finger
-    for i in range(n+1):
-        finger[i] = lC[i]
-    # finger = numba.typed.List(
-    #     lC.tolist())  # Initialize finger with a copy of lC
     for colNo in range(n):
+        lb, ub = prunePtr[colNo], prunePtr[colNo + 1] - 1
         # Uncompressing a col into a 1D array
         for nzNo in range(c[colNo], c[colNo + 1]):
             f[r[nzNo]] = values[nzNo]  # Copying nonzero of the col
-        for i in range(prunePtr[colNo], prunePtr[colNo + 1] - 1):
+        for i in range(lb, ub):
             spCol = pruneSet[i]
+            sw = False
+            facing_val, tmp = 0, 0
+            facing_idx = -1
             for l in range(lC[spCol], lC[spCol + 1]):
-                if lR[l] >= colNo:
-                    f[lR[l]] -= lValues[l] * lValues[finger[spCol]]
-            finger[spCol] += 1
-        finger[colNo] += 1  # Skip diagonal row
+                if lR[l] == colNo:
+                    facing_val = lValues[l]
+                    facing_idx = l
+                    break
+            for l in range(facing_idx, lC[spCol + 1]):
+                f[lR[l]] -= lValues[l] * facing_val
         if f[colNo] <= 0:
             return False  # The matrix is not SPD
         tmpSqrt = math.sqrt(f[colNo])
@@ -124,40 +124,45 @@ lock = threading.Lock()
 def cholesky_left_looking_numba_parallel(n, c, r, values, lC, lR, lValues,
                                          prunePtr, pruneSet, thread_flags, ret_val):
     ret_val = True
-    f = np.zeros(n)
-    # finger = np.array(lC, dtype=np.int32)  # Initialize finger with a copy of lC
-    finger = np.zeros(n + 1, dtype=np.int32)
-    # copy Lc to finger
-    for i in range(n + 1):
-        finger[i] = lC[i]
-    # finger = numba.typed.List(
-    #     lC.tolist())  # Initialize finger with a copy of lC
     for colNo in prange(n):
-        while thread_flags[colNo] > 0:
-            pass
-        print("colNo: ", colNo)
+        # print("colNo begin: ", colNo)
         # Uncompressing a col into a 1D array
+        f = np.zeros(n)
         for nzNo in range(c[colNo], c[colNo + 1]):
             f[r[nzNo]] = values[nzNo]  # Copying nonzero of the col
-        for i in range(prunePtr[colNo], prunePtr[colNo + 1] - 1):
+        lb, ub = prunePtr[colNo], prunePtr[colNo + 1] - 1
+        th_flag = thread_flags[colNo]
+        while not th_flag:
+            if ub - lb == 0:
+                th_flag = True
+                break
+            for i in range(lb, ub):
+                spCol = pruneSet[i]
+                if not thread_flags[spCol]:
+                    th_flag = False
+                    break
+                th_flag = True
+        for i in range(lb, ub):
             spCol = pruneSet[i]
-            # with lock:
-            #     thread_flags[spCol] -= 1
+            facing_val, tmp = 0, 0
+            facing_idx = -1
             for l in range(lC[spCol], lC[spCol + 1]):
-                if lR[l] >= colNo:
-                    f[lR[l]] -= lValues[l] * lValues[finger[spCol]]
-            finger[spCol] += 1
-            with numba.objmode():
-                thread_flags[spCol] -= 1
-        finger[colNo] += 1  # Skip diagonal row
+                if lR[l] == colNo:
+                    facing_val = lValues[l]
+                    facing_idx = l
+                    break
+            for l in range(facing_idx, lC[spCol + 1]):
+                f[lR[l]] -= lValues[l] * facing_val
         if f[colNo] <= 0:
-            ret_val = False
+            ret_val = False  # The matrix is not SPD
         tmpSqrt = math.sqrt(f[colNo])
         f[colNo] = 0
         lValues[lC[colNo]] = tmpSqrt
         for j in range(lC[colNo] + 1, lC[colNo + 1]):
             lValues[j] = f[lR[j]] / tmpSqrt
             f[lR[j]] = 0
+        with numba.objmode():
+            thread_flags[colNo] = True
 
 
 
