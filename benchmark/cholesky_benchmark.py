@@ -26,12 +26,16 @@ mtx_list = [
     "/home/kazem/Downloads/olafu/olafu.mtx",
     "/home/kazem/Downloads/gyro_k/gyro_k.mtx",
     "/home/kazem/Downloads/cant/cant.mtx",
-    "/home/kazem/UFDB/Trefethen_20000b/Trefethen_20000b.mtx"
+    #"/home/kazem/UFDB/Trefethen_20000b/Trefethen_20000b.mtx"
             ]
 
 for mtx in mtx_list:
+    print("Matrix: ", mtx)
     Ao = spio.mmread(mtx)
     Ao_csc = Ao.tocsc()
+    if Ao_csc.data.dtype != np.float64:
+        print(f"Matrix {mtx} is not double precision")
+        Ao_csc.data = Ao_csc.data.astype(np.float64)
     # lower part
     Au = sp.triu(Ao).tocsc()
     A = sp.tril(Ao).tocsc()
@@ -77,11 +81,11 @@ for mtx in mtx_list:
 
     prunePtr, pruneSet = Lt.indptr, Lt.indices
 
-    cholesky_left_looking(L_copy.shape[0], Ao_p.indptr, Ao_p.indices, Ao_p.data,
-                          L_copy.indptr, L_copy.indices, L_copy.data, prunePtr, pruneSet)
+    # cholesky_left_looking(L_copy.shape[0], Ao_p.indptr, Ao_p.indices, Ao_p.data,
+    #                       L_copy.indptr, L_copy.indices, L_copy.data, prunePtr, pruneSet)
 
 #
-    print("diff L: ", np.linalg.norm(L.data-L_copy.data, np.inf))
+    #print("diff L: ", np.linalg.norm(L.data-L_copy.data, np.inf))
 
     L_copy2 = L.copy()
     L_copy2.data[:] = 0
@@ -93,9 +97,8 @@ for mtx in mtx_list:
     print("diff L numba: ", np.linalg.norm(L.data-L_copy2.data, np.inf))
 
     thread_flags = np.zeros(L.shape[0], dtype=np.int32)
-    cholesky_left_looking_numba_parallel_inspector(L_copy2.shape[0], Ao_p.indptr, Ao_p.indices,
-                                L_copy2.indptr, L_copy2.indices, prunePtr, pruneSet, thread_flags)
-
+    # cholesky_left_looking_numba_parallel_inspector(L_copy2.shape[0], Ao_p.indptr, Ao_p.indices,
+    #                             L_copy2.indptr, L_copy2.indices, prunePtr, pruneSet, thread_flags)
     ret_val = True
     L_copy2.data[:] = 0
     cholesky_left_looking_numba_parallel(L_copy2.shape[0], Ao_p.indptr, Ao_p.indices, Ao_p.data,
@@ -108,4 +111,3 @@ for mtx in mtx_list:
     #print("norm: ", np.linalg.norm(b-Ao.dot(x)))
 
 
-    print("Matrix: ", mtx)
