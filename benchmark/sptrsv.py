@@ -27,25 +27,29 @@ from bench_utils import compute_wavefront
 REAL_TYPE = torch.float64
 REAL_TYPE_TL = tl.float64
 
-NUM_RUNS=1
 
+NUM_RUNS=1
 
 
 DEVICE = torch.device("cuda:0")
 
 
-
-@njit(numba.int32[:](numba.float32[:], numba.int32[:], numba.int32[:], numba.float32[:]), pipeline_class=MyCompiler)
+@njit(numba.float32[:](numba.float32[:], numba.int32[:], numba.int32[:], numba.float32[:]), pipeline_class=MyCompiler)
 def sptrsv_csr_numba(A, IA, JA, b):
     n = len(IA) - 1
-    x = np.zeros(n)
+    x = np.zeros(n, dtype=numba.float32)
+    # 128
     for i in range(n):
+        # 132
         x[i] = b[i]
+        # 192
         for j in range(IA[i], IA[i + 1]):
+            # 196
             x[i] -= A[j] * x[JA[j]]
+        # 250
         x[i] /= A[IA[i + 1] - 1]
+    # 304
     return x
-
 
 
 @triton.jit
