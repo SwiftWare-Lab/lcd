@@ -52,6 +52,20 @@ def sptrsv_csr_numba(A, IA, JA, b):
     return x
 
 
+def trsv(L, b):
+    m = L.shape[0]
+    x = np.zeros(m)
+
+    for i in range(m):
+        sum = 0
+        for j in range(i):
+            sum += L[i, j] * x[j]
+
+        x[i] = (b[i] - sum) / L[i, i]
+    
+    return x
+
+
 @triton.jit
 def sptrsv_sync_free(
     data_ptr, indices_ptr, indptr_ptr, rhs_vec, y_ptr,
