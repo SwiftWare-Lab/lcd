@@ -52,16 +52,18 @@ def sptrsv_csr_numba(A, IA, JA, b):
     return x
 
 
+# todo: Temp kernel for testing compiler pass on a different structure. Remove after
+# @njit(numba.float32[:](numba.float32[:], numba.float32[:]), pipeline_class=MyCompiler)
 def trsv(L, b):
     m = L.shape[0]
-    x = np.zeros(m)
+    x = np.zeros(m, dtype=numba.float32)
 
     for i in range(m):
         sum = 0
         for j in range(i):
-            sum += L[i, j] * x[j]
+            sum += L[i][j] * x[j]
 
-        x[i] = (b[i] - sum) / L[i, i]
+        x[i] = (b[i] - sum) / L[i][j]
     
     return x
 
