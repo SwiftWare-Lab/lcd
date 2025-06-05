@@ -1,0 +1,7 @@
+,Trefethen_20000b.mtx,msc23052.mtx
+triton,1,1
+triton-sync-free,1,1
+cusparse,1,1
+numba-sptrsv,1,1
+numba-sync-free,1,0
+triton-spmv,0,0

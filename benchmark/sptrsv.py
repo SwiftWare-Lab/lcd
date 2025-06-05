@@ -10,7 +10,7 @@ from cupyx.scipy.sparse import csc_matrix as cp_csc_matrix  # GPU sparse matrix
 # import csr_matrix as cp_csr_matrix  # GPU sparse matrix
 from cupyx.scipy.sparse.linalg import spsolve_triangular as cp_spsolve  # GPU sparse solver
 import time
-from scipy.sparse import csc_matrix
+from scipy.sparse import csc_matrix, csr_matrix
 import torch
 import triton
 import triton.language as tl
@@ -35,17 +35,27 @@ DEVICE = torch.device("cuda:0")
 
 
 
-@njit(numba.int32[:](numba.float32[:], numba.int32[:], numba.int32[:], numba.float32[:]), pipeline_class=MyCompiler)
+@njit(numba.float32[:](numba.float32[:], numba.int32[:], numba.int32[:], numba.float32[:]), pipeline_class=MyCompiler)
 def sptrsv_csr_numba(A, IA, JA, b):
     n = len(IA) - 1
-    x = np.zeros(n)
+    x = np.zeros(n, dtype=np.float32)
     for i in range(n):
         x[i] = b[i]
-        for j in range(IA[i], IA[i + 1]):
+        for j in range(IA[i], IA[i + 1] - 1):
             x[i] -= A[j] * x[JA[j]]
         x[i] /= A[IA[i + 1] - 1]
     return x
 
+
+dense = np.array([
+    [4, 0, 0],
+    [1, 5, 0],
+    [2, 1, 6]
+], dtype=np.float32)
+m = csr_matrix(dense)
+b = np.array([7, 8, 9], dtype=np.float32)
+x = sptrsv_csr_numba(m.data, m.indptr, m.indices, b)
+print(m @ x)
 
 
 @triton.jit
@@ -99,50 +109,32 @@ def sptrsv_sync_free_csc2(
 
 
 @triton.jit
-def sptrsv_sync_free_csc(
+def sptrsv_sync_free_csr(
         data_ptr, indices_ptr, indptr_ptr, rhs_vec, y_ptr,
         M, N, nnz, BLOCK_SIZE: tl.constexpr, count_dep
 ):
-    col = tl.program_id(axis=0)  # Get the row id based on the program grid
-    is_valid_row = col < M
+    i = tl.program_id(axis=0)  # Get the row id based on the program grid
+    is_valid_row = i < M
+
     if is_valid_row:
-        while tl.atomic_add(count_dep + col, 0) != 1:
-            #print("dep:", tl.load(count_dep + col))
+        while tl.atomic_add(count_dep + i, 0) != 1:
             pass  # Busy-wait: Do nothing, just keep looping
-        #print("dep:", col)
-        start = tl.load(indptr_ptr + col, mask=is_valid_row, other=0)
-        end = tl.load(indptr_ptr + col + 1, mask=is_valid_row, other=0)
-        col_length = end - start
 
-        # diagonal = tl.load(data_ptr + start)
-        # nonzero_mask = diagonal != 0
-        # tl.store(y_ptr + col,
-        #          ((tl.load(rhs_vec + col) - tl.load(y_ptr + col)) / diagonal).to(REAL_TYPE_TL),
-        #          mask=nonzero_mask)
-        # diagonal_val = tl.load(data_ptr + start)
-        # rhs_val = tl.load(rhs_vec + col)
-        # tl.store(y_ptr + col, rhs_val / diagonal_val)  # Initial solve step
-        y_col_sol = (tl.load(rhs_vec + col) - tl.load(y_ptr + col)) / tl.load(data_ptr + start)
-        tl.store(y_ptr + col, y_col_sol)
-        #tl.store(y_ptr + col, (tl.load(rhs_vec + col) - tl.load(y_ptr + col)) / tl.load(data_ptr + start))# b[i] / A[i, i]
-        # diagonal_val = tl.load(data_ptr + start)
-        # rhs_val = tl.load(rhs_vec + col)
-        # solution = rhs_val / diagonal_val
-        # tl.store(y_ptr + col, solution)
+        row_start = tl.load(indptr_ptr + i, mask=is_valid_row, other=0)
+        row_end = tl.load(indptr_ptr + i + 1, mask=is_valid_row, other=0)
 
-        #print("row: ", tl.load(y_ptr + col))
+        y_col_sol = (tl.load(rhs_vec + i) - tl.load(y_ptr + i)) / tl.load(data_ptr + row_end - 1)
+        tl.store(y_ptr + i, y_col_sol)
+
         # Thread-level processing
         thread_idx = tl.arange(0, BLOCK_SIZE)
-        block_start = start + 1 + thread_idx
+        block_start = row_start + 1 + thread_idx
 
-        mask = block_start < end
+        mask = block_start < row_end
         data_col = tl.load(data_ptr + block_start, mask=mask, other=0)
-        #y_col_scalar = tl.load(y_ptr + col).to(REAL_TYPE_TL)
 
         # Thread-specific partial contributions
-        #partial_sum = data_col * tl.load(y_ptr + col)
         partial_sum = data_col * y_col_sol #tl.atomic_add(y_ptr + col, 0)
-        #partial_sum = data_col * solution
 
         indices_col = tl.load(indices_ptr + block_start, mask=mask, other=0)
 
@@ -150,18 +142,48 @@ def sptrsv_sync_free_csc(
 
         # Scatter-add contributions to y_ptr
         tl.atomic_add(y_ptr + indices_col, partial_sum, mask=valid_indices)
-        #tl.fence()
-        # add fence to make sure all threads finish the computation
 
-        # tl.debug_barrier()
         # # Decrement count_dep only after y_ptr is updated
         tl.atomic_add(count_dep + indices_col, -1, mask=valid_indices)
-        # tl.debug_barrier()
-        # for j in range(start + 1, end):
-        #     r_i = tl.load(indices_ptr + j)
-        #     tl.atomic_add(count_dep + r_i, -1)
-            #print ("count", tl.atomic_add(count_dep + r_i, 0))
 
+
+@triton.jit
+def sptrsv_sync_free_csc(
+        data_ptr, indices_ptr, indptr_ptr, rhs_vec, y_ptr,
+        M, N, nnz, BLOCK_SIZE: tl.constexpr, count_dep
+):
+    col = tl.program_id(axis=0)  # Get the col id based on the program grid
+    is_valid_col = col < M
+
+    if is_valid_col:
+        while tl.atomic_add(count_dep + col, 0) != 1:
+            pass  # Busy-wait: Do nothing, just keep looping
+
+        start = tl.load(indptr_ptr + col, mask=is_valid_col, other=0)
+        end = tl.load(indptr_ptr + col + 1, mask=is_valid_col, other=0)
+
+        y_col_sol = (tl.load(rhs_vec + col) - tl.load(y_ptr + col)) / tl.load(data_ptr + start)
+        tl.store(y_ptr + col, y_col_sol)
+
+        # Thread-level processing
+        thread_idx = tl.arange(0, BLOCK_SIZE)
+        block_start = start + 1 + thread_idx
+
+        mask = block_start < end
+        data_col = tl.load(data_ptr + block_start, mask=mask, other=0)
+
+        # Thread-specific partial contributions
+        partial_sum = data_col * y_col_sol
+
+        indices_col = tl.load(indices_ptr + block_start, mask=mask, other=0)
+
+        valid_indices = mask
+
+        # Scatter-add contributions to y_ptr
+        tl.atomic_add(y_ptr + indices_col, partial_sum, mask=valid_indices)
+
+        # # Decrement count_dep only after y_ptr is updated
+        tl.atomic_add(count_dep + indices_col, -1, mask=valid_indices)
 
 
 def sptrsv_sync_free_triton(data, indices, indptr, x, M, N, nnz, dep_counts, max_col_length):
@@ -343,7 +365,7 @@ def simple_sptrsv_csc(L, b):
     n = L.shape[0]
     x = np.zeros(n)
     for i in range(n):
-        x[i] = (b[i] - x[i]) / L.data[L.indptr[i] ]
+        x[i] = (b[i] - x[i]) / L.data[L.indptr[i]]
         for j in range(L.indptr[i]+1, L.indptr[i + 1]):
             x[L.indices[j]] += L.data[j] * x[i]
     return x
