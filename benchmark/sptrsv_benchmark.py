@@ -21,23 +21,64 @@ from sptrsv import *
 # os.environ['NUMBAPRO_NVVM_NUM_THREADS'] = '1'
 # os.environ['CUDA_ENABLE_COMPUTE_CAPABILITY'] = '84'  # Adjust this value based on your GPU
 
-device = cuda.get_current_device()
-print(f"Using GPU: {device.name}")
-print(f"Compute Capability: {device.compute_capability}")
+# device = cuda.get_current_device()
+# print(f"Using GPU: {device.name}")
+# print(f"Compute Capability: {device.compute_capability}")
 
+
+# dense = np.array([
+#     [4, 0, 0],
+#     [0, 5, 0],
+#     [2, 0, 6]
+# ], dtype=np.float32)
+# csr = csr_matrix(dense)
+# csc = csc_matrix(dense)
+# compute_wavefront(csc)
+# b = np.array([7, 8, 9], dtype=np.float32)
+# max_col_size = max(spm.getnnz(axis=0))
+# if max_col_size < 31:
+#     BLOCKSIZE = 32
+# elif max_col_size < 63:
+#     BLOCKSIZE = 64
+# elif max_col_size < 255:
+#     BLOCKSIZE = 256
+# elif max_col_size < 511:
+#     BLOCKSIZE = 512
+# else:
+#     BLOCKSIZE = 1024
+
+# expected = sptrsv_csr_numba(csr.data, csr.indptr, csr.indices, b)
+# actual = sptrsv_sync_free_triton_csr(csr, b, BLOCKSIZE)
+
+# print(f"expected {expected}")
+# print(f"actual {actual}")
+
+# exit(0)
 
 
 mtx_list = [
     # "/home/kazem/Downloads/LFAT5/LFAT5.mtx", "/home/kazem/Downloads/ex5/ex5.mtx", "/home/kazem/Downloads/mesh1e1/mesh1e1.mtx","/home/kazem/Downloads/nos4/nos4.mtx",
     # "/home/kazem/Downloads/bcsstk03/bcsstk03.mtx",
-    "/home/kazem/UFDB/Trefethen_20000b/Trefethen_20000b.mtx",
-    "/home/kazem/Downloads/msc23052/msc23052.mtx",
-    "/home/kazem/Downloads/olafu/olafu.mtx",
-    "/home/kazem/Downloads/gyro_k/gyro_k.mtx",
-    "/home/kazem/Downloads/cant/cant.mtx"
-            ]
-method_list = ["triton", "triton-sync-free", "cusparse",  "numba-sptrsv", "numba-sync-free", "triton-spmv"]
-mtx_list = get_matrix_list("/home/kazem/UFDB/spd_list.txt", "/home/kazem/UFDB/")
+    # "/home/kazem/Downloads/Trefethen_20000b/Trefethen_20000b.mtx",
+    # "/home/kazem/Downloads/msc23052/msc23052.mtx",
+    # "/home/kazem/Downloads/olafu/olafu.mtx",
+    # "/home/kazem/Downloads/gyro_k/gyro_k.mtx",
+    # "/home/kazem/Downloads/cant/cant.mtx"
+
+    "/home/banis/Downloads/Trefethen_20000b/Trefethen_20000b.mtx",
+    # "/home/banis/Downloads/msc23052/msc23052.mtx",
+]
+method_list = [
+    "triton-csc", 
+    "triton-csr", 
+    "triton-sync-free-csc", 
+    # "triton-sync-free-csr", 
+    "cusparse",  
+    "numba-sptrsv", 
+    "numba-sync-free", 
+    "triton-spmv"
+]
+# mtx_list = get_matrix_list("/home/kazem/UFDB/spd_list.txt", "/home/kazem/UFDB/")
 #mtx_list = mtx_list[60:]
 
 def correctness_test():
@@ -48,39 +89,50 @@ def correctness_test():
         # read matrix from file
         matrix = scio.mmread(mtx_matrix_path)
         n = matrix.shape[0]
+
         # convert matrix to csc
-        A = matrix.tocsc()
-        if A.data.dtype != np.float64:
+        A_csc = matrix.tocsc()
+        if A_csc.data.dtype != np.float64:
             print(f"Matrix {mtx_matrix_path} is not double precision")
-            A.data = A.data.astype(np.float64)
+            A_csc.data = A_csc.data.astype(np.float64)
         # makke it sparse lower triangular
-        A = tril(A, format="csc")
+        A_csc = tril(A_csc, format="csc")
         # add diagonals with 100
-        A.setdiag(A.diagonal())
+        A_csc.setdiag(A_csc.diagonal())
         mat_name = mtx_matrix_path.split("/")[-1]
-        matrix_signtures.append(get_matrix_signature(A, mat_name))
-        b = A.dot(np.ones(n))  # Dense vector b
+        matrix_signtures.append(get_matrix_signature(A_csc, mat_name))
+
+        # convert matrix to csr
+        A_csr = matrix.tocsr()
+        A_csr = tril(A_csr, format="csr")
+        A_csr.setdiag(A_csr.diagonal())
+
+        b = A_csc.dot(np.ones(n))  # Dense vector b
         # simple solver
         #b_simp = simple_sptrsv_csc(A, b)
         #print("b:", b_simp)
         # Run CPU solver
-        x_cpu, cpu_median = cpu_solver(A, b)
+        x_cpu, cpu_median = cpu_solver(A_csc, b)
         # Run GPU solver
-        x_gpu, gpu_median = gpu_solver(A, b)
+        x_gpu, gpu_median = gpu_solver(A_csc, b)
 
         # Run Triton solver
-        max_col_size = max(A.getnnz(axis=0))
-        val_f32 = torch.tensor(A.data, dtype=REAL_TYPE, device=DEVICE)
+        max_col_size = max(A_csc.getnnz(axis=0))
+        val_f32 = torch.tensor(A_csc.data, dtype=REAL_TYPE, device=DEVICE)
         b_f32 = torch.tensor(b, dtype=REAL_TYPE, device=DEVICE)
-        indices_i32 = torch.tensor(A.indices, dtype=torch.int32, device=DEVICE)
-        indptr_i32 = torch.tensor(A.indptr, dtype=torch.int32, device=DEVICE)
-        wavefronts = compute_wavefront(A)
+        indices_i32 = torch.tensor(A_csc.indices, dtype=torch.int32, device=DEVICE)
+        indptr_i32 = torch.tensor(A_csc.indptr, dtype=torch.int32, device=DEVICE)
+        wavefronts = compute_wavefront(A_csc)
         wave_start_loc, waves = compact_2d_list(wavefronts)
         waves_gpu = torch.tensor(waves, dtype=torch.int32, device=DEVICE)
-        y = sptrsv_triton(val_f32, indices_i32, indptr_i32, b_f32, n, n, A.nnz, wave_start_loc, waves_gpu)
-        #print("y triton csc:", y[:])
+        y_csc = sptrsv_triton(val_f32, indices_i32, indptr_i32, b_f32, n, n, A_csc.nnz, wave_start_loc, waves_gpu, format='csc')
 
-        in_edge = incoming_edge(A)
+        val_f32_csr = torch.tensor(A_csr.data, dtype=REAL_TYPE, device=DEVICE)
+        indices_i32_csr = torch.tensor(A_csr.indices, dtype=torch.int32, device=DEVICE)
+        indptr_i32_csr = torch.tensor(A_csr.indptr, dtype=torch.int32, device=DEVICE)
+        y_csr = sptrsv_triton(val_f32_csr, indices_i32_csr, indptr_i32_csr, b_f32, n, n, A_csr.nnz, wave_start_loc, waves_gpu, format='csr')
+
+        in_edge = incoming_edge(A_csc)
         #b_sfree_cpu = simple_sptrsv_csc_syncfree(A, b)
         # print("b:", b_sfree_cpu[:10])
         #A_dens = np.array(A.todense())
@@ -97,22 +149,24 @@ def correctness_test():
             BLOCKSIZE = 512
         else:
             BLOCKSIZE = 1024
-        y_sync_free = sptrsv_sync_free_triton(val_f32, indices_i32, indptr_i32, b_f32, n, n, A.nnz, dep_count, BLOCKSIZE)
+
+        y_sync_free_csc = sptrsv_sync_free_triton_csc(val_f32, indices_i32, indptr_i32, b_f32, n, n, A_csc.nnz, dep_count, BLOCKSIZE)
+        # y_sync_free_csr = sptrsv_sync_free_triton_csr(A_csr, b, BLOCKSIZE)
         print(" triton solvers are done!")
         ########### numba sptrsv
         # Transfer data to the GPU
-        d_data = cuda.to_device(A.data)
-        d_indices = cuda.to_device(A.indices)
-        d_indptr = cuda.to_device(A.indptr)
+        d_data = cuda.to_device(A_csc.data)
+        d_indices = cuda.to_device(A_csc.indices)
+        d_indptr = cuda.to_device(A_csc.indptr)
         d_b = cuda.to_device(b)
         #wavefronts = compute_wavefront(A)
         #wave_start_loc, waves = compact_2d_list(wavefronts)
         waves_gpu = cuda.to_device(waves)
-        y_numba_gpu = sptrsc_numba_csc(d_data, d_indices, d_indptr, d_b, A.shape[0], A.shape[1], A.nnz, wave_start_loc, waves_gpu)
+        y_numba_gpu = sptrsc_numba_csc(d_data, d_indices, d_indptr, d_b, A_csc.shape[0], A_csc.shape[1], A_csc.nnz, wave_start_loc, waves_gpu)
         y_numba_cpu = y_numba_gpu.copy_to_host()
 
         #d_in_edges = cuda.to_device(in_edge)
-        y_numba_gpu_sync_free = sptrsc_numba_csc_sync_free(d_data, d_indices, d_indptr, d_b, A.shape[0], A.shape[1], A.nnz, in_edge)
+        y_numba_gpu_sync_free = sptrsc_numba_csc_sync_free(d_data, d_indices, d_indptr, d_b, A_csc.shape[0], A_csc.shape[1], A_csc.nnz, in_edge)
         y_numba_cpu_sync_free = y_numba_gpu_sync_free.copy_to_host()
 
         # Validate results
@@ -125,17 +179,30 @@ def correctness_test():
         else:
             print("\nWarning: cusparse Solutions do not match!")
 
-        if np.allclose(x_cpu, y.cpu().numpy(), atol=1e-5):
-            print("\ntriton wavefront Solutions match within tolerance!")
+        if np.allclose(x_cpu, y_csc.cpu().numpy(), atol=1e-5):
+            print("\ntriton-csc wavefront Solutions match within tolerance!")
             method_correctness[mat_name]['triton'] = 1
         else:
-            print("\nWarning: triton wavefront Solutions do not match!")
+            print("\nWarning: triton-csc wavefront Solutions do not match!")
 
-        if np.allclose(x_cpu, y_sync_free.cpu().numpy(), atol=1e-5):
-            print("\ntriton-sync-free Solutions match within tolerance!")
-            method_correctness[mat_name]['triton-sync-free'] = 1
+        if np.allclose(x_cpu, y_csr.cpu().numpy(), atol=1e-5):
+            print("\ntriton-csr wavefront Solutions match within tolerance!")
+            method_correctness[mat_name]['triton'] = 1
         else:
-            print("\nWarning: triton-sync-free Solutions do not match!")
+            print("\nWarning: triton-csr wavefront Solutions do not match!")
+
+        if np.allclose(x_cpu, y_sync_free_csc.cpu().numpy(), atol=1e-5):
+            print("\ntriton-sync-free-csc Solutions match within tolerance!")
+            method_correctness[mat_name]['triton-sync-free-csc'] = 1
+        else:
+            print("\nWarning: triton-sync-free-csc Solutions do not match!")
+
+        # if np.allclose(x_cpu, y_sync_free_csr.cpu().numpy(), atol=1e-5):
+        #     print("\ntriton-sync-free-csr Solutions match within tolerance!")
+        #     method_correctness[mat_name]['triton-sync-free-csr'] = 1
+        # else:
+        #     print(f"\n HERE correct: {x_cpu} result: {y_sync_free_csr}")
+        #     print("\nWarning: triton-sync-free-csr Solutions do not match!")
 
         if np.allclose(x_cpu, y_numba_cpu, atol=1e-5):
             print("\nnumba-sptrsv Solutions match within tolerance!")
@@ -228,7 +295,7 @@ def benchmark(matrices, provider):
         else:
             BLOCKSIZE = 1024
             assert max_col_size < 1023
-        ms, min_ms, max_ms = triton.testing.do_bench(lambda: sptrsv_sync_free_triton(val_f32, indices_i32, indptr_i32, b_f32, A.shape[0], A.shape[1], A.nnz, dep_count_gpu, BLOCKSIZE), quantiles=quantiles, warmup=warmpup, rep=rep)
+        ms, min_ms, max_ms = triton.testing.do_bench(lambda: sptrsv_sync_free_triton_csc(val_f32, indices_i32, indptr_i32, b_f32, A.shape[0], A.shape[1], A.nnz, dep_count_gpu, BLOCKSIZE), quantiles=quantiles, warmup=warmpup, rep=rep)
     if provider == 'triton-spmv':
         val_f32 = torch.tensor(A.data, dtype=REAL_TYPE, device=DEVICE)
         b_f32 = torch.tensor(np.zeros(n), dtype=REAL_TYPE, device=DEVICE)
