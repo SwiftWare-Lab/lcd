@@ -66,7 +66,7 @@ mtx_list = [
     # "/home/kazem/Downloads/cant/cant.mtx"
 
     "/home/banis/Downloads/Trefethen_20000b/Trefethen_20000b.mtx",
-    # "/home/banis/Downloads/msc23052/msc23052.mtx",
+    "/home/banis/Downloads/msc23052/msc23052.mtx",
 ]
 method_list = [
     "triton-csc", 
@@ -104,6 +104,9 @@ def correctness_test():
 
         # convert matrix to csr
         A_csr = matrix.tocsr()
+        if A_csr.data.dtype != np.float64:
+            print(f"Matrix {mtx_matrix_path} is not double precision")
+            A_csr.data = A_csr.data.astype(np.float64)
         A_csr = tril(A_csr, format="csr")
         A_csr.setdiag(A_csr.diagonal())
 
@@ -125,12 +128,12 @@ def correctness_test():
         wavefronts = compute_wavefront(A_csc)
         wave_start_loc, waves = compact_2d_list(wavefronts)
         waves_gpu = torch.tensor(waves, dtype=torch.int32, device=DEVICE)
-        y_csc = sptrsv_triton(val_f32, indices_i32, indptr_i32, b_f32, n, n, A_csc.nnz, wave_start_loc, waves_gpu, format='csc')
+        y_csc = sptrsv_triton_csc(val_f32, indices_i32, indptr_i32, b_f32, n, n, A_csc.nnz, wave_start_loc, waves_gpu)
 
         val_f32_csr = torch.tensor(A_csr.data, dtype=REAL_TYPE, device=DEVICE)
         indices_i32_csr = torch.tensor(A_csr.indices, dtype=torch.int32, device=DEVICE)
         indptr_i32_csr = torch.tensor(A_csr.indptr, dtype=torch.int32, device=DEVICE)
-        y_csr = sptrsv_triton(val_f32_csr, indices_i32_csr, indptr_i32_csr, b_f32, n, n, A_csr.nnz, wave_start_loc, waves_gpu, format='csr')
+        y_csr = sptrsv_triton_csr(val_f32_csr, indices_i32_csr, indptr_i32_csr, b_f32, n, n, A_csr.nnz, wave_start_loc, waves_gpu)
 
         in_edge = incoming_edge(A_csc)
         #b_sfree_cpu = simple_sptrsv_csc_syncfree(A, b)
@@ -190,6 +193,9 @@ def correctness_test():
             method_correctness[mat_name]['triton'] = 1
         else:
             print("\nWarning: triton-csr wavefront Solutions do not match!")
+            mismatches = [(i, x_cpu[i], y_csr.cpu().numpy()[i]) for i in range(len(x_cpu)) if not np.isclose(x_cpu[i], y_csr.cpu().numpy()[i], atol=1e-5)]
+            print(mismatches)
+            print(len(mismatches))
 
         if np.allclose(x_cpu, y_sync_free_csc.cpu().numpy(), atol=1e-5):
             print("\ntriton-sync-free-csc Solutions match within tolerance!")

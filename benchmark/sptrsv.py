@@ -274,6 +274,33 @@ def sptrsv_kernel_csr(
     tl.store(y_ptr + row, y_col_sol)
 
 
+def sptrsv_triton_csr(data, indices, indptr, x, M, N, nnz, wave_start, wavefronts):
+    # Allocate result vector on GPU
+    y = torch.zeros(M, dtype=REAL_TYPE, device=DEVICE)
+    #wavefront = torch.tensor(wavefronts, dtype=torch.int32, device=DEVICE)
+    # for wavefront in wavefronts:
+    #     # Launch Triton kernel
+    #     grid = (len(wavefront),)
+    #     # copy wavefront to GPU
+    #     wavefront_gpu = torch.tensor(wavefront, dtype=torch.int32, device=DEVICE)
+    num_waves = len(wave_start)-1
+    for i in range(num_waves):
+        grid_len = wave_start[i+1] - wave_start[i]
+        grid = (grid_len,)
+        sptrsv_kernel_csr[grid](
+            data,
+            indices,
+            indptr,
+            x,
+            y,
+            M,
+            N,
+            nnz,
+            BLOCK_SIZE=128,
+            wavefront=wavefronts[wave_start[i]])
+    return y
+
+
 @triton.jit
 def sptrsv_kernel_csc(
     data_ptr, indices_ptr, indptr_ptr, rhs_vec, y_ptr,
@@ -296,7 +323,7 @@ def sptrsv_kernel_csc(
             tl.atomic_add(y_ptr + r_i, val * x_val)
 
 
-def sptrsv_triton(data, indices, indptr, x, M, N, nnz, wave_start, wavefronts, format='csc'):
+def sptrsv_triton_csc(data, indices, indptr, x, M, N, nnz, wave_start, wavefronts):
     # Allocate result vector on GPU
     y = torch.zeros(M, dtype=REAL_TYPE, device=DEVICE)
     #wavefront = torch.tensor(wavefronts, dtype=torch.int32, device=DEVICE)
@@ -306,11 +333,10 @@ def sptrsv_triton(data, indices, indptr, x, M, N, nnz, wave_start, wavefronts, f
     #     # copy wavefront to GPU
     #     wavefront_gpu = torch.tensor(wavefront, dtype=torch.int32, device=DEVICE)
     num_waves = len(wave_start)-1
-    kernel = sptrsv_kernel_csc if format == 'csc' else sptrsv_kernel_csr
     for i in range(num_waves):
         grid_len = wave_start[i+1] - wave_start[i]
         grid = (grid_len,)
-        kernel[grid](
+        sptrsv_kernel_csc[grid](
             data,
             indices,
             indptr,
