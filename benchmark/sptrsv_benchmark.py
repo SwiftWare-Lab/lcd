@@ -193,9 +193,6 @@ def correctness_test():
             method_correctness[mat_name]['triton'] = 1
         else:
             print("\nWarning: triton-csr wavefront Solutions do not match!")
-            mismatches = [(i, x_cpu[i], y_csr.cpu().numpy()[i]) for i in range(len(x_cpu)) if not np.isclose(x_cpu[i], y_csr.cpu().numpy()[i], atol=1e-5)]
-            print(mismatches)
-            print(len(mismatches))
 
         if np.allclose(x_cpu, y_sync_free_csc.cpu().numpy(), atol=1e-5):
             print("\ntriton-sync-free-csc Solutions match within tolerance!")
