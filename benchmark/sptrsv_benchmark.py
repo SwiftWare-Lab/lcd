@@ -283,7 +283,7 @@ def benchmark(matrices, provider):
         wavefronts = compute_wavefront(A)
         wave_start_loc, waves = compact_2d_list(wavefronts)
         waves_gpu = torch.tensor(waves, dtype=torch.int32, device=DEVICE)
-        ms, min_ms, max_ms = triton.testing.do_bench(lambda: sptrsv_triton(val_f32, indices_i32, indptr_i32, b_f32, A.shape[0], A.shape[1], A.nnz, wave_start_loc, waves_gpu), quantiles=quantiles, warmup=warmpup, rep=rep)
+        ms, min_ms, max_ms = triton.testing.do_bench(lambda: sptrsv_triton_csc(val_f32, indices_i32, indptr_i32, b_f32, A.shape[0], A.shape[1], A.nnz, wave_start_loc, waves_gpu), quantiles=quantiles, warmup=warmpup, rep=rep)
     if provider == 'triton-sync-free':
         val_f32 = torch.tensor(A.data, dtype=REAL_TYPE, device=DEVICE)
         b_f32 = torch.tensor(b, dtype=REAL_TYPE, device=DEVICE)
