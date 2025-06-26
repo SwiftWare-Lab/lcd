@@ -370,6 +370,7 @@ def simple_sptrsv_csr(L, b):
         x[i] /= L.data[L.indptr[i + 1] - 1]
     return x
 
+
 def simple_sptrsv_csc_syncfree(L, b):
     n = L.shape[0]
     x = np.zeros(n)
