@@ -35,7 +35,7 @@ DEVICE = torch.device("cuda:0")
 
 
 
-@njit(numba.int32[:](numba.float32[:], numba.int32[:], numba.int32[:], numba.float32[:]), pipeline_class=MyCompiler)
+@njit(numba.float64[:](numba.float32[:], numba.int32[:], numba.int32[:], numba.float32[:]), pipeline_class=MyCompiler)
 def sptrsv_csr_numba(A, IA, JA, b):
     n = len(IA) - 1
     x = np.zeros(n)
@@ -357,6 +357,17 @@ def simple_sptrsv_csc_waves(L, b):
             x[i] = (b[i] - x[i]) / L.data[L.indptr[i]]
             for j in range(L.indptr[i]+1, L.indptr[i + 1]):
                 x[L.indices[j]] += L.data[j] * x[i]
+    return x
+
+
+def simple_sptrsv_csr(L, b):
+    n = L.shape[0]
+    x = np.zeros(n)
+    for i in range(n):
+        x[i] = b[i]
+        for j in range(L.indptr[i], L.indptr[i + 1]):
+            x[i] -= L.data[j] * x[L.indices[j]]
+        x[i] /= L.data[L.indptr[i + 1] - 1]
     return x
 
 

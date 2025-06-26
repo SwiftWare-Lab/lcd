@@ -1,6 +1,25 @@
 
 # benchmark
 
+## Table of operations
+
+-------------------
+| Operation  | Format         | Description |
+|------------|----------------|-------------|
+| sptrsv-fwd | CSR            | Forward substitution |
+| sptrsv-bwd | CSR            | Backward substitution |
+| ilu0       | CSR            | Incomplete LU factorization |
+| ilu0-solve | CSR            | Solve using ILU0 factorization |
+| ilu0       | CSC            | Incomplete LU factorization |
+| Gauss-seidel | CSR            | Gauss-Seidel iteration |
+| Cholesky   | CSC            | Cholesky factorization |
+| Cholesky   | Supernodal CSC | Cholesky factorization |
+| sptrsv-fwd | Supernodal CSC | Solve using Cholesky factorization |
+
+
+
+
+
 
 Each operation is added as a separate benchmark. Each operation has a 
 separate benchmark and implemetation file. The benchmark file is named 
