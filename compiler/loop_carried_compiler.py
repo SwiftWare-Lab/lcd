@@ -5,12 +5,13 @@ from numba.core import ir, ir_utils, config, errors
 from numba.core.compiler import CompilerBase, DefaultPassBuilder
 from numba.core.compiler_machinery import FunctionPass, register_pass
 from numba.core.ir_utils import *
-from numba.core.untyped_passes import IRProcessing, FixupArgs, TranslateByteCode
+from numba.core.untyped_passes import ReconstructSSA, FixupArgs, TranslateByteCode
+from numba.extending import type_callable
 import numpy as np
 import numba
 from numba.core.analysis import compute_live_map, compute_dead_maps, compute_live_variables
-from compiler.analysis import (extract_data_value, extract_read_write_accesses, extract_raw_data_dependences,
-                               create_statement_schedule, find_all_loop_bodies, refine_dependences)
+from compiler.analysis import *
+from graphviz import Source
 
 config.DEBUG_ARRAY_OPT = 3
 
@@ -56,25 +57,43 @@ class LoopFusion1(FunctionPass):
         print("Live Map:", raw_dependencies)
 
         # This is like use_defs from numba but with symbolised values
+        # flabels = extract_fused_loops(blocks)
 
+        # print("Fused Loop Labels: ", flabels)
         loop_bodies, lp_pars = find_all_loop_bodies(cfg)
-        accesses, stmnt_labels = extract_read_write_accesses(blocks, data_values, loop_bodies, lp_pars)
+        print("Loop Bodies: ", loop_bodies)
+        iter_vars = extract_iter_variables(blocks, loop_bodies, lp_pars)
+        print("Iterators: ", iter_vars)
+        floops = find_to_be_fused_loops(data_values, iter_vars)
+        print("Fusable Loops: ", floops)
+        loop_header_bodies = extract_loop_header_body_map(loop_bodies, lp_pars)
+        print("Loop Header Bodies: ", loop_header_bodies)
+        spf_tree = create_spf_tree(lp_pars, loop_header_bodies)
+        print(spf_tree)
+        accesses, stmnt_labels = extract_read_write_accesses(blocks, data_values, loop_header_bodies, iter_vars)
+        print("Statement Labels: ", stmnt_labels)
         print("Symbolic Accesses: ", accesses)
-        schedule = create_statement_schedule(blocks, cfg, stmnt_labels, loop_bodies, lp_pars)
-        raw_dependencies = extract_raw_data_dependences(accesses['reads'], accesses['writes'], schedule)
-        dependencies, ex_cons = refine_dependences(raw_dependencies)
+        latest_accesses = {}
+        for l in floops:
+            latest_accesses.update(extract_latest_write_accesses_in_loop(l, accesses['writes'], loop_bodies))
+            print("LOOP", l, ":", latest_accesses)
+        schedule = create_statement_schedule(stmnt_labels, spf_tree, iter_vars)
+        print(schedule)
+        raw_dependencies = extract_raw_data_dependences(accesses['reads'], latest_accesses, schedule, loop_header_bodies)
+        fused_iter_vars = [x.name for key, x in iter_vars.items() if key in floops]
+        dependencies, ex_cons = refine_dependences(raw_dependencies, fused_iter_vars)
 
         for i, dependence in enumerate(dependencies):
-            print(dependence)
-            print(ex_cons[i])
-            print("-----------------")
+            if dependence.type == 'RAW':
+                print(dependence)
+                print(ex_cons[i])
+                print("-----------------")
 
 
         # dot.render("cfg_diagram", view=True)
 
         order = find_topo_order(blocks)
         return mutate  # the pass has not mutated the IR
-
 
 
 class MyCompiler(CompilerBase):  # custom compiler extends from CompilerBase
@@ -85,7 +104,7 @@ class MyCompiler(CompilerBase):  # custom compiler extends from CompilerBase
         # namely the "nopython" pipeline
         pm = DefaultPassBuilder.define_nopython_pipeline(self.state)
         # Add the new pass to run after IRProcessing
-        pm.add_pass_after(LoopFusion1, IRProcessing)
+        pm.add_pass_after(LoopFusion1, ReconstructSSA)
         #pm.add_pass_after(ParFdd, IRProcessing)
         # finalize
         pm.finalize()

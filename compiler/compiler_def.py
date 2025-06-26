@@ -53,6 +53,9 @@ class Access:
     def __str__(self):
         return f"{self.var}[{self.index}]" if self.index is not None else self.var
 
+    def __hash__(self):
+        return hash(str(self))
+
     def __repr__(self):
         return str(self)
 
