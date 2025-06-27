@@ -1,14 +1,13 @@
-from numba.typed import Dict
-
-from numba import njit, prange
-from numba.core import ir, ir_utils, config, errors
+from numba.core import ir_utils, config
 from numba.core.compiler import CompilerBase, DefaultPassBuilder
 from numba.core.compiler_machinery import FunctionPass, register_pass
 from numba.core.ir_utils import *
-from numba.core.untyped_passes import IRProcessing, FixupArgs, TranslateByteCode
-import numpy as np
-import numba
+from numba.core.untyped_passes import IRProcessing
 from numba.core.analysis import compute_live_map, compute_dead_maps, compute_live_variables
+
+from analysis import extract_data_value, get_increment_and_final, unroll_loop
+
+import numba
 
 
 config.DEBUG_ARRAY_OPT = 3
@@ -62,6 +61,36 @@ class LoopFusion1(FunctionPass):
         return mutate  # the pass has not mutated the IR
 
 
+# mutate_CFG since we add a new loop for remaining iterations
+# not analysis_only since unrolling changes IR
+@register_pass(mutates_CFG=True, analysis_only=False)
+class LoopUnrolling(FunctionPass):
+    """ Implements loop unrolling on loops with only 1 basic block in their body """
+    _name = "loop_unrolling"
+
+    def __init__(self):
+        super().__init__(self)
+
+    def run_pass(self, state):
+        mutate = False
+
+        func_ir = state.func_ir
+        blocks = func_ir.blocks
+        dprint_func_ir(func_ir, "before maximize fusion down")
+        cfg = ir_utils.compute_cfg_from_blocks(blocks)
+        cfg.dump()
+
+        # body size 2 because numba includes header in body
+        simple_loops = [loop for loop in cfg.loops().values() if len(loop.body) == 2]
+        print(simple_loops)
+
+        data_values, _ = extract_data_value(blocks)
+        # incr, final = get_increment_and_final(simple_loops, blocks, data_values)
+        mutate = unroll_loop(simple_loops, blocks, data_values, factor=4)
+        # todo: currently assumes factor is a multiple of final, and that final >= factor
+
+        return mutate
+
 
 class MyCompiler(CompilerBase):  # custom compiler extends from CompilerBase
 
@@ -71,10 +100,57 @@ class MyCompiler(CompilerBase):  # custom compiler extends from CompilerBase
         # namely the "nopython" pipeline
         pm = DefaultPassBuilder.define_nopython_pipeline(self.state)
         # Add the new pass to run after IRProcessing
-        pm.add_pass_after(LoopFusion1, IRProcessing)
+        pm.add_pass_after(LoopUnrolling, IRProcessing)
+        # pm.add_pass_after(LoopFusion1, IRProcessing)
         #pm.add_pass_after(ParFdd, IRProcessing)
         # finalize
         pm.finalize()
         # return as an iterable, any number of pipelines may be defined!
         return [pm]
 
+
+@numba.njit(pipeline_class=MyCompiler)
+def test_loop():
+    xs = [1,2,3,4,5,6,7,8,9,10,11,12]
+    s = 0
+    i = 0
+    # for i in range(len(xs)):
+    #     s += xs[i]
+    while i < len(xs):
+        s += xs[i]
+        i += 1
+    # for _ in range(10):
+    #     for i in range(len(xs)):
+    #         s += xs[i]
+    # for _ in range(10):
+    #     for _ in range(10):
+    #         for _ in range(10):
+    #             for _ in range(10):
+    #                 for i in range(len(xs)):
+    #                     s += xs[i]
+    return s
+
+
+def test_loop_og():
+    xs = [1,2,3,4,5,6,7,8,9,10]
+    s = 0
+    i = 0
+    # for i in range(len(xs)):
+    #     s += xs[i]
+    while i < len(xs):
+        s += xs[i]
+        i += 1
+    # for _ in range(10):
+    #     for i in range(len(xs)):
+    #         s += xs[i]
+    # for _ in range(10):
+    #     for _ in range(10):
+    #         for _ in range(10):
+    #             for _ in range(10):
+    #                 for i in range(len(xs)):
+    #                     s += xs[i]
+    return s
+
+
+# print(test_loop_og())
+print(test_loop())
