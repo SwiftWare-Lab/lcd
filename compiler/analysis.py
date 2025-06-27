@@ -28,12 +28,33 @@ def unroll_loop(loops, blocks, data_values, factor):
     """Performs loop unrolling, modifying the IR through blocks. Assumes loops consist of only 1 basic block.
     In while loops, assumes the loop variable increment is the last statement.
     """
-    unrolled = []
     changed = False
 
     for loop in loops:
+        unrolled = []
         if is_for_loop(blocks[loop.header].body):
-            pass
+            # Get increment statements from header
+            header = blocks[loop.header].body
+            iternext_stmt = header[0]
+            get_next_val_stmt = header[1]
+            iternext_assign = header[3]
+            incr_stmts = [iternext_stmt, get_next_val_stmt, iternext_assign]
+
+            # Reader unroll_part factor - 1 times, then append the body as is
+            body_label = [b for b in loop.body if b != loop.header][0] # body consists of header and body itsel
+            body_stmts = blocks[body_label].body
+            # Add first iteration as is (excluding jump) so that loop var is assigned same phi var from loop header
+            unrolled += body_stmts[:-1]
+
+            # Add increment statements and loop excluded jump, this part is repeated
+            unroll_part = incr_stmts + body_stmts[:-1]
+            for _ in range(factor - 1):
+                unrolled += ssa_rename(unroll_part, varmap={})
+            # Add jump
+            unrolled.append(body_stmts[-1])
+            changed |= unrolled != body_stmts
+            # Replace rolled loop with unrolled
+            blocks[body_label].body = unrolled
         else:
             # Find increment statement
             # What we expect the "body" of a while loop to be, Numba calls it the header of the while loop
@@ -43,14 +64,18 @@ def unroll_loop(loops, blocks, data_values, factor):
             cond = data_values[cond_var_name]
             loop_var = cond.lhs
             final = cond.rhs
-            incr_st_idx = [i for i, st in enumerate(stmts) if isinstance(st, ir.Assign) and st.target == loop_var][-1]
-            unroll_part = stmts[: incr_st_idx + 1] # +1 to include the increment
 
+            incr_assign_idx = [i for i, st in enumerate(stmts) if isinstance(st, ir.Assign) and st.target == loop_var][-1]
+            incr_expr = stmts[incr_assign_idx - 1].value
+            incr_var = incr_expr.lhs if incr_expr.lhs != loop_var else incr_expr.rhs
+            incr = data_values[incr_var.name].value
+
+            unroll_part = stmts[: incr_assign_idx + 1] # +1 to include the increment
             # Unroll loop with renaming to maintain SSA form
             for _ in range(factor):
                 unrolled += ssa_rename(unroll_part, varmap={})
             # Add branching logic
-            unrolled += stmts[incr_st_idx + 1 :]
+            unrolled += stmts[incr_assign_idx + 1 :]
             changed |= unrolled != stmts
             # Replace rolled loop with unrolled
             blocks[loop.header].body = unrolled

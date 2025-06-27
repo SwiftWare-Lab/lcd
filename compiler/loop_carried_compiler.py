@@ -86,8 +86,9 @@ class LoopUnrolling(FunctionPass):
 
         data_values, _ = extract_data_value(blocks)
         # incr, final = get_increment_and_final(simple_loops, blocks, data_values)
-        mutate = unroll_loop(simple_loops, blocks, data_values, factor=4)
+        mutate = unroll_loop(simple_loops, blocks, data_values, factor=2)
         # todo: currently assumes factor is a multiple of final, and that final >= factor
+        # todo: get init for while loops, get init, incr and final for for loops, create new loop for remaining iterations. Must learn how to add blocks in numba
 
         return mutate
 
@@ -114,8 +115,8 @@ def test_loop():
     xs = [1,2,3,4,5,6,7,8,9,10,11,12]
     s = 0
     i = 0
-    # for i in range(len(xs)):
-    #     s += xs[i]
+    for j in range(len(xs)):
+        s += xs[j]
     while i < len(xs):
         s += xs[i]
         i += 1
