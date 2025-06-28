@@ -27,12 +27,11 @@ from bench_utils import compute_wavefront
 REAL_TYPE = torch.float64
 REAL_TYPE_TL = tl.float64
 
+
 NUM_RUNS=1
 
 
-
 DEVICE = torch.device("cuda:0")
-
 
 
 @njit(numba.float32[:](numba.float32[:], numba.int32[:], numba.int32[:], numba.float32[:]), pipeline_class=MyCompiler)
@@ -45,17 +44,6 @@ def sptrsv_csr_numba(A, IA, JA, b):
             x[i] -= A[j] * x[JA[j]]
         x[i] /= A[IA[i + 1] - 1]
     return x
-
-
-dense = np.array([
-    [4, 0, 0],
-    [1, 5, 0],
-    [2, 1, 6]
-], dtype=np.float32)
-m = csr_matrix(dense)
-b = np.array([7, 8, 9], dtype=np.float32)
-x = sptrsv_csr_numba(m.data, m.indptr, m.indices, b)
-print(m @ x)
 
 
 @triton.jit
@@ -491,3 +479,14 @@ def simple_sptrsv_csc_syncfree(L, b):
             if in_edges[L.indices[j]] == 1:
                 ready_cols = np.append(ready_cols, L.indices[j])
     return x
+
+
+# dense = np.array([
+#     [4, 0, 0],
+#     [1, 5, 0],
+#     [2, 1, 6]
+# ], dtype=np.float32)
+# m = csr_matrix(dense)
+# b = np.array([7, 8, 9], dtype=np.float32)
+# x = sptrsv_sync_free_triton_csr(m, b, 3)
+# print(m @ x)

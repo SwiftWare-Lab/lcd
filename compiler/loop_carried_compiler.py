@@ -5,7 +5,7 @@ from numba.core.ir_utils import *
 from numba.core.untyped_passes import IRProcessing
 from numba.core.analysis import compute_live_map, compute_dead_maps, compute_live_variables
 
-from analysis import extract_data_value, get_increment_and_final, unroll_loop
+from .analysis import extract_data_value, unroll_loop
 
 import numba
 
@@ -85,7 +85,6 @@ class LoopUnrolling(FunctionPass):
         print(simple_loops)
 
         data_values, _ = extract_data_value(blocks)
-        # incr, final = get_increment_and_final(simple_loops, blocks, data_values)
         mutate = unroll_loop(simple_loops, blocks, data_values, factor=2)
         # todo: currently assumes factor is a multiple of final, and that final >= factor
         # todo: get init for while loops, get init, incr and final for for loops, create new loop for remaining iterations. Must learn how to add blocks in numba
@@ -153,5 +152,6 @@ def test_loop_og():
     return s
 
 
-# print(test_loop_og())
-print(test_loop())
+if __name__ == "__main__":
+    # print(test_loop_og())
+    print(test_loop())
