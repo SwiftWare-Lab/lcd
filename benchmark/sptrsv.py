@@ -1,6 +1,6 @@
 import numpy as np
 import numba
-from numba import njit
+from numba import njit, frange
 from compiler.loop_carried_compiler import MyCompiler
 
 import numpy as np
