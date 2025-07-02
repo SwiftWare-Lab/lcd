@@ -1,6 +1,6 @@
 import numpy as np
 import numba
-from numba import njit
+from numba import njit, frange
 from compiler.loop_carried_compiler import MyCompiler
 
 import numpy as np
@@ -39,7 +39,7 @@ DEVICE = torch.device("cuda:0")
 def sptrsv_csr_numba(A, IA, JA, b):
     n = len(IA) - 1
     x = np.zeros(n,dtype=np.float32)
-    for i in range(n):
+    for i in frange(n):
         x[i] = b[i]
         for j in range(IA[i], IA[i + 1]):
             x[i] -= A[j] * x[JA[j]]
