@@ -419,11 +419,11 @@ def update_dep(dep, fused_iter_vars):
     to_si = new_dep.to_si.schedule
     for i, fi in enumerate(from_si):
         if fi in fused_iter_vars:
-            new_dep.from_si.schedule = from_si[:i+1]
+            new_dep.from_si.schedule = from_si[:i+2]
             break
     for j, ti in enumerate(to_si):
         if ti in fused_iter_vars:
-            new_dep.to_si.schedule = to_si[:j+1]
+            new_dep.to_si.schedule = to_si[:j+2]
             break
     return new_dep
 

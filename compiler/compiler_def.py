@@ -1,6 +1,36 @@
 import sympy
 from sympy import And, Eq, Symbol, GreaterThan, LessThan, Function, Gt
 
+
+class LoopBound:
+    def __init__(self, start, end):
+        self.start = start
+        self.end = end
+
+    # def get_sympy_expr(self, iter_var):
+    #     f1 = []
+    #     f2 = []
+    #     consts = []
+    #     if isinstance(self.start, Access):
+    #         f1, start = self.start.get_sympy_expr()
+    #     elif self.start.isnumeric():
+    #         start = int(self.start)
+    #     else:
+    #         start = Symbol(self.start)
+    #         consts.append(start)
+    #     if isinstance(self.end, Access):
+    #         f2, end = self.end.get_sympy_expr()
+    #     elif self.end.isnumeric():
+    #         end = int(self.end)
+    #     else:
+    #         end = Symbol(self.end)
+    #         consts.append(end)
+    #     return consts, f1 + f2, And(Gt(Symbol(iter_var), start), LessThan(Symbol(iter_var), end))
+
+    def __repr__(self):
+        return '(' + str(self.start) + ', ' + str(self.end) + ')'
+
+
 class Schedule:
 
     def __init__(self, schedule):
@@ -103,7 +133,6 @@ class DataDependence:
         assert len(from_ind) == len(to_ind)
 
     def has_condition(self, i1, i2):
-
         for i in range(len(self.from_ind)):
             if not isinstance(self.from_ind[i], Access) and not isinstance(self.to_ind[i], Access):
                 if (self.from_ind[i] == i1 and self.to_ind[i] == i2) or (self.from_ind[i] == i2 and self.to_ind[i] == i1):
