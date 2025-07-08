@@ -81,18 +81,22 @@ def unroll_simple_loops(cfg, blocks, data_values, factor):
             blocks[body_label].body = unrolled
         else:
             # Get needed blocks
-            # What we expect the "body" of a while loop to be, Numba calls it the header of the while loop
-            header_block = copy.deepcopy(blocks[loop.header])
             # Condition filters out back edges, and index 0 because we assume only 1 block leads to the loop
             pred_label = [label for label in cfg._preds[loop.header] if label < loop.header][0]
-            pred_block = copy.deepcopy(blocks[pred_label])
-            stmts = header_block.body
+            # What we expect the "body" of a while loop to be, Numba calls it the header of the while loop
+            # These copies are for the rolled version added later
+            rolled_pred_block = copy.deepcopy(blocks[pred_label])
+            rolled_header_block = copy.deepcopy(blocks[loop.header])
+            rolled_jump_block = copy.deepcopy(blocks[max(loop.body)])
+            # Will be modified (unrolled)
+            header_block = blocks[loop.header]
+            pred_block = blocks[pred_label]
 
-            # Find loop variable, final iteration, and increment statement
+            # Find loop variable and increment value
+            stmts = header_block.body
             cond = get_loop_cond(header_block, data_values)
             pred_cond = get_loop_cond(pred_block, data_values)
             loop_var = pred_cond.lhs
-            final = pred_cond.rhs
             incr_assign_idx = [i for i, st in enumerate(stmts) if isinstance(st, ir.Assign) and st.target == loop_var][-1]
             incr_expr = stmts[incr_assign_idx - 1].value
             incr_var = incr_expr.lhs if incr_expr.lhs != loop_var else incr_expr.rhs
@@ -107,7 +111,6 @@ def unroll_simple_loops(cfg, blocks, data_values, factor):
             scope = pred_stmt_before_cond.target.scope
 
             # Copy increment variable to the pred block
-            # Todo: remove it from loop body
             pred_incr_assign = ir.Assign(
                 incr,
                 ir.Var(scope, ir_utils.mk_unique_var("$incr"), loc),
@@ -160,6 +163,41 @@ def unroll_simple_loops(cfg, blocks, data_values, factor):
             changed |= unrolled != stmts
             # Replace rolled loop with unrolled
             blocks[loop.header].body = unrolled
+
+            # Cut out non-loop related logic from pred block
+            rolled_pred_block.body = rolled_pred_block.body[-4:]
+            # Define labels for all
+            rolled_pred_label = ir_utils.next_label()
+            rolled_header_label = ir_utils.next_label()
+            rolled_jump_label = ir_utils.next_label()
+            # Update branches and jumps to use new labels
+            pred_block.body[-1].falsebr = rolled_pred_label
+            header_block.body[-1].falsebr = rolled_pred_label
+            rolled_pred_block.body[-1].truebr = rolled_header_label
+            rolled_header_block.body[-1].truebr = rolled_jump_label
+            rolled_jump_block.body[-1].target = rolled_header_label
+
+            # # I added this to test if remainder loop executes as many times as expected
+            # getprint = ir.Assign(
+            #     ir.Global('print', print, loc),
+            #     ir.Var(scope, ir_utils.mk_unique_var("$print"), loc),
+            #     loc)
+            # rolled_header_block.insert_after(getprint, rolled_header_block.body[-2]) 
+            # const8 = ir.Assign(
+            #     ir.Const(8, loc),
+            #     ir.Var(scope, ir_utils.mk_unique_var("$const8"), loc),
+            #     loc)
+            # rolled_header_block.insert_after(const8, getprint)
+            # call = ir.Assign(
+            #     ir.Expr.call(getprint.target, [const8.target], (), loc),
+            #     ir.Var(scope, ir_utils.mk_unique_var("$call"), loc),
+            #     loc)
+            # rolled_header_block.insert_after(call, const8)
+
+            # Add to blocks dict
+            blocks[rolled_pred_label] = rolled_pred_block
+            blocks[rolled_header_label] = rolled_header_block
+            blocks[rolled_jump_label] = rolled_jump_block
 
     return changed
 

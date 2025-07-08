@@ -78,10 +78,12 @@ class LoopUnrolling(FunctionPass):
         blocks = func_ir.blocks
         dprint_func_ir(func_ir, "before maximize fusion down")
         cfg = ir_utils.compute_cfg_from_blocks(blocks)
-        cfg.dump()
+        # cfg.dump()
 
         data_values, _ = extract_data_value(blocks)
-        mutate = unroll_simple_loops(cfg, blocks, data_values, factor=4)
+        mutate = unroll_simple_loops(cfg, blocks, data_values, factor=2)
+        cfg = ir_utils.compute_cfg_from_blocks(blocks)
+        cfg.dump()
         # todo: currently assumes factor is a multiple of final, and that final >= factor
         # todo: get init for while loops, get init, incr and final for for loops, create new loop for remaining iterations. Must learn how to add blocks in numba
 
@@ -107,7 +109,7 @@ class MyCompiler(CompilerBase):  # custom compiler extends from CompilerBase
 
 @numba.njit(pipeline_class=MyCompiler)
 def test_loop():
-    xs = [1,2,3,]
+    xs = [1,2,3,4,5,6,7,8,9,10,11,12,13]
     s = 0
     i = 0
     # for j in range(len(xs)):
