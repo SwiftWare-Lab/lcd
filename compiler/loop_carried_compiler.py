@@ -5,7 +5,7 @@ from numba.core.ir_utils import *
 from numba.core.untyped_passes import IRProcessing
 from numba.core.analysis import compute_live_map, compute_dead_maps, compute_live_variables
 
-from .analysis import extract_data_value, unroll_loop
+from analysis import extract_data_value, unroll_simple_loops
 
 import numba
 
@@ -80,12 +80,8 @@ class LoopUnrolling(FunctionPass):
         cfg = ir_utils.compute_cfg_from_blocks(blocks)
         cfg.dump()
 
-        # body size 2 because numba includes header in body
-        simple_loops = [loop for loop in cfg.loops().values() if len(loop.body) == 2]
-        print(simple_loops)
-
         data_values, _ = extract_data_value(blocks)
-        mutate = unroll_loop(simple_loops, blocks, data_values, factor=2)
+        mutate = unroll_simple_loops(cfg, blocks, data_values, factor=4)
         # todo: currently assumes factor is a multiple of final, and that final >= factor
         # todo: get init for while loops, get init, incr and final for for loops, create new loop for remaining iterations. Must learn how to add blocks in numba
 
@@ -111,11 +107,11 @@ class MyCompiler(CompilerBase):  # custom compiler extends from CompilerBase
 
 @numba.njit(pipeline_class=MyCompiler)
 def test_loop():
-    xs = [1,2,3,4,5,6,7,8,9,10,11,12]
+    xs = [1,2,3,]
     s = 0
     i = 0
-    for j in range(len(xs)):
-        s += xs[j]
+    # for j in range(len(xs)):
+    #     s += xs[j]
     while i < len(xs):
         s += xs[i]
         i += 1
@@ -155,3 +151,4 @@ def test_loop_og():
 if __name__ == "__main__":
     # print(test_loop_og())
     print(test_loop())
+    pass
