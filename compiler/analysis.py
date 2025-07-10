@@ -1,4 +1,3 @@
-from typing import List
 import copy
 import operator
 
@@ -47,12 +46,6 @@ def unroll_simple_loops(cfg, blocks, data_values, factor):
     simple_loops = [loop for loop in cfg.loops().values() if len(loop.body) == 2]
 
     changed = False
-
-    # Todo: 
-    # - get init, final, and incr in for loops
-    # - no need for init value in while loops, just use the loop var itself before loop starts 
-    # - adjust unrolled loop to iterate  up to max multiple of factor
-    # - add rolled loop after for remaining iterations
 
     for loop in simple_loops:
         unrolled = []
@@ -176,23 +169,6 @@ def unroll_simple_loops(cfg, blocks, data_values, factor):
             rolled_pred_block.body[-1].truebr = rolled_header_label
             rolled_header_block.body[-1].truebr = rolled_jump_label
             rolled_jump_block.body[-1].target = rolled_header_label
-
-            # # I added this to test if remainder loop executes as many times as expected
-            # getprint = ir.Assign(
-            #     ir.Global('print', print, loc),
-            #     ir.Var(scope, ir_utils.mk_unique_var("$print"), loc),
-            #     loc)
-            # rolled_header_block.insert_after(getprint, rolled_header_block.body[-2]) 
-            # const8 = ir.Assign(
-            #     ir.Const(8, loc),
-            #     ir.Var(scope, ir_utils.mk_unique_var("$const8"), loc),
-            #     loc)
-            # rolled_header_block.insert_after(const8, getprint)
-            # call = ir.Assign(
-            #     ir.Expr.call(getprint.target, [const8.target], (), loc),
-            #     ir.Var(scope, ir_utils.mk_unique_var("$call"), loc),
-            #     loc)
-            # rolled_header_block.insert_after(call, const8)
 
             # Add to blocks dict
             blocks[rolled_pred_label] = rolled_pred_block

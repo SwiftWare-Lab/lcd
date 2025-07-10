@@ -5,6 +5,9 @@ from numba.core.ir_utils import *
 from numba.core.untyped_passes import IRProcessing
 from numba.core.analysis import compute_live_map, compute_dead_maps, compute_live_variables
 
+from matplotlib import pyplot as plt
+import time
+
 from analysis import extract_data_value, unroll_simple_loops
 
 import numba
@@ -84,8 +87,6 @@ class LoopUnrolling(FunctionPass):
         mutate = unroll_simple_loops(cfg, blocks, data_values, factor=2)
         cfg = ir_utils.compute_cfg_from_blocks(blocks)
         cfg.dump()
-        # todo: currently assumes factor is a multiple of final, and that final >= factor
-        # todo: get init for while loops, get init, incr and final for for loops, create new loop for remaining iterations. Must learn how to add blocks in numba
 
         return mutate
 
@@ -108,49 +109,77 @@ class MyCompiler(CompilerBase):  # custom compiler extends from CompilerBase
 
 
 @numba.njit(pipeline_class=MyCompiler)
-def test_loop():
-    xs = [1,2,3,4,5,6,7,8,9,10,11,12,13]
+def test_unrolling(iterations):
+    xs = list(range(1, iterations + 1))
     s = 0
     i = 0
-    # for j in range(len(xs)):
-    #     s += xs[j]
+
     while i < len(xs):
         s += xs[i]
         i += 1
-    # for _ in range(10):
-    #     for i in range(len(xs)):
-    #         s += xs[i]
-    # for _ in range(10):
-    #     for _ in range(10):
-    #         for _ in range(10):
-    #             for _ in range(10):
-    #                 for i in range(len(xs)):
-    #                     s += xs[i]
+
     return s
 
 
-def test_loop_og():
-    xs = [1,2,3,4,5,6,7,8,9,10]
+@numba.jit
+def test_control(iterations):
+    xs = list(range(1, iterations + 1))
     s = 0
     i = 0
-    # for i in range(len(xs)):
-    #     s += xs[i]
+
     while i < len(xs):
         s += xs[i]
         i += 1
-    # for _ in range(10):
-    #     for i in range(len(xs)):
-    #         s += xs[i]
-    # for _ in range(10):
-    #     for _ in range(10):
-    #         for _ in range(10):
-    #             for _ in range(10):
-    #                 for i in range(len(xs)):
-    #                     s += xs[i]
+
     return s
 
 
-if __name__ == "__main__":
-    # print(test_loop_og())
-    print(test_loop())
-    pass
+# if __name__ == "__main__":
+#     # Warm up
+#     for _ in range(3):
+#         test_unrolling(10_000)
+#         test_control(10_000)
+
+#     rolled_times = []
+#     unrolled_times = []
+
+#     MAX_ITERATIONS = 500_000
+#     TRIES = 100
+
+#     iters_list = list(range(0, MAX_ITERATIONS + 1, 10_000))
+
+#     for iters in iters_list:
+#         rolled_total_time = 0
+#         unrolled_total_time = 0
+
+#         print(f"Benchmarking for {iters} iterations...")
+
+#         # Test correctness
+#         control_result = test_control(iters)
+#         unrolling_result = test_unrolling(iters)
+#         assert control_result == unrolling_result, f"Unrolling was incorrect for iters = {iters}"
+
+#         # Benchmark
+#         for _ in range(TRIES):
+#             start = time.perf_counter()
+#             test_unrolling(iters)
+#             end = time.perf_counter()
+#             unrolled_total_time += end - start
+
+#             start = time.perf_counter()
+#             test_control(iters)
+#             end = time.perf_counter()
+#             rolled_total_time += end - start
+
+#         rolled_times.append(rolled_total_time / TRIES) 
+#         unrolled_times.append(unrolled_total_time / TRIES) 
+    
+#     # Plot results
+#     plt.plot(iters_list, rolled_times, label='Rolled Loop')
+#     plt.plot(iters_list, unrolled_times, label='Unrolled Loop')
+#     plt.xlabel("Iteration Count")
+#     plt.ylabel("Avg Execution Time (seconds)")
+#     plt.title("Loop Unrolling Benchmark")
+#     plt.legend()
+#     plt.grid(True)
+#     plt.show()
