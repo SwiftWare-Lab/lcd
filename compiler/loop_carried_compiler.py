@@ -99,8 +99,8 @@ class MyCompiler(CompilerBase):  # custom compiler extends from CompilerBase
         # namely the "nopython" pipeline
         pm = DefaultPassBuilder.define_nopython_pipeline(self.state)
         # Add the new pass to run after IRProcessing
-        pm.add_pass_after(LoopUnrolling, IRProcessing)
-        # pm.add_pass_after(LoopFusion1, IRProcessing)
+        # pm.add_pass_after(LoopUnrolling, IRProcessing)
+        pm.add_pass_after(LoopFusion1, IRProcessing)
         #pm.add_pass_after(ParFdd, IRProcessing)
         # finalize
         pm.finalize()
@@ -108,30 +108,31 @@ class MyCompiler(CompilerBase):  # custom compiler extends from CompilerBase
         return [pm]
 
 
-@numba.njit(pipeline_class=MyCompiler)
-def test_unrolling(iterations):
-    xs = list(range(1, iterations + 1))
-    s = 0
-    i = 0
+# # Temporary tests and benchmarks for numba loop unrolling
+# @numba.njit(pipeline_class=MyCompiler)
+# def test_unrolling(iterations):
+#     xs = list(range(1, iterations + 1))
+#     s = 0
+#     i = 0
 
-    while i < len(xs):
-        s += xs[i]
-        i += 1
+#     while i < len(xs):
+#         s += xs[i]
+#         i += 1
 
-    return s
+#     return s
 
 
-@numba.jit
-def test_control(iterations):
-    xs = list(range(1, iterations + 1))
-    s = 0
-    i = 0
+# @numba.jit
+# def test_control(iterations):
+#     xs = list(range(1, iterations + 1))
+#     s = 0
+#     i = 0
 
-    while i < len(xs):
-        s += xs[i]
-        i += 1
+#     while i < len(xs):
+#         s += xs[i]
+#         i += 1
 
-    return s
+#     return s
 
 
 # if __name__ == "__main__":
