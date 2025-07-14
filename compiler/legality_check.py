@@ -1,0 +1,309 @@
+import sympy
+
+from compiler_def import DataDependence, LoopBound, Access, Expression, Schedule
+from copy import deepcopy
+from sympy import Symbol, Eq, GreaterThan, And, Or, Not, StrictGreaterThan
+from spf_ir import *
+from SMT_Generator import generate_smt_file
+import ast
+from z3 import Solver, CheckSatResult, Z3_L_FALSE
+
+
+
+def check_bound_equivalency(b1, b2):
+    if isinstance(b1, Expression) and isinstance(b2, Expression):
+        if len(b1.elements) != len(b2.elements):
+            return False
+        res = True
+        for i, el in enumerate(b1.elements):
+            res = res and check_bound_equivalency(el, b2.elements[i])
+        return res
+    if isinstance(b1, Access) and isinstance(b2, Access):
+        if b1.var == b2.var:
+            return check_bound_equivalency(b1.index, b2.index)
+    elif not isinstance(b1, Access) and not isinstance(b2, Access):
+        if b1 == b2:
+            return True
+        # elif (b1, b2) in mappings:
+        #     return True
+        else:
+            return False
+    else:
+        return False
+
+
+#TODO: For now it's fine to have frange on inner loops but this need to be fixed later.
+def check_loop_bounds_safety(targeted_iters: tuple[str, str], loop_bounds: dict[str, LoopBound]):
+    i1 = targeted_iters[0]
+    i2 = targeted_iters[1]
+    i1_start = loop_bounds[i1].start
+    i1_end = loop_bounds[i1].end
+    i2_start = loop_bounds[i2].start
+    i2_end = loop_bounds[i2].end
+    return check_bound_equivalency(i1_start, i2_start) and check_bound_equivalency(i1_end, i2_end)
+
+
+
+def extract_fusion_constraint_for_dependence(dependence: DataDependence):
+    from_sched = dependence.from_si
+    to_sched = dependence.to_si
+    print(from_sched)
+    print(to_sched)
+    conditions = sympy.false
+    base_cond = sympy.true
+    for i, s in enumerate(from_sched.schedule):
+         if s.isnumeric():
+             assert(to_sched.schedule[i].isnumeric())
+             if int(to_sched.schedule[i]) > int(from_sched.schedule[i]):
+                 return conditions
+             elif int(to_sched.schedule[i]) < int(from_sched.schedule[i]): #TODO: Think how I can fix this.
+                     return True
+         else:
+             if not dependence.has_condition(from_sched.schedule[i], to_sched.schedule[i]):
+                 from_sym = Symbol(from_sched.schedule[i].replace(".", ""))
+                 to_sym = Symbol(to_sched.schedule[i].replace(".", ""))
+                 conditions = Or(And(base_cond, StrictGreaterThan(from_sym, to_sym)), conditions)
+                 base_cond = And(Eq(from_sym, to_sym), base_cond)
+    return conditions
+
+
+def transform_sched(target_sched: Schedule, current_sched: Schedule, i1: str, i2: str):
+    new_sched = deepcopy(current_sched)
+    tar_index = 0
+    for i, s in enumerate(target_sched.schedule):
+        if s == i1:
+            tar_index = i+1
+            assert(new_sched.schedule[i] == i2)
+            break
+        if s.isnumeric():
+            assert(new_sched.schedule[i].isnumeric())
+            new_sched.schedule[i] = s
+    new_sched.schedule[tar_index] = str(int(target_sched.schedule[tar_index]) + 1)
+    return new_sched
+
+
+# for now, we considered tuple holds the schedule order
+# TODO: I should check that all the dependences after the transformation still hold(remove relevent dependences part
+def extract_fusion_illegality_constraint(targeted_iters: tuple[str, str], dependences: list[DataDependence]):
+    i1 = targeted_iters[0]
+    i2 = targeted_iters[1]
+    constraints = []
+    for dep in dependences:
+        # assert dep.to_si.occurs_in(i2) and dep.from_si.occurs_in(i1), "Dependences should be defined between given loops only"
+        new_sched = transform_sched(dep.from_si, dep.to_si, i1, i2)
+        new_dep = DataDependence(dep.from_si, new_sched, dep.data, dep.from_ind, dep.to_ind, dep.type)
+        dependence_constraint = And(dep.get_condition_statement_sympy(),
+                                    extract_fusion_constraint_for_dependence(new_dep))
+        constraints.append(dependence_constraint)
+    return constraints
+
+
+# TODO: For now only works for legal fusion.
+def check_legality_of_fusion(mapping: tuple[str, str],
+                             node_data: dict[str, LoopNode]):
+    loop_bounds = {}
+    mapping_nodes = {}
+    for lid, lnode in node_data.items():
+        if isinstance(lnode, LoopNode):
+            loop_bounds[lnode.iter_var] = lnode.bound
+            if lnode.iter_var in mapping:
+                mapping_nodes[lnode.iter_var] = lnode
+    if check_loop_bounds_safety(mapping, loop_bounds):
+        dependences = extract_dependences(node_data, mapping, mapping_nodes)
+        new_mapping = subscript_fused_vars(mapping)
+        constraints = extract_fusion_illegality_constraint(new_mapping, dependences)
+        return constraints
+    else:
+        return sympy.true
+    # if check_loop_bounds_safety(targeted_iters, loop_bounds, mappings):
+    #     return extract_fusion_illigality_constraint(targeted_iters, dependence, schedules), mappings
+    # else:
+    #     return sympy.true, []
+
+
+
+# EXTRACTING DEPENDENCES
+
+def  extract_latest_write_access_in_loop(loop_node):
+    last_write_access = {}
+    #BFS
+    queue = [loop_node]
+    while len(queue) > 0:
+        cur_node = queue.pop(0)
+        if isinstance(cur_node, AssignNode):
+            last_write_access[cur_node.write_access] = cur_node
+        for c in cur_node.children:
+            queue.append(c)
+    return last_write_access
+
+# Works based on iter var to node data map.
+def extract_raw_data_dependencies(node_data, last_write_accesses):
+    schedule_to_reads = {}
+    schedule_to_write = {}
+    dependences = []
+    for cur_node in node_data.values():
+        if isinstance(cur_node, AssignNode):
+            schedule_to_reads[cur_node.schedule] = cur_node.read_accesses
+    for last_write_access in last_write_accesses.values():
+        for s_node in last_write_access:
+            schedule_to_write[s_node.schedule] = s_node.write_access
+    for ri, r_accesses in schedule_to_reads.items():
+        for wi, w_access in schedule_to_write.items():
+            for r_access in r_accesses:
+                r_arr = r_access.get_data_array()
+                w_arr = w_access.get_data_array()
+                r_index = r_access.get_index()
+                w_index = w_access.get_index()
+                if r_arr == w_arr:
+                    # if wi != ri:
+                    raw_dependence = DataDependence(wi, ri, r_arr, w_index, r_index, 'RAW')
+                    dependences.append(raw_dependence)
+    return dependences
+
+
+def refine_dependences(dependences, fused_iter_vars):
+    refined_dependences = []
+    extra_constrains = []
+    for dep in dependences:
+        new_dep = update_dep(dep, fused_iter_vars)
+        # subscript_dependence(new_dep)
+        dep_cond = check_if_dependence_holds(new_dep)
+        if dep_cond != sympy.false:
+            refined_dependences.append(new_dep)
+            extra_constrains.append(dep_cond)
+    return refined_dependences, extra_constrains
+
+
+def update_dep(dep, fused_iter_vars):
+    new_dep = deepcopy(dep)
+    from_si = new_dep.from_si.schedule
+    to_si = new_dep.to_si.schedule
+    for i, fi in enumerate(from_si):
+        if fi in fused_iter_vars:
+            new_dep.from_si.schedule = from_si[:i+2]
+            break
+    for j, ti in enumerate(to_si):
+        if ti in fused_iter_vars:
+            new_dep.to_si.schedule = to_si[:j+2]
+            break
+    return new_dep
+
+
+def check_if_dependence_holds(dependence):
+    from_sched = dependence.from_si
+    to_sched = dependence.to_si
+    conditions = sympy.false
+    base_cond = sympy.true
+    for i, s in enumerate(from_sched.schedule):
+        if s.isnumeric():
+            assert (to_sched.schedule[i].isnumeric())
+            if int(to_sched.schedule[i]) > int(from_sched.schedule[i]):
+                return Or(conditions, base_cond)
+            elif int(to_sched.schedule[i]) < int(from_sched.schedule[i]):  # TODO: Think how I can fix this.
+                return conditions
+        else:
+            if not dependence.has_condition(from_sched.schedule[i], to_sched.schedule[i]):
+                from_sym = Symbol(from_sched.schedule[i].replace(".", ""))
+                to_sym = Symbol(to_sched.schedule[i].replace(".", ""))
+                conditions = Or(And(base_cond, GreaterThan(to_sym, from_sym)), conditions)
+                base_cond = And(Eq(from_sym, to_sym), base_cond)
+    return conditions
+
+def subscript_fused_vars(fused_vars):
+    return fused_vars[0] + "1", fused_vars[1] + "2"
+
+#TODO: For index subscriptions, we need to check if type of index is access and act accordingly(something like visit?)
+def subscript_dependence(dependence):
+    from_sched = dependence.from_si
+    to_sched = dependence.to_si
+    new_from_sched = deepcopy(from_sched)
+    new_to_sched = deepcopy(to_sched)
+    new_from_ind = []
+    new_to_ind = []
+    for i, s in enumerate(from_sched.schedule):
+        if not s.isnumeric():
+            new_from_sched.schedule[i] = s + "1"
+    for k, fi in enumerate(dependence.from_ind):
+        if fi in from_sched.schedule:
+            new_from_ind.append(fi + "1")
+        elif isinstance(fi, Access):
+            new_fi = Access(fi.var, fi.index + "1")
+            new_from_ind.append(new_fi)
+        else:
+            new_from_ind.append(fi)
+    for j, s in enumerate(to_sched.schedule):
+        if not s.isnumeric():
+            new_to_sched.schedule[j] = s + "2"
+    for k, ti in enumerate(dependence.to_ind):
+        if ti in to_sched.schedule:
+            new_to_ind.append(ti + "2")
+        elif isinstance(ti, Access):
+            new_ti = Access(ti.var, ti.index + "1")
+            new_to_ind.append(new_ti)
+        else:
+            new_to_ind.append(ti)
+    dependence.from_si = new_from_sched
+    dependence.to_si = new_to_sched
+    dependence.from_ind = tuple(new_from_ind)
+    dependence.to_ind = tuple(new_to_ind)
+
+
+# Works based on iter var to node data map.
+def extract_dependences(node_data, fused_iter_vars, mapping_nodes):
+    last_write_accesses = {}
+    for loop_id in fused_iter_vars:
+        last_write_accesses[loop_id] = []
+        last_write_access = extract_latest_write_access_in_loop(mapping_nodes[loop_id])
+        for s_node in last_write_access.values():
+            last_write_accesses[loop_id].append(s_node)
+    dependences = extract_raw_data_dependencies(node_data, last_write_accesses)
+    # print(dependences)
+    # fused_iter_vars = [node_data[loop_id].iter_var for loop_id in fused_loop_ids]
+    refined_dependences, extra_constraints = refine_dependences(dependences, fused_iter_vars)
+    for i, dependence in enumerate(refined_dependences):
+        print(dependence)
+        print(extra_constraints[i])
+        print("-----------------")
+    return refined_dependences
+
+
+src_sddmm_spmm = """
+for i1 in frange(m):
+    for i2 in range(Ap[i1], Ap[i1 + 1]):
+        for i3 in range(k):
+            Xx[i2] += B[i1][i3] * C[Ai[i2]][i3]
+for j1 in frange(m):
+    for j2 in range(Ap[j1], Ap[j1 + 1]):
+        for j3 in range(n):
+            Y[j1][j3] += Xx[j2] * D[j1][j3]
+"""
+
+function_props = {
+    'Ap': ['monotonically_increasing'],
+    'Ai': [],
+}
+
+if __name__ == "__main__":
+    tree = ast.parse(src_sddmm_spmm)
+    spf_builder = SPFBuilder()
+    root_node = spf_builder.visit(tree)
+    node_data = extract_node_data(root_node)
+
+    # print(node_data)
+    # dependencies = extract_dependences(node_data, spf_builder.fused_loop_ids)
+    mappings = extract_mappings(root_node, node_data, spf_builder.fused_loop_ids)
+    print(mappings)
+    iv_node_data = {}
+    for nid, node in node_data.items():
+        if isinstance(node, LoopNode):
+            iv_node_data[node.iter_var] = node
+    constraints = check_legality_of_fusion(("i1", "j1"), node_data)
+    #For each constraint one separate smt file is generated.
+    smt_out = generate_smt_file(iv_node_data.values(), constraints[0], function_props)
+    s = Solver()
+    s.from_string(smt_out)
+    print(s.check())
+    if s.check() == CheckSatResult(Z3_L_FALSE):
+        fusion_transformer = LegalFusionTransformer()
+        transformed_tree = fusion_transformer.visit(tree)
+        print(ast.unparse(transformed_tree))

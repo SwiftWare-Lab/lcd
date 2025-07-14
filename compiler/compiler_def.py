@@ -7,25 +7,25 @@ class LoopBound:
         self.start = start
         self.end = end
 
-    # def get_sympy_expr(self, iter_var):
-    #     f1 = []
-    #     f2 = []
-    #     consts = []
-    #     if isinstance(self.start, Access):
-    #         f1, start = self.start.get_sympy_expr()
-    #     elif self.start.isnumeric():
-    #         start = int(self.start)
-    #     else:
-    #         start = Symbol(self.start)
-    #         consts.append(start)
-    #     if isinstance(self.end, Access):
-    #         f2, end = self.end.get_sympy_expr()
-    #     elif self.end.isnumeric():
-    #         end = int(self.end)
-    #     else:
-    #         end = Symbol(self.end)
-    #         consts.append(end)
-    #     return consts, f1 + f2, And(Gt(Symbol(iter_var), start), LessThan(Symbol(iter_var), end))
+    def get_sympy_expr(self, iter_var):
+        f1 = []
+        f2 = []
+        consts = []
+        if isinstance(self.start, Access):
+            f1, start = self.start.get_sympy_expr()
+        elif self.start.isnumeric():
+            start = int(self.start)
+        else:
+            start = Symbol(self.start)
+            consts.append(start)
+        if isinstance(self.end, Access):
+            f2, end = self.end.get_sympy_expr()
+        elif self.end.isnumeric():
+            end = int(self.end)
+        else:
+            end = Symbol(self.end)
+            consts.append(end)
+        return consts, f1 + f2, And(Gt(Symbol(iter_var), start), LessThan(Symbol(iter_var), end))
 
     def __repr__(self):
         return '(' + str(self.start) + ', ' + str(self.end) + ')'
@@ -71,12 +71,12 @@ class Access:
         return funcs, func_sym
 
     def __eq__(self, other):
-        # if type(self.index) is type(other.index) or type(self.var) is type(other.var):
-        #     return False
-        if type(self.index) is list and type(other.index) is list:
-            self.index.sort()
-            other.index.sort()
-        return self.var == other.var and self.index == other.index
+        if isinstance(other, Access):
+            if type(self.index) is list and type(other.index) is list:
+                self.index.sort()
+                other.index.sort()
+            return self.var == other.var and self.index == other.index
+        return False
 
     def __str__(self):
         return f"{self.var}[{self.index}]" if self.index is not None else self.var
@@ -155,3 +155,8 @@ class DataDependence:
         return str(self.from_si) + '->' + str(
             self.to_si) + '\ndata: `' + self.data.__repr__() + '`\ncondition: ' + condition + '\ntype: ' + self.type
 
+
+class FusionDefinition:
+    def __init__(self, fusion_mappings: list[tuple[str, str]], interleaving_mapping: tuple[str, str] | None):
+        self.fusion_mappings = fusion_mappings
+        self.interleaving_mapping = interleaving_mapping
