@@ -129,38 +129,78 @@ class LoopUnroller(ast.NodeTransformer):
         return all(not isinstance(stmt, control_flow_nodes) for stmt in loop.body)
 
 
-test_codes = ["""
-def test():
-    a = [0] * 100_000
-    i = 0
-    while i < len(a):
-        a[i] = i
-        i += 1
-
-test()
-""", 
-
+test_codes = [
 """
+# Running average while loop
 def test():
     a = list(range(100_000))
+    avg = [0.0] * len(a)
     s = 0
     i = 0
     while i < len(a):
-        s += i
+        s += a[i]
+        avg[i] = s / (i + 1)
         i += 1
+test()
+""", 
+"""
+# Running average for loop
+def test():
+    a = list(range(100_000))
+    avg = [0.0] * len(a)
+    s = 0
+    for i in range(len(a)):
+        s += a[i]
+        avg[i] = s / (i + 1)
 
 test()
 """,
 
 """
+# Convolution while loop
 def test():
-    y = list(range(100_000))
-    s = 0
-    for x in range(len(y)):
-        s += y[x]
+    a = list(range(100_000))
+    b = [0] * 100_000
+    i = 2
+    while i < len(a):
+        b[i] = a[i] + a[i - 1] + a[i - 2]
+        i += 1
 
 test()
+""",
 """
+# Convolution for loop
+def test():
+    a = list(range(100_000))
+    b = [0] * 100_000
+    for i in range(2, len(a)):
+        b[i] = a[i] + a[i - 1] + a[i - 2]
+
+test()
+""",
+
+"""
+# Bit manipulation while loop
+def test():
+    a = list(range(100_000))
+    b = [0] * 100_000
+    i = 0
+    while i < len(a):
+        b[i] = (a[i] << 2) ^ (a[i] >> 1)
+        i += 1
+
+test()
+""",
+"""
+# Bit manipulation for loop
+def test():
+    a = list(range(100_000))
+    b = [0] * 100_000
+    for i in range(len(a)):
+        b[i] = (a[i] << 2) ^ (a[i] >> 1)
+
+test()
+""",
 ]
 
 
