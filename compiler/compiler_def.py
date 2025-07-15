@@ -1,6 +1,53 @@
 import sympy
-from sympy import And, Eq, Symbol, GreaterThan, LessThan, Function, Gt
+import sympy
 
+class DependencePremise:
+    def __init__(self, left, right):
+        self.left = left
+        self.right = right
+
+    def __eq__(self, other):
+        if type(other) == type(self):
+            return other.left == self.left and other.right == self.right
+        else:
+            return False
+
+    def get_sympy_expression(self):
+        raise NotImplementedError("This functionality is only implemented for subclass objects.")
+
+    def __repr__(self):
+        raise NotImplementedError("This functionality is only implemented for subclass objects.")
+
+    def __str__(self):
+        return self.__repr__()
+
+class Equality(DependencePremise):
+    def get_sympy_expression(self):
+        return sympy.Eq(sympy.Symbol(str(self.left)), sympy.Symbol(str(self.right)))
+
+    def __repr__(self):
+        return str(self.left) + ' = ' + str(self.right)
+
+    def __eq__(self, other):
+        if type(other) == type(self):
+            return (other.left == self.left and other.right == self.right) and \
+                (other.left == self.right and other.right == self.left)
+        else:
+            return False
+
+class GreaterThanOrEqual(DependencePremise):
+    def get_sympy_expression(self):
+        return sympy.Gt(sympy.Symbol(str(self.left)), sympy.Symbol(str(self.right)))
+
+    def __repr__(self):
+        return str(self.left) + ' >= ' + str(self.right)
+
+class GreaterThan(DependencePremise):
+    def get_sympy_expression(self):
+        return sympy.StrictGreaterThan(sympy.Symbol(str(self.left)), sympy.Symbol(str(self.right)))
+
+    def __repr__(self):
+        return str(self.left) + ' > ' + str(self.right)
 
 class LoopBound:
     def __init__(self, start, end):
@@ -16,16 +63,16 @@ class LoopBound:
         elif self.start.isnumeric():
             start = int(self.start)
         else:
-            start = Symbol(self.start)
+            start = sympy.Symbol(self.start)
             consts.append(start)
         if isinstance(self.end, Access):
             f2, end = self.end.get_sympy_expr()
         elif self.end.isnumeric():
             end = int(self.end)
         else:
-            end = Symbol(self.end)
+            end = sympy.Symbol(self.end)
             consts.append(end)
-        return consts, f1 + f2, And(Gt(Symbol(iter_var), start), LessThan(Symbol(iter_var), end))
+        return consts, f1 + f2, sympy.And(sympy.Gt(sympy.Symbol(iter_var), start), sympy.LessThan(sympy.Symbol(iter_var), end))
 
     def __repr__(self):
         return '(' + str(self.start) + ', ' + str(self.end) + ')'
@@ -67,7 +114,7 @@ class Access:
         args_sympy = self.get_index_sympy_expr()
         args = args_sympy[1]
         funcs += [f for f in self.get_index_sympy_expr()[0] if f is not None]
-        func_sym = Function(func)(args)
+        func_sym = sympy.Function(func)(args)
         return funcs, func_sym
 
     def __eq__(self, other):
@@ -105,7 +152,7 @@ class Access:
         elif isinstance(self.index, Expression):
             return [], self.index.get_sympy_expr()
         else:
-            return [], Symbol(self.index.replace(".", ""))
+            return [], sympy.Symbol(self.index.replace(".", ""))
 
 
 class Expression:
@@ -123,35 +170,30 @@ class Expression:
 
 
 class DataDependence:
-    def __init__(self, from_si, to_si, data, from_ind, to_ind, type):
+    def __init__(self, from_si, to_si, data, initial_premises, type):
         self.from_si = from_si
         self.to_si = to_si
         self.data = data
-        self.from_ind = from_ind
-        self.to_ind = to_ind
+        # self.from_ind = from_ind
+        # self.to_ind = to_ind
+        self.premises = initial_premises
         self.type = type
-        assert len(from_ind) == len(to_ind)
+        # assert len(from_ind) == len(to_ind)
 
-    def has_condition(self, i1, i2):
-        for i in range(len(self.from_ind)):
-            if not isinstance(self.from_ind[i], Access) and not isinstance(self.to_ind[i], Access):
-                if (self.from_ind[i] == i1 and self.to_ind[i] == i2) or (self.from_ind[i] == i2 and self.to_ind[i] == i1):
-                    return True
-        return False
+    def add_premises(self, premises):
+        self.premises.extend(premises)
+
+    def has_premise(self, condition):
+        return condition in self.premises
 
     def get_condition_statement_sympy(self):
         condition = sympy.true
-        for i in range(len(self.from_ind)):
-            from_sym = Symbol(str(self.from_ind[i]).replace(".", ""))
-            to_sym = Symbol(str(self.to_ind[i]).replace(".", ""))
-            condition = And(Eq(from_sym, to_sym), condition)
+        for premise in self.premises:
+            condition = sympy.And(premise.get_sympy_expression(), condition)
         return condition
 
     def __repr__(self):
-        conditions = []
-        for i in range(len(self.from_ind)):
-            conditions.append('{} == {}'.format(self.from_ind[i], self.to_ind[i]))
-        condition = ' and '.join(conditions)
+        condition = ' and '.join(map(str, self.premises))
         return str(self.from_si) + '->' + str(
             self.to_si) + '\ndata: `' + self.data.__repr__() + '`\ncondition: ' + condition + '\ntype: ' + self.type
 

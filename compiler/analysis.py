@@ -385,9 +385,10 @@ def extract_raw_data_dependences(reads, writes, schedule, loop_bodies):
                 w_index = w_access.get_index()
                 if r_arr == w_arr:
                     # if wi != ri:
-                    raw_dependence = DataDependence(wi, ri, r_arr, w_index, r_index, 'RAW')
+                    premises = [Equality(w_index[i], r_index[i]) for i in range(len(r_index))]
+                    raw_dependence = DataDependence(wi, ri, r_arr, premises, 'RAW')
                     dependences.append(raw_dependence)
-                    war_dependence = DataDependence(ri, wi, r_arr, w_index, r_index, 'WAR')
+                    war_dependence = DataDependence(ri, wi, r_arr, premises, 'WAR')
                     dependences.append(war_dependence)
     for wi, w_access in sched_writes.items():
         for wj, w_access2 in sched_writes.items():
@@ -395,7 +396,8 @@ def extract_raw_data_dependences(reads, writes, schedule, loop_bodies):
             w_index = w_access.get_index()
             w_index2 = w_access2.get_index()
             if w_arr == w_access2.get_data_array():
-                waw_dependence = DataDependence(wi, wj, w_arr, w_index, w_index2, 'WAW')
+                premises = [Equality(w_index[i], w_index2[i]) for i in range(len(w_index))]
+                waw_dependence = DataDependence(wi, wj, w_arr, premises, 'WAW')
                 dependences.append(waw_dependence)
     return dependences
 

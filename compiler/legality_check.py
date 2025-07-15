@@ -44,6 +44,7 @@ def check_loop_bounds_safety(targeted_iters: tuple[str, str], loop_bounds: dict[
 
 
 
+#TODO: Fix it with new dependence premise design.
 def extract_fusion_constraint_for_dependence(dependence: DataDependence):
     from_sched = dependence.from_si
     to_sched = dependence.to_si
@@ -59,7 +60,8 @@ def extract_fusion_constraint_for_dependence(dependence: DataDependence):
              elif int(to_sched.schedule[i]) < int(from_sched.schedule[i]): #TODO: Think how I can fix this.
                      return True
          else:
-             if not dependence.has_condition(from_sched.schedule[i], to_sched.schedule[i]):
+             if not dependence.has_premise(Equality(from_sched.schedule[i], to_sched.schedule[i]))\
+                     or dependence.has_premise(GreaterThanOrEqual(to_sched.schedule[i], from_sched.schedule[i])):
                  from_sym = Symbol(from_sched.schedule[i].replace(".", ""))
                  to_sym = Symbol(to_sched.schedule[i].replace(".", ""))
                  conditions = Or(And(base_cond, StrictGreaterThan(from_sym, to_sym)), conditions)
@@ -91,7 +93,7 @@ def extract_fusion_illegality_constraint(targeted_iters: tuple[str, str], depend
     for dep in dependences:
         # assert dep.to_si.occurs_in(i2) and dep.from_si.occurs_in(i1), "Dependences should be defined between given loops only"
         new_sched = transform_sched(dep.from_si, dep.to_si, i1, i2)
-        new_dep = DataDependence(dep.from_si, new_sched, dep.data, dep.from_ind, dep.to_ind, dep.type)
+        new_dep = DataDependence(dep.from_si, new_sched, dep.data, dep.premises, dep.type)
         dependence_constraint = And(dep.get_condition_statement_sympy(),
                                     extract_fusion_constraint_for_dependence(new_dep))
         constraints.append(dependence_constraint)
@@ -155,23 +157,23 @@ def extract_raw_data_dependencies(node_data, last_write_accesses):
                 r_index = r_access.get_index()
                 w_index = w_access.get_index()
                 if r_arr == w_arr:
+                    premises = [Equality(w_index[i], r_index[i]) for i in range(len(r_index))]
                     # if wi != ri:
-                    raw_dependence = DataDependence(wi, ri, r_arr, w_index, r_index, 'RAW')
+                    raw_dependence = DataDependence(wi, ri, r_arr, premises, 'RAW')
                     dependences.append(raw_dependence)
     return dependences
 
 
 def refine_dependences(dependences, fused_iter_vars):
     refined_dependences = []
-    extra_constrains = []
     for dep in dependences:
         new_dep = update_dep(dep, fused_iter_vars)
         # subscript_dependence(new_dep)
         dep_cond = check_if_dependence_holds(new_dep)
         if dep_cond != sympy.false:
             refined_dependences.append(new_dep)
-            extra_constrains.append(dep_cond)
-    return refined_dependences, extra_constrains
+            dep.add_premises(dep_cond)
+    return refined_dependences
 
 
 def update_dep(dep, fused_iter_vars):
@@ -192,21 +194,19 @@ def update_dep(dep, fused_iter_vars):
 def check_if_dependence_holds(dependence):
     from_sched = dependence.from_si
     to_sched = dependence.to_si
-    conditions = sympy.false
-    base_cond = sympy.true
+    conditions = []
     for i, s in enumerate(from_sched.schedule):
         if s.isnumeric():
             assert (to_sched.schedule[i].isnumeric())
             if int(to_sched.schedule[i]) > int(from_sched.schedule[i]):
-                return Or(conditions, base_cond)
-            elif int(to_sched.schedule[i]) < int(from_sched.schedule[i]):  # TODO: Think how I can fix this.
+                return conditions
+            elif int(to_sched.schedule[i]) < int(from_sched.schedule[i]):
                 return conditions
         else:
-            if not dependence.has_condition(from_sched.schedule[i], to_sched.schedule[i]):
-                from_sym = Symbol(from_sched.schedule[i].replace(".", ""))
-                to_sym = Symbol(to_sched.schedule[i].replace(".", ""))
-                conditions = Or(And(base_cond, GreaterThan(to_sym, from_sym)), conditions)
-                base_cond = And(Eq(from_sym, to_sym), base_cond)
+            if not dependence.has_premise(Equality(from_sched.schedule[i], to_sched.schedule[i])):
+                from_sym = from_sched.schedule[i].replace(".", "")
+                to_sym = to_sched.schedule[i].replace(".", "")
+                conditions += GreaterThanOrEqual(to_sym, from_sym)
     return conditions
 
 def subscript_fused_vars(fused_vars):
@@ -259,13 +259,23 @@ def extract_dependences(node_data, fused_iter_vars, mapping_nodes):
     dependences = extract_raw_data_dependencies(node_data, last_write_accesses)
     # print(dependences)
     # fused_iter_vars = [node_data[loop_id].iter_var for loop_id in fused_loop_ids]
-    refined_dependences, extra_constraints = refine_dependences(dependences, fused_iter_vars)
+    refined_dependences = refine_dependences(dependences, fused_iter_vars)
     for i, dependence in enumerate(refined_dependences):
         print(dependence)
-        print(extra_constraints[i])
         print("-----------------")
     return refined_dependences
 
+
+src_spmm_spmm_v4 = """
+for i3 in frange(n):
+    for i2 in range(Ap[i1], Ap[i1 + 1]):
+        for i1 in range(m):
+            y[i1][i3] += Ax[i2] * B[Ai[i2]][i3]
+for j3 in frange(n):
+    for j2 in range(Ap[j1], Ap[j1 + 1]):
+        for j1 in range(m):
+            z[j1][j3] += Ax[j2] * y[Ai[j2]][j3]
+"""
 
 src_sddmm_spmm = """
 for i1 in frange(m):
@@ -284,7 +294,7 @@ function_props = {
 }
 
 if __name__ == "__main__":
-    tree = ast.parse(src_sddmm_spmm)
+    tree = ast.parse(src_spmm_spmm_v4)
     spf_builder = SPFBuilder()
     root_node = spf_builder.visit(tree)
     node_data = extract_node_data(root_node)
@@ -298,12 +308,17 @@ if __name__ == "__main__":
         if isinstance(node, LoopNode):
             iv_node_data[node.iter_var] = node
     constraints = check_legality_of_fusion(("i1", "j1"), node_data)
+    if constraints[0] != sympy.false:
     #For each constraint one separate smt file is generated.
-    smt_out = generate_smt_file(iv_node_data.values(), constraints[0], function_props)
-    s = Solver()
-    s.from_string(smt_out)
-    print(s.check())
-    if s.check() == CheckSatResult(Z3_L_FALSE):
+        smt_out = generate_smt_file(iv_node_data.values(), constraints[0], function_props)
+        s = Solver()
+        s.from_string(smt_out)
+        print(s.check())
+        if s.check() == CheckSatResult(Z3_L_FALSE):
+            fusion_transformer = LegalFusionTransformer()
+            transformed_tree = fusion_transformer.visit(tree)
+            print(ast.unparse(transformed_tree))
+    else:
         fusion_transformer = LegalFusionTransformer()
         transformed_tree = fusion_transformer.visit(tree)
         print(ast.unparse(transformed_tree))
