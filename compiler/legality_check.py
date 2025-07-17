@@ -1,11 +1,9 @@
 import sympy
 
-from compiler_def import DataDependence, LoopBound, Access, Expression, Schedule
 from copy import deepcopy
 from sympy import Symbol, Eq, GreaterThan, And, Or, Not, StrictGreaterThan
-from spf_ir import *
+from spf_raising import *
 from SMT_Generator import generate_smt_file
-import ast
 from z3 import Solver, CheckSatResult, Z3_L_FALSE
 
 
@@ -206,7 +204,7 @@ def check_if_dependence_holds(dependence):
             if not dependence.has_premise(Equality(from_sched.schedule[i], to_sched.schedule[i])):
                 from_sym = from_sched.schedule[i].replace(".", "")
                 to_sym = to_sched.schedule[i].replace(".", "")
-                conditions += GreaterThanOrEqual(to_sym, from_sym)
+                conditions.append(GreaterThanOrEqual(to_sym, from_sym))
     return conditions
 
 def subscript_fused_vars(fused_vars):
@@ -265,6 +263,31 @@ def extract_dependences(node_data, fused_iter_vars, mapping_nodes):
         print("-----------------")
     return refined_dependences
 
+def finalize_legality_of_fusion(transformation, cur_ast):
+    spf_builder = SPFBuilder()
+    root_node = spf_builder.visit(cur_ast)
+    node_data = extract_node_data(root_node)
+
+    iv_node_data = {}
+    for nid, node in node_data.items():
+        if isinstance(node, LoopNode):
+            iv_node_data[node.iter_var] = node
+    constraints = check_legality_of_fusion(transformation, node_data)
+    if constraints[0] != sympy.false:
+        smt_out = generate_smt_file(iv_node_data.values(), constraints[0], function_props)
+        s = Solver()
+        s.from_string(smt_out)
+        if s.check() == CheckSatResult(Z3_L_FALSE):
+           return True
+        else:
+            return False
+    else:
+        return True
+
+
+def transform_ast(transformation, cur_ast):
+    fusion_transformer = LegalFusionTransformer(transformation)
+    return fusion_transformer.visit(cur_ast)
 
 src_spmm_spmm_v4 = """
 for i3 in frange(n):
@@ -288,37 +311,47 @@ for j1 in frange(m):
             Y[j1][j3] += Xx[j2] * D[j1][j3]
 """
 
+src_sddmm_spmm_v2 = """
+for i1 in range(m):
+    for i2 in frange(Ap[i1], Ap[i1 + 1]):
+        for i3 in range(k):
+            Xx[i2] += B[i1][i3] * C[Ai[i2]][i3]
+    for j2 in frange(Ap[i1], Ap[i1 + 1]):
+        for j3 in range(n):
+            Y[i1][j3] += Xx[j2] * D[i1][j3]
+"""
+
 function_props = {
     'Ap': ['monotonically_increasing'],
     'Ai': [],
 }
 
-if __name__ == "__main__":
-    tree = ast.parse(src_spmm_spmm_v4)
-    spf_builder = SPFBuilder()
-    root_node = spf_builder.visit(tree)
-    node_data = extract_node_data(root_node)
-
-    # print(node_data)
-    # dependencies = extract_dependences(node_data, spf_builder.fused_loop_ids)
-    mappings = extract_mappings(root_node, node_data, spf_builder.fused_loop_ids)
-    print(mappings)
-    iv_node_data = {}
-    for nid, node in node_data.items():
-        if isinstance(node, LoopNode):
-            iv_node_data[node.iter_var] = node
-    constraints = check_legality_of_fusion(("i1", "j1"), node_data)
-    if constraints[0] != sympy.false:
-    #For each constraint one separate smt file is generated.
-        smt_out = generate_smt_file(iv_node_data.values(), constraints[0], function_props)
-        s = Solver()
-        s.from_string(smt_out)
-        print(s.check())
-        if s.check() == CheckSatResult(Z3_L_FALSE):
-            fusion_transformer = LegalFusionTransformer()
-            transformed_tree = fusion_transformer.visit(tree)
-            print(ast.unparse(transformed_tree))
-    else:
-        fusion_transformer = LegalFusionTransformer()
-        transformed_tree = fusion_transformer.visit(tree)
-        print(ast.unparse(transformed_tree))
+# if __name__ == "__main__":
+#     tree = ast.parse(src_sddmm_spmm_v2)
+#     spf_builder = SPFBuilder()
+#     root_node = spf_builder.visit(tree)
+#     node_data = extract_node_data(root_node)
+#
+#     # print(node_data)
+#     # dependencies = extract_dependences(node_data, spf_builder.fused_loop_ids)
+#     # mappings = extract_mappings(root_node, node_data, spf_builder.fused_loop_ids)
+#     # print(mappings)
+#     iv_node_data = {}
+#     for nid, node in node_data.items():
+#         if isinstance(node, LoopNode):
+#             iv_node_data[node.iter_var] = node
+#     constraints = check_legality_of_fusion(("i2", "j2"), node_data)
+#     if constraints[0] != sympy.false:
+#     #For each constraint one separate smt file is generated.
+#         smt_out = generate_smt_file(iv_node_data.values(), constraints[0], function_props)
+#         s = Solver()
+#         s.from_string(smt_out)
+#         print(s.check())
+#         if s.check() == CheckSatResult(Z3_L_FALSE):
+#             fusion_transformer = LegalFusionTransformer()
+#             transformed_tree = fusion_transformer.visit(tree)
+#             print(ast.unparse(transformed_tree))
+#     else:
+#         fusion_transformer = LegalFusionTransformer()
+#         transformed_tree = fusion_transformer.visit(tree)
+#         print(ast.unparse(transformed_tree))

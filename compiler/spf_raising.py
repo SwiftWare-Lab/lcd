@@ -1,40 +1,42 @@
 import ast
-from compiler_def import *
+from spf_def import *
+
+
 # from sympy import Symbol, Eq, GreaterThan, Lt, And, Or, Not
 # from copy import deepcopy
 # from legality_check import check_legality_of_fusion
 
 class LegalFusionTransformer(ast.NodeTransformer):
-    def __init__(self):
+    def __init__(self, transformation):
         self.target_loop = None
         self.target_loop_iter_var = None
         self.removed_iter_vars = []
+        self.transformation = transformation
 
-    #TODO: Fix generic visits(use return value to have one return statement.)
+    # TODO: Fix generic visits(use return value to have one return statement.)
     def visit_For(self, node):
-        if isinstance(node.iter, ast.Call) and node.iter.func.id == 'frange':
-            iter_var = self.visit(node.target)
-            if not self.target_loop:
-                self.target_loop_iter_var = iter_var.id
-                self.target_loop = node
-                self.generic_visit(node)
-                node.iter.func.id = 'range'
-                return node
-            else:
-                self.removed_iter_vars.append(iter_var.id)
-                self.generic_visit(node)
-                for child in node.body:
-                    self.target_loop.body.append(child)
-                return None
+        iter_var = self.visit(node.target)
+        if iter_var.id == self.transformation[0]:
+            self.target_loop = node
+            self.generic_visit(node)
+            return node
+        elif iter_var.id == self.transformation[1]:
+            assert node.target is not None, "Wrong transformation."
+            self.removed_iter_vars.append(iter_var.id)
+            self.generic_visit(node)
+            for child in node.body:
+                self.target_loop.body.append(child)
+            return None
         else:
             self.generic_visit(node)
             return node
 
     def visit_Name(self, node):
         if self.target_loop and node.id in self.removed_iter_vars:
-            return ast.Name(id=self.target_loop_iter_var, ctx=node.ctx)
+            return ast.Name(id=self.transformation[0], ctx=node.ctx)
         else:
             return node
+
 
 class SPFBuilder(ast.NodeVisitor):
 
@@ -50,11 +52,17 @@ class SPFBuilder(ast.NodeVisitor):
         self.fused_loop_ids = []
 
     def visit_Module(self, node):
+        assert len(node.body) == 1 and isinstance(node.body[0], ast.FunctionDef), "Wrong usage."
+        return self.visit(node.body[0])
+
+    def visit_FunctionDef(self, node):
         root = SPFNode("root")
         for s in node.body:
-            assert isinstance(s, ast.For) or isinstance(s, ast.Assign), \
+            assert isinstance(s, ast.For) or isinstance(s, ast.Assign) or isinstance(s, ast.Return), \
                 "Only for loops and assignments are supported for now."
-            root.add_child(self.visit(s))
+            node = self.visit(s)
+            if not isinstance(s, ast.Return):
+                root.add_child(node)
         return root
 
     def visit_Name(self, node):
@@ -113,8 +121,9 @@ class SPFBuilder(ast.NodeVisitor):
         self.loop_counter += 1
         loop_node = LoopNode(loop_id, iter_var, loop_bound)
         for s in node.body:
-            assert isinstance(s, ast.For) or isinstance(s, ast.Assign) or isinstance(s, ast.AugAssign), \
-                "Only for loops and assignments are supported for now."
+            assert (isinstance(s, ast.For) or isinstance(s, ast.Assign)
+                    or isinstance(s, ast.AugAssign) or isinstance(s, ast.Return)) \
+                , "Only for loops and assignments are supported for now."
             node = self.visit(s)
             loop_node.add_child(node)
         return loop_node
@@ -193,52 +202,12 @@ class SPFBuilder(ast.NodeVisitor):
         return operator_to_string[type(fn)]
 
 
-class SPFNode:
-    def __init__(self, node_id):
-        self.id = node_id
-        self.children = []
-        self.schedule = None
-
-    def add_child(self, node):
-        self.children.append(node)
-
-    def __repr__(self):
-        return self.id
-
-    def __str__(self):
-        return self.id
-
-
-class LoopNode(SPFNode):
-    def __init__(self, node_id, iter_var, loop_bound):
-        super().__init__(node_id)
-        self.iter_var = iter_var
-        self.bound = loop_bound
-        # print(loop_bound)
-
-
-class AssignNode(SPFNode):
-    def __init__(self, node_id, target, value):
-        super().__init__(node_id)
-        self.target = target
-        self.value = value
-        self.read_accesses = []
-        self.write_access = None
-
-    def add_read_access(self, read_access):
-        self.read_accesses.append(read_access)
-
-    def __str__(self):
-        return (self.id + "\n - write: " + str(self.write_access) +
-                "\n - reads: \n" + '\n'.join(map(str, self.read_accesses)))
-
-
 # DFS Algorithm on DFS tree
 def extract_node_data(spf_node):
     # schedule_to_node = {}
     node_data = {}
     node_data[spf_node.id] = spf_node
-    #Hold level, and statment_counter in addition to node to construct the schedule for each node correctly
+    # Hold level, and statment_counter in addition to node to construct the schedule for each node correctly
     stack = [(spf_node, 0, -1)]
     schedule = []
     # loop_last_statements = {}
@@ -260,40 +229,6 @@ def extract_node_data(spf_node):
             stack.append((c, counter, level))
     return node_data
 
-def extract_mappings(root_node, node_data, fused_loops):
-    loop_par = {}
-    node_queue = [root_node]
-    while len(node_queue) > 0:
-        cur_node = node_queue.pop(0)
-        for c in cur_node.children:
-            if isinstance(c, LoopNode):
-                loop_par[c.id] = cur_node.id
-                node_queue.append(c)
-    loop_nests = [] # List(List)
-    for lid in fused_loops:
-        loop_nests.append([])
-        cur_node = node_data[lid]
-        while isinstance(cur_node, LoopNode):
-            loop_nests[-1].insert(0, cur_node)
-            cur_node = node_data[loop_par[cur_node.id]]
-    assert len(loop_nests) == 2, "Fusing more than two loops is not supported."
-    if len(loop_nests[0]) != len(loop_nests[1]):
-        raise ValueError("Invalid fusion transformation")
-    mappings = []
-    for i, loop_node in enumerate(loop_nests[0]):
-        mappings.append((loop_node.iter_var, loop_nests[1][i].iter_var))
-    return mappings
-
-
-
-
-def perform_legal_fusion(node_data, target_loop, src_loop):
-    new_node_data = {}
-    for id, node in node_data.items():
-        if id != src_loop:
-            new_node_data[id] = node
-        if id == target_loop:
-            pass
 
 # transformation: (i, j)
 # dependence: DataDependence
@@ -356,8 +291,6 @@ def add_extra_iter_var_based_on_bound(bound, iter_list, iter_var_to_node):
     return None
 
 
-
-
 src = """
 for i in range(10):
     for j in range(0,n):
@@ -365,7 +298,6 @@ for i in range(10):
             A[i] = B[j] + C[k]
         
 """
-
 
 src_sddmm_spmm = """
 for i1 in range(m):
@@ -377,7 +309,6 @@ for j1 in range(m):
         for j3 in range(n):
             Y[j1][j3] += Xx[j2] * D[j1][j3]
 """
-
 
 src_spmm_spmm_v2 = """
 for i3 in frange(n):
@@ -446,11 +377,11 @@ for i in frange(n):
 #         if isinstance(node, LoopNode):
 #             iv_node_data[node.iter_var] = node
 #     print(check_legality_of_fusion(("i1", "j1"), iv_node_data))
-    # check_legality_of_fusion(spf_builder.fused_loop_ids, )
-    # fusion_transformer = LegalFusionTransformer()
-    # transformed_tree = fusion_transformer.visit(tree)
-    # print(ast.unparse(transformed_tree))
+# check_legality_of_fusion(spf_builder.fused_loop_ids, )
+# fusion_transformer = LegalFusionTransformer()
+# transformed_tree = fusion_transformer.visit(tree)
+# print(ast.unparse(transformed_tree))
 
-    # iter_list = generate_dag_creation_code(('i1', 'j1'), dependencies[0], node_data)
-    # print(iter_list)
+# iter_list = generate_dag_creation_code(('i1', 'j1'), dependencies[0], node_data)
+# print(iter_list)
 # print(ast.dump(ast.parse('l[1][3]', mode='eval'), indent=4))

@@ -1,5 +1,4 @@
 import sympy
-import sympy
 
 class DependencePremise:
     def __init__(self, left, right):
@@ -198,7 +197,41 @@ class DataDependence:
             self.to_si) + '\ndata: `' + self.data.__repr__() + '`\ncondition: ' + condition + '\ntype: ' + self.type
 
 
-class FusionDefinition:
-    def __init__(self, fusion_mappings: list[tuple[str, str]], interleaving_mapping: tuple[str, str] | None):
-        self.fusion_mappings = fusion_mappings
-        self.interleaving_mapping = interleaving_mapping
+class SPFNode:
+    def __init__(self, node_id):
+        self.id = node_id
+        self.children = []
+        self.schedule = None
+
+    def add_child(self, node):
+        self.children.append(node)
+
+    def __repr__(self):
+        return self.id
+
+    def __str__(self):
+        return self.id
+
+
+class LoopNode(SPFNode):
+    def __init__(self, node_id, iter_var, loop_bound):
+        super().__init__(node_id)
+        self.iter_var = iter_var
+        self.bound = loop_bound
+        # print(loop_bound)
+
+
+class AssignNode(SPFNode):
+    def __init__(self, node_id, target, value):
+        super().__init__(node_id)
+        self.target = target
+        self.value = value
+        self.read_accesses = []
+        self.write_access = None
+
+    def add_read_access(self, read_access):
+        self.read_accesses.append(read_access)
+
+    def __str__(self):
+        return (self.id + "\n - write: " + str(self.write_access) +
+                "\n - reads: \n" + '\n'.join(map(str, self.read_accesses)))

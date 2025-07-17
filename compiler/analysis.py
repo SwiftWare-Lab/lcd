@@ -1,5 +1,5 @@
 from numba.core import ir
-from compiler.compiler_def import *
+from compiler.spf_def import *
 import operator
 from copy import deepcopy
 from sympy import Symbol, Eq, GreaterThan, Lt, And, Or, Not
