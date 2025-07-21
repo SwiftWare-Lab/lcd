@@ -79,9 +79,9 @@ def benchmark(matrix, func, *args, repeat=5):
         func(*args)
         end = time.perf_counter()
         times.append(end - start)
-    avg = sum(times) / repeat
-    print(f"{func.__name__}, {avg:.6f}, {repeat}, {matrix}")
-    return avg
+    time_median = np.median(times)
+    print(f"{func.__name__}, {time_median:.6f}, {repeat}, {matrix}")
+    return time_median
 
 
 # TODO: This is temporary only for testing the decorator.
@@ -115,6 +115,7 @@ else:
 
 for matrix_path in matrices:
     matrix = scio.mmread(matrix_path)
+    matrix_name = matrix_path.split("/")[-1]
     A = matrix.tocsr()
     m = A.shape[0]
     p = A.shape[1]
@@ -128,8 +129,8 @@ for matrix_path in matrices:
     B = np.random.rand(m, k).astype(np.float32)
     C = np.random.rand(p, k).astype(np.float32)
     D = np.random.rand(p, n).astype(np.float32)
-    benchmark(matrix_path, sddmm_spmm_unfused, m, n, k, nnz, Ap, Ai, B, C, D, repeat=10)
-    benchmark(matrix_path, sddmm_spmm_fused_v1, m, n, k, nnz, Ap, Ai, B, C, D, repeat=10)
-    benchmark(matrix_path, sddmm_spmm_fused_v2, m, n, k, nnz, Ap, Ai, B, C, D, repeat=10)
+    benchmark(matrix_name, sddmm_spmm_unfused, m, n, k, nnz, Ap, Ai, B, C, D, repeat=10)
+    benchmark(matrix_name, sddmm_spmm_fused_v1, m, n, k, nnz, Ap, Ai, B, C, D, repeat=10)
+    benchmark(matrix_name, sddmm_spmm_fused_v2, m, n, k, nnz, Ap, Ai, B, C, D, repeat=10)
 
 
