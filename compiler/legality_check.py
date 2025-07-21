@@ -263,7 +263,7 @@ def extract_dependences(node_data, fused_iter_vars, mapping_nodes):
         print("-----------------")
     return refined_dependences
 
-def finalize_legality_of_fusion(transformation, cur_ast):
+def finalize_legality_of_fusion(transformation, cur_ast, function_props):
     spf_builder = SPFBuilder()
     root_node = spf_builder.visit(cur_ast)
     node_data = extract_node_data(root_node)
@@ -320,11 +320,6 @@ for i1 in range(m):
         for j3 in range(n):
             Y[i1][j3] += Xx[j2] * D[i1][j3]
 """
-
-function_props = {
-    'Ap': ['monotonically_increasing'],
-    'Ai': [],
-}
 
 # if __name__ == "__main__":
 #     tree = ast.parse(src_sddmm_spmm_v2)

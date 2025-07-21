@@ -116,8 +116,8 @@ class SPFBuilder(ast.NodeVisitor):
         iter_var = self.visit(node.target)
         loop_bound = self.visit_iter(node.iter)
         loop_id = "F" + str(self.loop_counter)
-        if isinstance(node.iter, ast.Call) and node.iter.func.id == 'frange':
-            self.fused_loop_ids.append(loop_id)
+        # if isinstance(node.iter, ast.Call) and node.iter.func.id == 'frange':
+        #     self.fused_loop_ids.append(loop_id)
         self.loop_counter += 1
         loop_node = LoopNode(loop_id, iter_var, loop_bound)
         for s in node.body:
@@ -131,7 +131,7 @@ class SPFBuilder(ast.NodeVisitor):
     # TODO: Iter can be subscript two
     def visit_iter(self, node):
         if isinstance(node, ast.Call):
-            if node.func.id == 'range' or node.func.id == 'frange':
+            if node.func.id == 'range' or node.func.id == 'prange':
                 return self.visit_range(node)
             else:
                 raise NotImplementedError(f"Unsupported function call: {node.func.id}")
