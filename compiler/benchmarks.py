@@ -89,31 +89,31 @@ mat_folder = sys.argv[2]
 # TODO: This is temporary only for testing the decorator.
 matrices = get_matrix_list(mat_file, mat_folder)
 
-matrix = scio.mmread("/home/salehm32/projects/fused-gnn/fusion/data/tri-banded/tri-banded-1000.mtx")
-A = matrix.tocsr()
-m = A.shape[0]
-p = A.shape[1]
-n = 128
-k = 128
-
-Ap = A.indptr
-Ai = A.indices
-Ax = A.data.astype(np.float32)
-nnz = A.nnz
-B = np.random.rand(m, k).astype(np.float32)
-C = np.random.rand(p, k).astype(np.float32)
-D = np.random.rand(p, n).astype(np.float32)
-
-out_unfused = sddmm_spmm_unfused(m, n, k, nnz, Ap, Ai, B, C, D)
-
-out_fused_v1 = sddmm_spmm_fused_v1(m, n, k, nnz, Ap, Ai, B, C, D)
-
-out_fused_v2 = sddmm_spmm_fused_v2(m, n, k, nnz, Ap, Ai, B, C, D)
-
-if np.allclose(out_unfused, out_fused_v1, atol=1e-6):
-    print("PASS")
-else:
-    print("FAIL")
+# # matrix = scio.mmread("/home/salehm32/projects/fused-gnn/fusion/data/tri-banded/tri-banded-1000.mtx")
+# A = matrix.tocsr()
+# m = A.shape[0]
+# p = A.shape[1]
+# n = 128
+# k = 128
+#
+# Ap = A.indptr
+# Ai = A.indices
+# Ax = A.data.astype(np.float32)
+# nnz = A.nnz
+# B = np.random.rand(m, k).astype(np.float32)
+# C = np.random.rand(p, k).astype(np.float32)
+# D = np.random.rand(p, n).astype(np.float32)
+#
+# out_unfused = sddmm_spmm_unfused(m, n, k, nnz, Ap, Ai, B, C, D)
+#
+# out_fused_v1 = sddmm_spmm_fused_v1(m, n, k, nnz, Ap, Ai, B, C, D)
+#
+# out_fused_v2 = sddmm_spmm_fused_v2(m, n, k, nnz, Ap, Ai, B, C, D)
+#
+# if np.allclose(out_unfused, out_fused_v1, atol=1e-6):
+#     print("PASS")
+# else:
+#     print("FAIL")
 
 for matrix_path in matrices:
     matrix = scio.mmread(matrix_path)
