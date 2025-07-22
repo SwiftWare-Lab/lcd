@@ -5,6 +5,7 @@ import scipy.io as scio
 import time
 from benchmark.bench_utils import get_matrix_list
 from numba import prange
+import sys
 
 function_props = {
     'Ap': ['monotonically_increasing'],
@@ -83,9 +84,10 @@ def benchmark(matrix, func, *args, repeat=5):
     print(f"{func.__name__}, {time_median:.6f}, {repeat}, {matrix}")
     return time_median
 
-
+mat_file = sys.argv[1]
+mat_folder = sys.argv[2]
 # TODO: This is temporary only for testing the decorator.
-matrices = get_matrix_list("/home/salehm32/projects/fused-gnn/fusion/data/SPD/spd_list.txt", "/home/salehm32/projects/fused-gnn/fusion/data/SPD/")
+matrices = get_matrix_list(mat_file, mat_folder)
 
 matrix = scio.mmread("/home/salehm32/projects/fused-gnn/fusion/data/tri-banded/tri-banded-1000.mtx")
 A = matrix.tocsr()
