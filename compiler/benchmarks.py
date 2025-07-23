@@ -78,7 +78,7 @@ def benchmark(matrix, func, *args, repeat=5):
         end = time.perf_counter()
         times.append(end - start)
     time_median = np.median(times)
-    print(f"{func.__name__}, {time_median:.6f}, {repeat}, {matrix}")
+    print(f"{func.__name__},{time_median:.6f},{repeat},{matrix},{args[3]}")
     return time_median
 
 mat_file = sys.argv[1]
@@ -111,7 +111,7 @@ matrices = get_matrix_list(mat_file, mat_folder)
 #     print("PASS")
 # else:
 #     print("FAIL")
-
+print('implementation,median_time,repeats,matrix,nnz')
 for matrix_path in matrices:
     matrix = scio.mmread(matrix_path)
     matrix_name = matrix_path.split("/")[-1]
