@@ -60,7 +60,7 @@ class WritesTracker(ast.NodeTransformer):
         # Gets passed to ReadsTracker so it knows which subscripts are not reads
         self.write_nodes = set()  
         # * Assume only 1 array is written to
-        self.array_written_to = None
+        self.write_array_id = None
 
     def generate_add_write_stmt(self, write_index):
         return ast.Expr(
@@ -89,7 +89,7 @@ class WritesTracker(ast.NodeTransformer):
         if self.outer_loop_var and isinstance(node.targets[0], ast.Subscript):
             index = node.targets[0].slice
             self.write_nodes.add(node.targets[0])
-            self.array_written_to = node.targets[0].value
+            self.write_array_id = node.targets[0].value.id
             return [node, self.generate_add_write_stmt(index)]
 
         return node
@@ -99,49 +99,66 @@ class WritesTracker(ast.NodeTransformer):
         if self.outer_loop_var and isinstance(node.target, ast.Subscript):
             index = node.target.slice
             self.write_nodes.add(node.target)
-            self.array_written_to = node.target.value
+            self.write_array_id = node.target.value.id
             return [node, self.generate_add_write_stmt(index)]
 
         return node
 
 
 class ReadsTracker(ast.NodeTransformer):
-    def __init__(self, write_nodes, array_written_to):
-        self.loop_var = None
-        self.write_nodes = write_nodes
-        self.array_written_to = array_written_to
-        self.added_reads_from_stmt = []
+    class __InternalTracker(ast.NodeTransformer):
+        def __init__(self, outer_ref):
+            self.outer_ref = outer_ref
+            self.added_reads_from_stmt = []
 
-    def generate_add_read_stmt(self, read_index):
-        return ast.Expr(
-            ast.Call(
-                func=ast.Attribute(
-                    value=ast.Subscript(
-                        value=ast.Name("reads", ctx=ast.Load()),
-                        slice=self.loop_var,
+        def visit_Subscript(self, node):
+            if isinstance(node.value, ast.Name) and node.value.id == self.outer_ref.write_array_id:
+                index = node.slice
+                self.added_reads_from_stmt.append(self.__generate_add_read_stmt(index))
+            return node
+        
+        def flush_stmts(self):
+            stmts = self.added_reads_from_stmt
+            self.added_reads_from_stmt = []
+            return stmts
+
+        def __generate_add_read_stmt(self, read_index):
+            return ast.Expr(
+                ast.Call(
+                    func=ast.Attribute(
+                        value=ast.Subscript(
+                            value=ast.Name("reads", ctx=ast.Load()),
+                            slice=self.outer_ref.outer_loop_var,
+                        ),
+                        attr="append",
+                        ctx=ast.Load(),
                     ),
-                    attr="append",
-                    ctx=ast.Load(),
-                ),
-                args=[read_index],
-                keywords=[],
+                    args=[read_index],
+                    keywords=[],
+                )
             )
-        )
+
+    def __init__(self, write_array_id):
+        self.write_array_id = write_array_id
+        self.outer_loop_var = None
+        self.__internal_tracker = self.__InternalTracker(self)
 
     def visit_For(self, node):
-        self.loop_var = node.target
+        if not self.outer_loop_var:
+            self.outer_loop_var = node.target
         self.generic_visit(node)
-        node.body += self.added_reads_from_stmt
-        self.added_reads_from_stmt = []
-        return node
-
-    def visit_Subscript(self, node):
-        if not self.loop_var or node in self.write_nodes or node.value != self.array_written_to:
-            return node
-        index = node.slice
-        self.added_reads_from_stmt.append(self.generate_add_read_stmt(index))
         return node
     
+    def visit_Assign(self, node):
+        if self.outer_loop_var:
+            self.__internal_tracker.visit(node.value)
+        return [node, *self.__internal_tracker.flush_stmts()]
+
+    def visit_AugAssign(self, node):
+        if self.outer_loop_var:
+            self.__internal_tracker.visit(node)
+        return [node, *self.__internal_tracker.flush_stmts()]
+ 
     def visit_Return(self, node):
         return ast.Return(
             ast.Tuple(
@@ -150,6 +167,14 @@ class ReadsTracker(ast.NodeTransformer):
                 ctx=ast.Load()
             )
         )
+
+
+def generate_read_write_tracker_body(node: ast.FunctionDef) -> list[ast.stmt]:
+    writes_tracker = WritesTracker()
+    writes_tracker.visit(node)
+    reads_tracker = ReadsTracker(writes_tracker.write_array_id)
+    reads_tracker.visit(node)
+    return node.body
 
 
 class SptrsvParallelizer(ast.NodeTransformer):
@@ -193,24 +218,7 @@ class SptrsvParallelizer(ast.NodeTransformer):
                 lineno=lineno + len(output) + 1,
             ),
         ]
-
-        writes_tracker = WritesTracker()
-        tree_with_writes: ast.FunctionDef = writes_tracker.visit(node)
-        print(writes_tracker.write_nodes)
-
-        # ast.fix_missing_locations(tree_with_writes)
-        reads_tracker = ReadsTracker(writes_tracker.write_nodes, writes_tracker.array_written_to)
-        tree_with_read_writes: ast.FunctionDef = reads_tracker.visit(tree_with_writes)
-
-        get_read_writes_body += tree_with_read_writes.body
-
-        # unrolled_code = ast.unparse(tree_with_writes)
-        # print("\n".join(ast.unparse(node) for node in get_read_writes_body))
-        # print(unrolled_code)
-
-        # for block in iter(self.cfg):
-        #     print("\n".join(ast.unparse(stmt) for stmt in block.statements))
-        #     print()
+        get_read_writes_body += generate_read_write_tracker_body(deepcopy(node))
 
         output.append(
             ast.FunctionDef(
