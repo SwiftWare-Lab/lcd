@@ -62,7 +62,7 @@ class WritesTracker(ast.NodeTransformer):
         # * Assume only 1 array is written to
         self.write_array_id = None
 
-    def generate_add_write_stmt(self, write_index):
+    def _generate_add_write_stmt(self, write_index):
         return ast.Expr(
             ast.Call(
                 func=ast.Attribute(
@@ -90,7 +90,7 @@ class WritesTracker(ast.NodeTransformer):
             index = node.targets[0].slice
             self.write_nodes.add(node.targets[0])
             self.write_array_id = node.targets[0].value.id
-            return [node, self.generate_add_write_stmt(index)]
+            return [node, self._generate_add_write_stmt(index)]
 
         return node
 
@@ -100,13 +100,13 @@ class WritesTracker(ast.NodeTransformer):
             index = node.target.slice
             self.write_nodes.add(node.target)
             self.write_array_id = node.target.value.id
-            return [node, self.generate_add_write_stmt(index)]
+            return [node, self._generate_add_write_stmt(index)]
 
         return node
 
 
 class ReadsTracker(ast.NodeTransformer):
-    class __InternalTracker(ast.NodeTransformer):
+    class _InternalTracker(ast.NodeTransformer):
         def __init__(self, outer_ref):
             self.outer_ref = outer_ref
             self.added_reads_from_stmt = []
@@ -114,7 +114,7 @@ class ReadsTracker(ast.NodeTransformer):
         def visit_Subscript(self, node):
             if isinstance(node.value, ast.Name) and node.value.id == self.outer_ref.write_array_id:
                 index = node.slice
-                self.added_reads_from_stmt.append(self.__generate_add_read_stmt(index))
+                self.added_reads_from_stmt.append(self._generate_add_read_stmt(index))
             return node
         
         def flush_stmts(self):
@@ -122,7 +122,7 @@ class ReadsTracker(ast.NodeTransformer):
             self.added_reads_from_stmt = []
             return stmts
 
-        def __generate_add_read_stmt(self, read_index):
+        def _generate_add_read_stmt(self, read_index):
             return ast.Expr(
                 ast.Call(
                     func=ast.Attribute(
@@ -141,7 +141,7 @@ class ReadsTracker(ast.NodeTransformer):
     def __init__(self, write_array_id):
         self.write_array_id = write_array_id
         self.outer_loop_var = None
-        self.__internal_tracker = self.__InternalTracker(self)
+        self.__internal_tracker = self._InternalTracker(self)
 
     def visit_For(self, node):
         if not self.outer_loop_var:
