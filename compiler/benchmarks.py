@@ -27,7 +27,7 @@ def sddmm_spmm_unfused(m, n, k, nnz, Ap, Ai, B, C, D):
     return Y
 
 @numba.njit(numba.float32[:, :](numba.int64, numba.int64, numba.int64, numba.int64, numba.int32[:], numba.int32[:], numba.float32[:, :], numba.float32[:, :], numba.float32[:, :]), cache=True, parallel=True)
-# @fusion(transformation=[("i1", "j1")], function_props=function_props)
+@fusion(transformation=[("i1", "j1")], function_props=function_props)
 def sddmm_spmm_fused_v1(m, n, k, nnz, Ap, Ai, B, C, D):
     Xx = np.zeros(nnz)
     Y = np.zeros((m, n), dtype=np.float32)
@@ -35,25 +35,26 @@ def sddmm_spmm_fused_v1(m, n, k, nnz, Ap, Ai, B, C, D):
         for i2 in range(Ap[i1], Ap[i1 + 1]):
             for i3 in range(k):
                 Xx[i2] += B[i1][i3] * C[Ai[i2]][i3]
-        for j2 in range(Ap[i1], Ap[i1 + 1]):
+    for j1 in prange(m):
+        for j2 in range(Ap[j1], Ap[j1 + 1]):
             for j3 in range(n):
-                Y[i1][j3] += Xx[j2] * D[Ai[j2]][j3]
+                Y[j1][j3] += Xx[j2] * D[Ai[j2]][j3]
     return Y
 
 @numba.njit(numba.float32[:, :](numba.int64, numba.int64, numba.int64, numba.int64, numba.int32[:], numba.int32[:], numba.float32[:, :], numba.float32[:, :], numba.float32[:, :]), cache=True, parallel=True)
-# @fusion(transformation=[("i1", "j1"), ("i2", "j2")], function_props=function_props)
+@fusion(transformation=[("i1", "j1"), ("i2", "j2")], function_props=function_props)
 def sddmm_spmm_fused_v2(m, n, k, nnz, Ap, Ai, B, C, D):
+    Xx = np.zeros(nnz)
     Y = np.zeros((m, n), dtype=np.float32)
     for i1 in prange(m):
         for i2 in range(Ap[i1], Ap[i1 + 1]):
-            tmp = 0
             for i3 in range(k):
-                tmp += B[i1][i3] * C[Ai[i2]][i3]
+                Xx[i2] += B[i1][i3] * C[Ai[i2]][i3]
+    for j1 in prange(m):
+        for j2 in range(Ap[j1], Ap[j1 + 1]):
             for j3 in range(n):
-                Y[i1][j3] += tmp * D[Ai[i2]][j3]
+                Y[j1][j3] += Xx[j2] * D[Ai[j2]][j3]
     return Y
-
-
 
 
 

@@ -70,6 +70,7 @@ def extract_fusion_constraint_for_dependence(dependence: DataDependence):
 def transform_sched(target_sched: Schedule, current_sched: Schedule, i1: str, i2: str):
     new_sched = deepcopy(current_sched)
     tar_index = 0
+    print(i1, i2)
     for i, s in enumerate(target_sched.schedule):
         if s == i1:
             tar_index = i+1
@@ -92,8 +93,9 @@ def extract_fusion_illegality_constraint(targeted_iters: tuple[str, str], depend
         # assert dep.to_si.occurs_in(i2) and dep.from_si.occurs_in(i1), "Dependences should be defined between given loops only"
         new_sched = transform_sched(dep.from_si, dep.to_si, i1, i2)
         new_dep = DataDependence(dep.from_si, new_sched, dep.data, dep.premises, dep.type)
+        fusion_constraint_for_dependence = extract_fusion_constraint_for_dependence(new_dep)
         dependence_constraint = And(dep.get_condition_statement_sympy(),
-                                    extract_fusion_constraint_for_dependence(new_dep))
+                                    fusion_constraint_for_dependence)
         constraints.append(dependence_constraint)
     return constraints
 
@@ -110,9 +112,9 @@ def check_legality_of_fusion(mapping: tuple[str, str],
                 mapping_nodes[lnode.iter_var] = lnode
     if check_loop_bounds_safety(mapping, loop_bounds):
         dependences = extract_dependences(node_data, mapping, mapping_nodes)
-        new_mapping = subscript_fused_vars(mapping)
-        constraints = extract_fusion_illegality_constraint(new_mapping, dependences)
-        return constraints
+        # new_mapping = subscript_fused_vars(mapping)
+        constraints = extract_fusion_illegality_constraint(mapping, dependences)
+        return constraints, dependences
     else:
         return sympy.true
     # if check_loop_bounds_safety(targeted_iters, loop_bounds, mappings):
@@ -272,7 +274,7 @@ def finalize_legality_of_fusion(transformation, cur_ast, function_props):
     for nid, node in node_data.items():
         if isinstance(node, LoopNode):
             iv_node_data[node.iter_var] = node
-    constraints = check_legality_of_fusion(transformation, node_data)
+    constraints, dependencies = check_legality_of_fusion(transformation, node_data)
     if constraints[0] != sympy.false:
         smt_out = generate_smt_file(iv_node_data.values(), constraints[0], function_props)
         s = Solver()
@@ -280,7 +282,7 @@ def finalize_legality_of_fusion(transformation, cur_ast, function_props):
         if s.check() == CheckSatResult(Z3_L_FALSE):
            return True
         else:
-            return False
+            return dependencies
     else:
         return True
 
@@ -320,6 +322,205 @@ for i1 in range(m):
         for j3 in range(n):
             Y[i1][j3] += Xx[j2] * D[i1][j3]
 """
+
+# transformation: (i, j)
+# dependence: DataDependence
+
+# TODO: what about nested loops?
+# Complete this.
+def extract_dag_creation_components(transformation: tuple[str, str], dependence: DataDependence, node_data):
+    iter_list = []
+    iter_list.append(transformation[0])
+    iter_list.append(transformation[1])
+    from_ind = [_.left for _ in dependence.premises]
+    to_ind = [_.right for _ in dependence.premises]
+    new_transformation = [transformation[0], transformation[1]]
+    for i, ind in enumerate(from_ind):
+        assert ind != transformation[1] and to_ind[i] != transformation[0], "Data Error!"
+        if ind == transformation[0]:
+            if isinstance(to_ind[i], Access):
+                ufc = to_ind[i]
+                iter_list.remove(ind)
+                if ufc.index not in iter_list:
+                    iter_list.append(ufc.index)
+                new_transformation[0] = to_ind[i]
+        if to_ind[i] == transformation[1]:
+            if isinstance(ind, Access):
+                ufc = ind
+                iter_list.remove(to_ind[i])
+                if ufc.index not in iter_list:
+                    iter_list.append(ufc.index)
+                new_transformation[1] = ind
+    iter_var_to_node = {}
+    for node_id, node in node_data.items():
+        if node_id.startswith("F"):
+            iter_var_to_node[node.iter_var] = node
+    ordered_iter_list = []
+    for iter_var in iter_list:
+        node = iter_var_to_node[iter_var]
+        lb = node.bound.start
+        ub = node.bound.end
+        new_iter_var1 = add_extra_iter_var_based_on_bound(lb, iter_list, iter_var_to_node)
+        if new_iter_var1:
+            iter_list.append(new_iter_var1)
+            ordered_iter_list.append(new_iter_var1)
+        new_iter_var2 = add_extra_iter_var_based_on_bound(ub, iter_list, iter_var_to_node)
+        if new_iter_var2:
+            iter_list.append(new_iter_var2)
+            ordered_iter_list.append(new_iter_var2)
+        if iter_var not in ordered_iter_list:
+            ordered_iter_list.append(iter_var)
+    return ordered_iter_list, new_transformation
+
+
+def add_extra_iter_var_based_on_bound(bound, iter_list, iter_var_to_node):
+    if isinstance(bound, Access):
+        if isinstance(bound.index, Expression):
+            for e in bound.index.elements:
+                if e in iter_var_to_node and e not in iter_list:
+                    return e
+        elif bound.index in iter_var_to_node and bound.index not in iter_list:
+            return bound.index
+    return None
+
+
+def generate_for_loop(iterator_var, start, end, tab_num):
+    tab_str = "\t" * tab_num
+    return "for {} in range({}, {}):\n{}".format(iterator_var, start, end, tab_str)
+
+def generate_iteration_space(ordered_iter_list, node_data):
+    code_str = ""
+    tab_num = 2
+    for iter_var in ordered_iter_list:
+        for lid, lnode in node_data.items():
+            if isinstance(lnode, LoopNode):
+                if lnode.iter_var == iter_var:
+                    code_str += generate_for_loop(iter_var, lnode.bound.start, lnode.bound.end, tab_num)
+                    tab_num += 1
+    return code_str
+
+
+def extract_arguments(components, node_data):
+    arguments = set()
+    iter_list = components[0]
+    symbolic_nodes = components[1]
+    for it in iter_list:
+        for lid, lnode in node_data.items():
+            if isinstance(lnode, LoopNode):
+                if lnode.iter_var == it:
+                    bound_start = lnode.bound.start
+                    bound_end = lnode.bound.end
+                    if isinstance(bound_start, Access):
+                        arguments.add(bound_start.get_data_array())
+                    elif not bound_start.isdigit():
+                        arguments.add(bound_start)
+                    if isinstance(bound_end, Access):
+                        arguments.add(bound_end.get_data_array())
+                    elif not bound_end.isdigit():
+                        arguments.add(bound_end)
+    for sn in symbolic_nodes:
+        if isinstance(sn, Access):
+            arguments.add(sn.get_data_array())
+    return arguments
+
+
+def generate_dag_generation_code(components, node_data, partition_node_num):
+    arguments = extract_arguments(components, node_data)
+    print(arguments)
+    code_str = ""
+    function_def = "def extract_dag({}):\n\t".format(', '. join(arguments))
+    code_str += function_def
+    symbolic_nodes = components[1]
+    DAG_def = "DAG = [[] for i in range({})]\n\t".format(partition_node_num[symbolic_nodes[1]])
+    code_str += DAG_def
+    iteration_space_code = generate_iteration_space(components[0], node_data)
+    code_str += iteration_space_code
+    DAG_update = "DAG[{}].append({})".format(symbolic_nodes[1], symbolic_nodes[0])
+    code_str += DAG_update
+    return code_str
+
+
+
+src = """
+for i in range(10):
+    for j in range(0,n):
+        for k in range(Ap[i], Ap[i + 1]):
+            A[i] = B[j] + C[k]
+        
+"""
+
+src_spmm_spmm_v2 = """
+for i3 in frange(n):
+    for i1 in range(m):
+        for i2 in range(Ap[i1], Ap[i1 + 1]):
+            y[i1][i3] += Ax[i2] * B[Ai[i2]][i3]
+for j1 in frange(m):
+    for j2 in range(Ap[j1], Ap[j1 + 1]):
+        for j3 in range(n):
+            z[j1][j3] += Ax[j2] * y[Ai[j2]][j3]
+"""
+
+src_spmm_spmm = """
+def spmm_spmm(m, n, Ap, Ai, Ax, B):
+    for i1 in range(m):
+        for i2 in range(Ap[i1], Ap[i1 + 1]):
+            for i3 in range(n):
+                y[i1][i3] += Ax[i2] * B[Ai[i2]][i3]
+    for j1 in range(m):
+        for j2 in range(Ap[j1], Ap[j1 + 1]):
+            for j3 in range(n):
+                z[j1][j3] += Ax[j2] * y[Ai[j2]][j3]
+"""
+
+src_spmm_spmm_v3 = """
+for i1 in frange(m):
+    for i2 in range(Ap[i1], Ap[i1 + 1]):
+        for i3 in range(n):
+            y[i1][i3] += Ax[i2] * B[Ai[i2]][i3]
+for j3 in frange(n):
+    for j1 in range(m):
+        for j2 in range(Ap[j1], Ap[j1 + 1]):
+            z[j1][j3] += Ax[j2] * y[Ai[j2]][j3]
+"""
+
+src_sptrsv = """
+for i in frange(n):
+    x[i] = b[i]
+    for j in range(IA[i], IA[i + 1]):
+        x[i] -= A[j] * x[JA[j]]
+    x[i] /= A[IA[i + 1] - 1]
+"""
+
+if __name__ == "__main__":
+    tree = ast.parse(src_spmm_spmm)
+    spf_builder = SPFBuilder()
+    root_node = spf_builder.visit(tree)
+    node_data = extract_node_data(root_node)
+    #
+    #     print(node_data)
+    function_props = {
+        'Ap': ['monotonically_increasing'],
+        'Ai': [],
+    }
+    const, dependencies = check_legality_of_fusion(('i1', 'j1'), node_data)
+    #     mappings = extract_mappings(root_node, node_data, spf_builder.fused_loop_ids)
+    #     print(mappings)
+    #     iv_node_data = {}
+    #     for nid, node in node_data:
+    #         if isinstance(node, LoopNode):
+    #             iv_node_data[node.iter_var] = node
+    #     print(check_legality_of_fusion(("i1", "j1"), iv_node_data))
+    #     check_legality_of_fusion(spf_builder.fused_loop_ids, )
+    #     fusion_transformer = LegalFusionTransformer()
+    #     transformed_tree = fusion_transformer.visit(tree)
+    #     print(ast.unparse(transformed_tree))
+    print(dependencies)
+    iter_list = extract_dag_creation_components(('i1', 'j1'), dependencies[0], node_data)
+    print(iter_list)
+    code = generate_dag_generation_code(iter_list, node_data, {'j1': 'm'})
+    print(code)
+
+    # print(ast.dump(ast.parse('l[1][3]', mode='eval'), indent=4))
 
 # if __name__ == "__main__":
 #     tree = ast.parse(src_sddmm_spmm_v2)

@@ -5,6 +5,10 @@ class DependencePremise:
         self.left = left
         self.right = right
 
+    # def get_subscripted_premise(self):
+    #     return DependencePremise(self.left + "1", self.right + "2")
+
+
     def __eq__(self, other):
         if type(other) == type(self):
             return other.left == self.left and other.right == self.right
