@@ -7,8 +7,11 @@ import numpy as np
 from scipy.sparse.linalg import spsolve_triangular  # CPU sparse solver
 import cupy as cp  # For GPU operations
 from cupyx.scipy.sparse import csc_matrix as cp_csc_matrix  # GPU sparse matrix
+
 # import csr_matrix as cp_csr_matrix  # GPU sparse matrix
-from cupyx.scipy.sparse.linalg import spsolve_triangular as cp_spsolve  # GPU sparse solver
+from cupyx.scipy.sparse.linalg import (
+    spsolve_triangular as cp_spsolve,
+)  # GPU sparse solver
 import time
 from scipy.sparse import csc_matrix, csr_matrix
 import torch
@@ -20,22 +23,21 @@ from numba import config
 
 config.CUDA_ENABLE_PYNVJITLINK = 1
 
-from bench_utils import incoming_edge
-from bench_utils import compute_wavefront
+from .bench_utils import incoming_edge
+from .bench_utils import compute_wavefront
 
 
 REAL_TYPE = torch.float64
 REAL_TYPE_TL = tl.float64
 
 
-NUM_RUNS=1
+NUM_RUNS = 1
 
 
 DEVICE = torch.device("cuda:0")
 
 
-
-@njit(numba.float64[:](numba.float32[:], numba.int32[:], numba.int32[:], numba.float32[:]), pipeline_class=MyCompiler)
+# @njit(numba.float64[:](numba.float32[:], numba.int32[:], numba.int32[:], numba.float32[:]), pipeline_class=MyCompiler)
 def sptrsv_csr_numba(A, IA, JA, b):
     n = len(IA) - 1
     x = np.zeros(n, dtype=np.float32)
@@ -43,14 +45,40 @@ def sptrsv_csr_numba(A, IA, JA, b):
         x[i] = b[i]
         for j in range(IA[i], IA[i + 1] - 1):
             x[i] -= A[j] * x[JA[j]]
+#                          --------
+#                          RAW   <i
         x[i] /= A[IA[i + 1] - 1]
+#       ----
+#       RAW, WAW
+    return x
+
+
+def simple_sptrsv_csc(L, b):
+    n = L.shape[0]
+    x = np.zeros(n)
+    for i in range(n):
+        x[i] = (b[i] - x[i]) / L.data[L.indptr[i]]
+#                      ----
+#                      RAW
+        for j in range(L.indptr[i] + 1, L.indptr[i + 1]):
+            x[L.indices[j]] += L.data[j] * x[i]  # associative
+#           ---------------                ----
+#                WAW    >i                 RAW
     return x
 
 
 @triton.jit
 def sptrsv_sync_free(
-    data_ptr, indices_ptr, indptr_ptr, rhs_vec, y_ptr,
-    M, N, nnz, BLOCK_SIZE: tl.constexpr, count_dep
+    data_ptr,
+    indices_ptr,
+    indptr_ptr,
+    rhs_vec,
+    y_ptr,
+    M,
+    N,
+    nnz,
+    BLOCK_SIZE: tl.constexpr,
+    count_dep,
 ):
     row = tl.program_id(axis=0)  # Get the row id based on the program grid
     is_valid_row = row < M
@@ -61,36 +89,47 @@ def sptrsv_sync_free(
     print("row: ", row)
     end = tl.load(indptr_ptr + row + 1, mask=is_valid_row, other=0)
     # define an array of float64 with size 2
-    y_val_row = tl.load(rhs_vec + row)  / tl.load(data_ptr + end-1) # b[i] / A[i, i]
-    y_val =  tl.cast(0.0, REAL_TYPE_TL)
-    for i in range(start, end-1):
+    y_val_row = tl.load(rhs_vec + row) / tl.load(data_ptr + end - 1)  # b[i] / A[i, i]
+    y_val = tl.cast(0.0, REAL_TYPE_TL)
+    for i in range(start, end - 1):
         col = tl.load(indices_ptr + i)
-        val = tl.load(data_ptr + i) # A[j, i]
+        val = tl.load(data_ptr + i)  # A[j, i]
         x_val = tl.load(y_ptr + col)
         y_val += val * x_val
         # atomid update dount_dep[col]
         tl.atomic_add(count_dep + col, -1)
-    y_val = (y_val_row - y_val) / tl.load(data_ptr + end-1)
+    y_val = (y_val_row - y_val) / tl.load(data_ptr + end - 1)
     print("val: ", y_val)
     tl.store(y_ptr + row, y_val)
 
 
 @triton.jit
 def sptrsv_sync_free_csc2(
-    data_ptr, indices_ptr, indptr_ptr, rhs_vec, y_ptr,
-    M, N, nnz, BLOCK_SIZE: tl.constexpr, count_dep
+    data_ptr,
+    indices_ptr,
+    indptr_ptr,
+    rhs_vec,
+    y_ptr,
+    M,
+    N,
+    nnz,
+    BLOCK_SIZE: tl.constexpr,
+    count_dep,
 ):
     col = tl.program_id(axis=0)  # Get the row id based on the program grid
     is_valid_row = col < M
     if is_valid_row:
         while tl.atomic_add(count_dep + col, 0) != 1:
-            pass   # Busy-wait: Do nothing, just keep looping
+            pass  # Busy-wait: Do nothing, just keep looping
         start = tl.load(indptr_ptr + col, mask=is_valid_row, other=0)
-        end = tl.load(indptr_ptr + col + 1 , mask=is_valid_row, other=0)
+        end = tl.load(indptr_ptr + col + 1, mask=is_valid_row, other=0)
 
-        tl.store(y_ptr + col, (tl.load(rhs_vec + col) - tl.load(y_ptr + col)  )/ tl.load(data_ptr + start))
-        for j in range(start+1, end):
-            val = tl.load(data_ptr + j) # A[j, i]
+        tl.store(
+            y_ptr + col,
+            (tl.load(rhs_vec + col) - tl.load(y_ptr + col)) / tl.load(data_ptr + start),
+        )
+        for j in range(start + 1, end):
+            val = tl.load(data_ptr + j)  # A[j, i]
             x_val = tl.load(y_ptr + col)
             r_i = tl.load(indices_ptr + j)
             tl.atomic_add(y_ptr + r_i, val * x_val)
@@ -99,7 +138,7 @@ def sptrsv_sync_free_csc2(
 
 # @triton.jit
 # def sptrsv_sync_free_csr(
-#     data_ptr, indices_ptr, indptr_ptr, rhs_vec, y_ptr, 
+#     data_ptr, indices_ptr, indptr_ptr, rhs_vec, y_ptr,
 #     M, N, nnz, BLOCK_SIZE: tl.constexpr, flags
 # ):
 #     """
@@ -182,8 +221,16 @@ def sptrsv_sync_free_csc2(
 
 @triton.jit
 def sptrsv_sync_free_csc(
-        data_ptr, indices_ptr, indptr_ptr, rhs_vec, y_ptr,
-        M, N, nnz, BLOCK_SIZE: tl.constexpr, count_dep
+    data_ptr,
+    indices_ptr,
+    indptr_ptr,
+    rhs_vec,
+    y_ptr,
+    M,
+    N,
+    nnz,
+    BLOCK_SIZE: tl.constexpr,
+    count_dep,
 ):
     col = tl.program_id(axis=0)  # Get the col id based on the program grid
     is_valid_col = col < M
@@ -195,7 +242,9 @@ def sptrsv_sync_free_csc(
         start = tl.load(indptr_ptr + col, mask=is_valid_col, other=0)
         end = tl.load(indptr_ptr + col + 1, mask=is_valid_col, other=0)
 
-        y_col_sol = (tl.load(rhs_vec + col) - tl.load(y_ptr + col)) / tl.load(data_ptr + start)
+        y_col_sol = (tl.load(rhs_vec + col) - tl.load(y_ptr + col)) / tl.load(
+            data_ptr + start
+        )
         tl.store(y_ptr + col, y_col_sol)
 
         # Thread-level processing
@@ -214,7 +263,9 @@ def sptrsv_sync_free_csc(
         tl.atomic_add(count_dep + indices_col, -1, mask=valid_indices)
 
 
-def sptrsv_sync_free_triton_csc(data, indices, indptr, x, M, N, nnz, dep_counts, max_col_length):
+def sptrsv_sync_free_triton_csc(
+    data, indices, indptr, x, M, N, nnz, dep_counts, max_col_length
+):
     # Allocate result vector on GPU
     y = torch.zeros(M, dtype=REAL_TYPE, device=DEVICE)
     d_dep_count = dep_counts.clone().detach()
@@ -229,15 +280,24 @@ def sptrsv_sync_free_triton_csc(data, indices, indptr, x, M, N, nnz, dep_counts,
         M,
         N,
         nnz,
-        BLOCK_SIZE= max_col_length,
-        count_dep=d_dep_count)
+        BLOCK_SIZE=max_col_length,
+        count_dep=d_dep_count,
+    )
     return y
 
 
 @triton.jit
 def sptrsv_kernel_csr(
-    data_ptr, indices_ptr, indptr_ptr, rhs_vec, y_ptr,
-    M, N, nnz, BLOCK_SIZE: tl.constexpr, wavefront
+    data_ptr,
+    indices_ptr,
+    indptr_ptr,
+    rhs_vec,
+    y_ptr,
+    M,
+    N,
+    nnz,
+    BLOCK_SIZE: tl.constexpr,
+    wavefront,
 ):
     row_loc = tl.program_id(axis=0)  # Get the row id based on the program grid
     row = tl.load(wavefront + row_loc)
@@ -266,15 +326,15 @@ def sptrsv_kernel_csr(
 def sptrsv_triton_csr(data, indices, indptr, x, M, N, nnz, wave_start, wavefronts):
     # Allocate result vector on GPU
     y = torch.zeros(M, dtype=REAL_TYPE, device=DEVICE)
-    #wavefront = torch.tensor(wavefronts, dtype=torch.int32, device=DEVICE)
+    # wavefront = torch.tensor(wavefronts, dtype=torch.int32, device=DEVICE)
     # for wavefront in wavefronts:
     #     # Launch Triton kernel
     #     grid = (len(wavefront),)
     #     # copy wavefront to GPU
     #     wavefront_gpu = torch.tensor(wavefront, dtype=torch.int32, device=DEVICE)
-    num_waves = len(wave_start)-1
+    num_waves = len(wave_start) - 1
     for i in range(num_waves):
-        grid_len = wave_start[i+1] - wave_start[i]
+        grid_len = wave_start[i + 1] - wave_start[i]
         grid = (grid_len,)
         sptrsv_kernel_csr[grid](
             data,
@@ -286,14 +346,23 @@ def sptrsv_triton_csr(data, indices, indptr, x, M, N, nnz, wave_start, wavefront
             N,
             nnz,
             BLOCK_SIZE=128,
-            wavefront=wavefronts[wave_start[i]])
+            wavefront=wavefronts[wave_start[i]],
+        )
     return y
 
 
 @triton.jit
 def sptrsv_kernel_csc(
-    data_ptr, indices_ptr, indptr_ptr, rhs_vec, y_ptr,
-    M, N, nnz, BLOCK_SIZE: tl.constexpr, wavefront
+    data_ptr,
+    indices_ptr,
+    indptr_ptr,
+    rhs_vec,
+    y_ptr,
+    M,
+    N,
+    nnz,
+    BLOCK_SIZE: tl.constexpr,
+    wavefront,
 ):
     row_loc = tl.program_id(axis=0)  # Get the row id based on the program grid
     col = tl.load(wavefront + row_loc)
@@ -304,8 +373,11 @@ def sptrsv_kernel_csc(
         start = tl.load(indptr_ptr + col, mask=is_valid_row, other=0)
         end = tl.load(indptr_ptr + col + 1, mask=is_valid_row, other=0)
         # define an array of float64 with size 2
-        tl.store(y_ptr + col, (tl.load(rhs_vec + col) - tl.load(y_ptr + col)) / tl.load(data_ptr + start)) # b[i] / A[i, i]
-        for j in range(start+1, end):
+        tl.store(
+            y_ptr + col,
+            (tl.load(rhs_vec + col) - tl.load(y_ptr + col)) / tl.load(data_ptr + start),
+        )  # b[i] / A[i, i]
+        for j in range(start + 1, end):
             val = tl.load(data_ptr + j)  # A[j, i]
             x_val = tl.load(y_ptr + col)
             r_i = tl.load(indices_ptr + j)
@@ -315,15 +387,15 @@ def sptrsv_kernel_csc(
 def sptrsv_triton_csc(data, indices, indptr, x, M, N, nnz, wave_start, wavefronts):
     # Allocate result vector on GPU
     y = torch.zeros(M, dtype=REAL_TYPE, device=DEVICE)
-    #wavefront = torch.tensor(wavefronts, dtype=torch.int32, device=DEVICE)
+    # wavefront = torch.tensor(wavefronts, dtype=torch.int32, device=DEVICE)
     # for wavefront in wavefronts:
     #     # Launch Triton kernel
     #     grid = (len(wavefront),)
     #     # copy wavefront to GPU
     #     wavefront_gpu = torch.tensor(wavefront, dtype=torch.int32, device=DEVICE)
-    num_waves = len(wave_start)-1
+    num_waves = len(wave_start) - 1
     for i in range(num_waves):
-        grid_len = wave_start[i+1] - wave_start[i]
+        grid_len = wave_start[i + 1] - wave_start[i]
         grid = (grid_len,)
         sptrsv_kernel_csc[grid](
             data,
@@ -335,14 +407,17 @@ def sptrsv_triton_csc(data, indices, indptr, x, M, N, nnz, wave_start, wavefront
             N,
             nnz,
             BLOCK_SIZE=128,
-            wavefront=wavefronts[wave_start[i]])
+            wavefront=wavefronts[wave_start[i]],
+        )
     return y
 
 
 @cuda.jit
-def sptrsc_numba_csc_sync_free_kernel(data, indices, indptr, b, y, M, N, nnz, incom_edges):
+def sptrsc_numba_csc_sync_free_kernel(
+    data, indices, indptr, b, y, M, N, nnz, incom_edges
+):
     col = cuda.grid(1)
-    #col = cuda.blockIdx.x * cuda.blockDim.x + cuda.threadIdx.x
+    # col = cuda.blockIdx.x * cuda.blockDim.x + cuda.threadIdx.x
     if col < M:
         while cuda.atomic.add(incom_edges, col, 0) != 1:
             pass
@@ -351,35 +426,41 @@ def sptrsc_numba_csc_sync_free_kernel(data, indices, indptr, b, y, M, N, nnz, in
         y[col] = (b[col] - y[col]) / data[start]
         for j in range(start + 1, end):
             val = data[j]
-            #x_val = y[col]
+            # x_val = y[col]
             r_i = indices[j]
-            cuda.atomic.add(y, r_i, val * cuda.atomic.add(y, col, 0)) # x[r_i] += val * x_val
+            cuda.atomic.add(
+                y, r_i, val * cuda.atomic.add(y, col, 0)
+            )  # x[r_i] += val * x_val
             cuda.atomic.add(incom_edges, r_i, -1)
 
 
 def sptrsc_numba_csc_sync_free(data, indices, indptr, b, M, N, nnz, in_edges):
     d_y = cuda.to_device(np.zeros(M, dtype=np.float64))
-    d_in_edges = cuda.to_device(in_edges) # avoid race in multiple kernel calls
+    d_in_edges = cuda.to_device(in_edges)  # avoid race in multiple kernel calls
     threads_per_block = 1
-    blocks_per_grid = M+1 #(M + threads_per_block - 1) // threads_per_block
-    sptrsc_numba_csc_sync_free_kernel[blocks_per_grid, threads_per_block](data, indices, indptr, b, d_y, M, N, nnz, d_in_edges)
+    blocks_per_grid = M + 1  # (M + threads_per_block - 1) // threads_per_block
+    sptrsc_numba_csc_sync_free_kernel[blocks_per_grid, threads_per_block](
+        data, indices, indptr, b, d_y, M, N, nnz, d_in_edges
+    )
     return d_y
 
 
 @cuda.jit
-def sptrsc_numba_csc_kernel(data, indices, indptr, b, y, M, N, nnz, wavefronts, wave_start):
+def sptrsc_numba_csc_kernel(
+    data, indices, indptr, b, y, M, N, nnz, wavefronts, wave_start
+):
     wave_loc = cuda.grid(1)
     col = wavefronts[wave_start + wave_loc]
     if col < M:
         start = indptr[col]
         end = indptr[col + 1]
         y[col] = (b[col] - y[col]) / data[start]
-        #print("col: ", y[col])
+        # print("col: ", y[col])
         for j in range(start + 1, end):
             val = data[j]
             x_val = y[col]
             r_i = indices[j]
-            cuda.atomic.add(y, r_i, val * x_val) # x[r_i] += val * x_val
+            cuda.atomic.add(y, r_i, val * x_val)  # x[r_i] += val * x_val
 
 
 def sptrsc_numba_csc(data, indices, indptr, b, M, N, nnz, wave_start, wavefronts):
@@ -387,10 +468,12 @@ def sptrsc_numba_csc(data, indices, indptr, b, M, N, nnz, wave_start, wavefronts
     num_waves = len(wave_start) - 1
     for i in range(num_waves):
         grid_len = wave_start[i + 1] - wave_start[i]
-        #print("grid_len: ", grid_len)
+        # print("grid_len: ", grid_len)
         threads_per_block = 1
-        blocks_per_grid = grid_len #(threads_per_block - 1) // threads_per_block
-        sptrsc_numba_csc_kernel[blocks_per_grid, threads_per_block](data, indices, indptr, b, d_y, M, N, nnz, wavefronts, wave_start[i])
+        blocks_per_grid = grid_len  # (threads_per_block - 1) // threads_per_block
+        sptrsc_numba_csc_kernel[blocks_per_grid, threads_per_block](
+            data, indices, indptr, b, d_y, M, N, nnz, wavefronts, wave_start[i]
+        )
     return d_y
 
 
@@ -428,7 +511,7 @@ def cusparse_solver(matrix, b):
 def gpu_solver(matrix, b):
     print("\nRunning GPU-based solver...")
     # nake it csr
-    #matrix_gpu_csr = cp_csr_matrix(matrix.tocsr())
+    # matrix_gpu_csr = cp_csr_matrix(matrix.tocsr())
     matrix_gpu_csc = cp_csc_matrix(matrix.tocsc())
     b_gpu = cp.array(b)  # Move dense vector to GPU
     time_measures = []
@@ -442,23 +525,13 @@ def gpu_solver(matrix, b):
     return cp.asnumpy(x_gpu), np.median(time_measures)  # Convert result back to host
 
 
-def simple_sptrsv_csc(L, b):
-    n = L.shape[0]
-    x = np.zeros(n)
-    for i in range(n):
-        x[i] = (b[i] - x[i]) / L.data[L.indptr[i]]
-        for j in range(L.indptr[i]+1, L.indptr[i + 1]):
-            x[L.indices[j]] += L.data[j] * x[i]
-    return x
-
-
 def simple_sptrsv_csc_waves(L, b):
     n = L.shape[0]
     x = np.zeros(n)
     for wave in compute_wavefront(L):
         for i in wave:
             x[i] = (b[i] - x[i]) / L.data[L.indptr[i]]
-            for j in range(L.indptr[i]+1, L.indptr[i + 1]):
+            for j in range(L.indptr[i] + 1, L.indptr[i + 1]):
                 x[L.indices[j]] += L.data[j] * x[i]
     return x
 
@@ -484,8 +557,8 @@ def simple_sptrsv_csc_syncfree(L, b):
         i = ready_cols[0]
         # remove i from ready_cols
         ready_cols = ready_cols[1:]
-        x[i] = (b[i] - x[i]) / L.data[L.indptr[i] ]
-        for j in range(L.indptr[i]+1, L.indptr[i + 1]):
+        x[i] = (b[i] - x[i]) / L.data[L.indptr[i]]
+        for j in range(L.indptr[i] + 1, L.indptr[i + 1]):
             x[L.indices[j]] += L.data[j] * x[i]
             in_edges[L.indices[j]] -= 1
             if in_edges[L.indices[j]] == 1:
