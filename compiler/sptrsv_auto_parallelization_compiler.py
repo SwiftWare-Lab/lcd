@@ -477,7 +477,7 @@ class SptrsvParallelizer(ast.NodeTransformer):
         # Generate kernel
         output.append(
             ast.FunctionDef(
-                name="sptrsv_sync_free_csc",
+                name="__sptrsv_sync_free_csc",
                 args=ast.arguments(
                     args=[
                         ast.arg(arg="data_ptr"),
