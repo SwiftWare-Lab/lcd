@@ -58,7 +58,7 @@ class WritesTracker(ast.NodeTransformer):
         # When a For loop is visited, this gets set
         self.outer_loop_var = None
         # Gets passed to ReadsTracker so it knows which subscripts are not reads
-        self.write_nodes = set()  
+        self.write_nodes = set()
         # * Assume only 1 array is written to
         self.write_array_id = None
 
@@ -67,10 +67,10 @@ class WritesTracker(ast.NodeTransformer):
             ast.Call(
                 func=ast.Attribute(
                     value=ast.Subscript(
-                        value=ast.Name("writes", ctx=ast.Load()),
+                        value=ast.Name("__writes", ctx=ast.Load()),
                         slice=self.outer_loop_var,
                     ),
-                    attr="append",
+                    attr="add",
                     ctx=ast.Load(),
                 ),
                 args=[write_index],
@@ -106,17 +106,20 @@ class WritesTracker(ast.NodeTransformer):
 
 
 class ReadsTracker(ast.NodeTransformer):
-    class _InternalTracker(ast.NodeTransformer):
+    class _SubscriptVisitor(ast.NodeTransformer):
         def __init__(self, outer_ref):
             self.outer_ref = outer_ref
             self.added_reads_from_stmt = []
 
         def visit_Subscript(self, node):
-            if isinstance(node.value, ast.Name) and node.value.id == self.outer_ref.write_array_id:
+            if (
+                isinstance(node.value, ast.Name)
+                and node.value.id == self.outer_ref.write_array_id
+            ):
                 index = node.slice
                 self.added_reads_from_stmt.append(self._generate_add_read_stmt(index))
             return node
-        
+
         def flush_stmts(self):
             stmts = self.added_reads_from_stmt
             self.added_reads_from_stmt = []
@@ -127,10 +130,10 @@ class ReadsTracker(ast.NodeTransformer):
                 ast.Call(
                     func=ast.Attribute(
                         value=ast.Subscript(
-                            value=ast.Name("reads", ctx=ast.Load()),
+                            value=ast.Name("__reads", ctx=ast.Load()),
                             slice=self.outer_ref.outer_loop_var,
                         ),
-                        attr="append",
+                        attr="add",
                         ctx=ast.Load(),
                     ),
                     args=[read_index],
@@ -141,14 +144,14 @@ class ReadsTracker(ast.NodeTransformer):
     def __init__(self, write_array_id):
         self.write_array_id = write_array_id
         self.outer_loop_var = None
-        self.__internal_tracker = self._InternalTracker(self)
+        self.__internal_tracker = self._SubscriptVisitor(self)
 
     def visit_For(self, node):
         if not self.outer_loop_var:
             self.outer_loop_var = node.target
         self.generic_visit(node)
         return node
-    
+
     def visit_Assign(self, node):
         if self.outer_loop_var:
             self.__internal_tracker.visit(node.value)
@@ -158,13 +161,16 @@ class ReadsTracker(ast.NodeTransformer):
         if self.outer_loop_var:
             self.__internal_tracker.visit(node)
         return [node, *self.__internal_tracker.flush_stmts()]
- 
+
+    # Sneak this transformation in here, it needs to happen eventually
     def visit_Return(self, node):
         return ast.Return(
             ast.Tuple(
-                elts=[ast.Name("reads", ctx=ast.Load()), 
-                      ast.Name("writes", ctx=ast.Load())], 
-                ctx=ast.Load()
+                elts=[
+                    ast.Name("__reads", ctx=ast.Load()),
+                    ast.Name("__writes", ctx=ast.Load()),
+                ],
+                ctx=ast.Load(),
             )
         )
 
@@ -177,14 +183,56 @@ def generate_read_write_tracker_body(node: ast.FunctionDef) -> list[ast.stmt]:
     return node.body
 
 
+def generate_tensor_assign(varname, data, dtype=None):
+    if dtype:
+        keywords = [
+            ast.keyword(
+                arg="dtype",
+                value=dtype,
+            ),
+            ast.keyword(
+                arg="device",
+                value=ast.Name("__DEVICE", ctx=ast.Load()),
+            ),
+        ]
+    else:
+        keywords = [
+            ast.keyword(
+                arg="device",
+                value=ast.Name("__DEVICE", ctx=ast.Load()),
+            )
+        ]
+
+    return ast.Assign(
+        targets=[ast.Name(varname, ctx=ast.Store())],
+        value=ast.Call(
+            func=ast.Attribute(
+                value=ast.Name("torch", ctx=ast.Load()),
+                attr="as_tensor",
+                ctx=ast.Load(),
+            ),
+            args=[data],
+            keywords=keywords,
+        ),
+    )
+
+
 class SptrsvParallelizer(ast.NodeTransformer):
     def __init__(self, cfg: CFG):
         self.cfg = cfg
 
     def visit_FunctionDef(self, node):
         """Takes sequential CSC SpTRSV function, outputs parallel Triton kernel"""
-
-        output = [ast.Import([ast.alias("triton"), ast.alias("triton.language", "tl")])]
+        # todo: while loops
+        output = [
+            ast.Import(
+                [
+                    ast.alias("triton"),
+                    ast.alias("triton.language", "tl"),
+                    ast.alias("torch"),
+                ]
+            )
+        ]
 
         # * Assume first arg is the sparse matrix and second arg is the rhs of the sptrsv equation
         matrix = node.args.args[0]
@@ -192,28 +240,48 @@ class SptrsvParallelizer(ast.NodeTransformer):
 
         N = ast.Name("__N", ctx=ast.Load())
 
-        # Generate function that creates Read and Write sets
+        # Function that creates Read and Write sets
         lineno = node.lineno
         get_read_writes_body = [
             ast.Assign(
-                targets=[ast.Name("reads", ctx=ast.Store())],
-                value=ast.BinOp(
-                    left=ast.List(
-                        elts=[ast.List(elts=[], ctx=ast.Load())], ctx=ast.Load()
+                targets=[ast.Name("__reads", ctx=ast.Store())],
+                value=ast.ListComp(
+                    elt=ast.Call(
+                        func=ast.Name("set", ctx=ast.Load()), args=[], keywords=[]
                     ),
-                    op=ast.Mult(),
-                    right=N,
+                    generators=[
+                        ast.comprehension(
+                            target=ast.Name("_", ctx=ast.Store()),
+                            iter=ast.Call(
+                                func=ast.Name("range", ctx=ast.Load()),
+                                args=[N],
+                                keywords=[],
+                            ),
+                            ifs=[],
+                            is_async=0,
+                        )
+                    ],
                 ),
                 lineno=lineno + len(output),
             ),
             ast.Assign(
-                targets=[ast.Name("writes", ctx=ast.Store())],
-                value=ast.BinOp(
-                    left=ast.List(
-                        elts=[ast.List(elts=[], ctx=ast.Load())], ctx=ast.Load()
+                targets=[ast.Name("__writes", ctx=ast.Store())],
+                value=ast.ListComp(
+                    elt=ast.Call(
+                        func=ast.Name("set", ctx=ast.Load()), args=[], keywords=[]
                     ),
-                    op=ast.Mult(),
-                    right=N,
+                    generators=[
+                        ast.comprehension(
+                            target=ast.Name("_", ctx=ast.Store()),
+                            iter=ast.Call(
+                                func=ast.Name("range", ctx=ast.Load()),
+                                args=[N],
+                                keywords=[],
+                            ),
+                            ifs=[],
+                            is_async=0,
+                        )
+                    ],
                 ),
                 lineno=lineno + len(output) + 1,
             ),
@@ -222,17 +290,193 @@ class SptrsvParallelizer(ast.NodeTransformer):
 
         output.append(
             ast.FunctionDef(
-                name="get_read_writes",
-                args=ast.arguments(args=[matrix, N], posonlyargs=[], defaults=[], kwonlyargs=[]), 
+                name="__get_read_writes",
+                args=ast.arguments(
+                    args=[*node.args.args, N],
+                    posonlyargs=[],
+                    defaults=[],
+                    kwonlyargs=[],
+                ),
                 body=get_read_writes_body,
                 decorator_list=[],
             )
         )
 
-        # todo triton function definition
-        # Generate FI (generating W did most of the work already)
+        # Generate `deps_count`
+        # Todo figure out where args come from
+        output.append(
+            ast.Assign(
+                targets=[
+                    ast.Tuple(
+                        elts=[
+                            ast.Name("__reads", ctx=ast.Load()),
+                            ast.Name("__writes", ctx=ast.Load()),
+                        ],
+                        ctx=ast.Load(),
+                    )
+                ],
+                value=ast.Call(
+                    func=ast.Name("__get_read_writes", ctx=ast.Load()),
+                    args=[*node.args.args, N],
+                    keywords=[],
+                ),
+            )
+        )
+
+        torch_alias = ast.Name("torch", ctx=ast.Load())
+        device = ast.Name("__DEVICE", ctx=ast.Load())
+        output.append(
+            ast.Assign(
+                targets=[ast.Name("__DEVICE", ctx=ast.Store())],
+                value=ast.Call(
+                    func=ast.Attribute(
+                        value=torch_alias,
+                        attr="device",
+                        ctx=ast.Load(),
+                    ),
+                    args=[ast.Constant("cuda:0")],
+                    keywords=[],
+                ),
+            )
+        )
+
+        output.append(
+            ast.Assign(
+                targets=[ast.Name("__deps_count", ctx=ast.Store())],
+                value=ast.List(elts=[], ctx=ast.Load()),
+            )
+        )
+
+        output.append(
+            ast.For(
+                target=ast.Name(id="i", ctx=ast.Store()),
+                iter=ast.Call(
+                    func=ast.Name(id="range", ctx=ast.Load()),
+                    args=[N],
+                    keywords=[],
+                ),
+                body=[
+                    ast.Expr(
+                        value=ast.Call(
+                            func=ast.Attribute(
+                                value=ast.Name(id="__deps_count", ctx=ast.Load()),
+                                attr="append",
+                                ctx=ast.Load(),
+                            ),
+                            args=[
+                                ast.Call(
+                                    func=ast.Name(id="sum", ctx=ast.Load()),
+                                    args=[
+                                        ast.GeneratorExp(
+                                            elt=ast.Constant(value=1),
+                                            generators=[
+                                                ast.comprehension(
+                                                    target=ast.Tuple(
+                                                        elts=[
+                                                            ast.Name(
+                                                                id="j", ctx=ast.Store()
+                                                            ),
+                                                            ast.Name(
+                                                                id="x", ctx=ast.Store()
+                                                            ),
+                                                        ],
+                                                        ctx=ast.Store(),
+                                                    ),
+                                                    iter=ast.Call(
+                                                        func=ast.Name(
+                                                            id="enumerate",
+                                                            ctx=ast.Load(),
+                                                        ),
+                                                        args=[
+                                                            ast.Name(
+                                                                id="writes",
+                                                                ctx=ast.Load(),
+                                                            )
+                                                        ],
+                                                        keywords=[],
+                                                    ),
+                                                    ifs=[
+                                                        ast.Compare(
+                                                            left=ast.Name(
+                                                                id="j", ctx=ast.Load()
+                                                            ),
+                                                            ops=[ast.NotEq()],
+                                                            comparators=[
+                                                                ast.Name(
+                                                                    id="i",
+                                                                    ctx=ast.Load(),
+                                                                )
+                                                            ],
+                                                        ),
+                                                        ast.Compare(
+                                                            left=ast.Name(
+                                                                id="i", ctx=ast.Load()
+                                                            ),
+                                                            ops=[ast.In()],
+                                                            comparators=[
+                                                                ast.Name(
+                                                                    id="x",
+                                                                    ctx=ast.Load(),
+                                                                )
+                                                            ],
+                                                        ),
+                                                    ],
+                                                    is_async=0,
+                                                )
+                                            ],
+                                        )
+                                    ],
+                                    keywords=[],
+                                )
+                            ],
+                            keywords=[],
+                        )
+                    )
+                ],
+                orelse=[],
+            )
+        )
+
+        # Set up tensors to pass to launcher
+        output.append(
+            generate_tensor_assign(
+                varname="__deps_count",
+                data=ast.Name("__deps_count", ctx=ast.Load()),
+                dtype=ast.Attribute(value=torch_alias, attr="int32", ctx=ast.Load()),
+            )
+        )
+
+        output.append(
+            generate_tensor_assign(
+                varname="__data",
+                data=ast.Attribute(value=matrix, attr="data", ctx=ast.Load()),
+            )
+        )
+        output.append(
+            generate_tensor_assign(
+                varname="__rhs",
+                data=rhs,
+            )
+        )
+        output.append(
+            generate_tensor_assign(
+                varname="__indices",
+                data=ast.Attribute(value=matrix, attr="indices", ctx=ast.Load()),
+                dtype=ast.Attribute(value=torch_alias, attr="int32", ctx=ast.Load()),
+            )
+        )
+        output.append(
+            generate_tensor_assign(
+                varname="__indptr",
+                data=ast.Attribute(value=matrix, attr="indptr", ctx=ast.Load()),
+                dtype=ast.Attribute(value=torch_alias, attr="int32", ctx=ast.Load()),
+            )
+        )
+
+        # Generate kernel launcher
+        launcher_body = []
+
         ## Get loop variable form original code
-        ### todo: while loops
         ### If you don't use the loop target, this is pointless. Think why to use same name
         # outer_loop = next((b for b in node.body if isinstance(b, (ast.For))), None)
         # if outer_loop is None:
