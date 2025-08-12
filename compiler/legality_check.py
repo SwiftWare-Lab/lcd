@@ -435,8 +435,10 @@ def generate_dag_generation_code(components, node_data, partition_node_num):
     code_str += DAG_def
     iteration_space_code = generate_iteration_space(components[0], node_data)
     code_str += iteration_space_code
-    DAG_update = "DAG[{}].append({})".format(symbolic_nodes[1], symbolic_nodes[0])
+    DAG_update = "DAG[{}].append({})\n".format(symbolic_nodes[1], symbolic_nodes[0])
     code_str += DAG_update
+    return_stmnt = "\treturn DAG"
+    code_str += return_stmnt
     return code_str
 
 
@@ -472,6 +474,29 @@ def spmm_spmm(m, n, Ap, Ai, Ax, B):
                 z[j1][j3] += Ax[j2] * y[Ai[j2]][j3]
 """
 
+src_spmv_spmv = """
+def spmv_spmv(m, n, Ap, Ai, Ax, B):
+    for i1 in range(m):
+        for i2 in range(Ap[i1], Ap[i1 + 1]):
+                y[i1] += Ax[i2] * B[Ai[i2]]
+    for j1 in range(m):
+        for j2 in range(Ap[j1], Ap[j1 + 1]):
+                z[j1] += Ax[j2] * y[Ai[j2]]
+"""
+
+src_gemm_spmm = """
+def gemm_spmm(m, n, Ap, Ai, Ax, B, A):
+    for i1 in range(m):
+        for i2 in range(n):
+            for i3 in range(n):
+                y[i1][i3] += A[i1][i2] * B[i2][i3]
+    for j1 in range(m):
+        for j2 in range(Ap[j1], Ap[j1 + 1]):
+            for j3 in range(n):
+                z[j1][j3] += Ax[j2] * y[Ai[j2]][j3]
+"""
+
+
 src_spmm_spmm_v3 = """
 for i1 in frange(m):
     for i2 in range(Ap[i1], Ap[i1 + 1]):
@@ -492,7 +517,7 @@ for i in frange(n):
 """
 
 if __name__ == "__main__":
-    tree = ast.parse(src_spmm_spmm)
+    tree = ast.parse(src_spmv_spmv)
     spf_builder = SPFBuilder()
     root_node = spf_builder.visit(tree)
     node_data = extract_node_data(root_node)
@@ -519,6 +544,14 @@ if __name__ == "__main__":
     print(iter_list)
     code = generate_dag_generation_code(iter_list, node_data, {'j1': 'm'})
     print(code)
+
+    # new_file_name = "dag_extraction.py"
+    #
+    # with open(new_file_name, 'w') as py_file:
+    #     py_file.write(code)
+    #
+    # import dag_extraction
+
 
     # print(ast.dump(ast.parse('l[1][3]', mode='eval'), indent=4))
 

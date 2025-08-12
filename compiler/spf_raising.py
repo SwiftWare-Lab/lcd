@@ -6,6 +6,26 @@ from spf_def import *
 # from copy import deepcopy
 # from legality_check import check_legality_of_fusion
 
+class TileFusionLoopBodyExtractor(ast.NodeVisitor):
+    def __init__(self, transformation):
+        self.first_loop = None
+        self.second_loop = None
+        self.transformation = transformation
+
+    # TODO: Fix generic visits(use return value to have one return statement.)
+    def visit_For(self, node):
+        iter_var = self.visit(node.target)
+        if iter_var == self.transformation[0]:
+            self.first_loop = node.body
+        elif iter_var == self.transformation[1]:
+            self.second_loop = node.body
+        else:
+            self.generic_visit(node)
+            return node
+
+    def visit_Name(self, node):
+        return node.id
+
 class LegalFusionTransformer(ast.NodeTransformer):
     def __init__(self, transformation):
         self.target_loop = None
