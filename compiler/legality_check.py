@@ -424,8 +424,7 @@ def extract_arguments(components, node_data):
     return arguments
 
 
-def generate_dag_generation_code(components, node_data, partition_node_num):
-    arguments = extract_arguments(components, node_data)
+def generate_dag_generation_code(arguments, components, node_data, partition_node_num):
     print(arguments)
     code_str = ""
     function_def = "def extract_dag({}):\n\t".format(', '. join(arguments))
@@ -437,7 +436,7 @@ def generate_dag_generation_code(components, node_data, partition_node_num):
     code_str += iteration_space_code
     DAG_update = "DAG[{}].append({})\n".format(symbolic_nodes[1], symbolic_nodes[0])
     code_str += DAG_update
-    return_stmnt = "\treturn DAG"
+    return_stmnt = "\treturn DAG\n"
     code_str += return_stmnt
     return code_str
 

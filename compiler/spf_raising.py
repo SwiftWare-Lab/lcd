@@ -6,11 +6,74 @@ from spf_def import *
 # from copy import deepcopy
 # from legality_check import check_legality_of_fusion
 
+class SparseFusionTransformer(ast.NodeTransformer):
+    def __init__(self, directives):
+        super().__init__()
+        self.directives = directives
+
+    def visit_FunctionDef(self, node):
+        # rename function
+        node.name = "executer"
+        # add schedule argument
+        node.args.args.append(ast.arg(arg="schedule"))
+
+        # separate the loops into two groups: directive-driven
+        preamble = []
+        loop_bodies = {}
+
+        for stmt in node.body:
+            if isinstance(stmt, ast.Assign):  # keep initializations
+                preamble.append(stmt)
+            elif isinstance(stmt, ast.For):
+                # capture loops whose target is in directives
+                loop_var = stmt.target.id
+                if loop_var in self.directives:
+                    loop_bodies[loop_var] = stmt
+                    self.visit(stmt)
+            else:
+                # keep return for later
+                ret_stmt = stmt
+
+        # Build new structure
+        new_for = ast.For(
+            target=ast.Name(id="s", ctx=ast.Store()),
+            iter=ast.Name(id="schedule", ctx=ast.Load()),
+            body=[
+                ast.For(
+                    target=ast.Tuple(
+                        elts=[ast.Name(id="first", ctx=ast.Store()),
+                              ast.Name(id="second", ctx=ast.Store())],
+                        ctx=ast.Store()
+                    ),
+                    iter=ast.Name(id="s", ctx=ast.Load()),
+                    body=[
+                        loop_bodies[self.directives[0]],
+                        loop_bodies[self.directives[1]],
+                    ],
+                    orelse=[]
+                )
+            ],
+            orelse=[]
+        )
+
+        node.body = preamble + [new_for, ret_stmt]
+        return node
+    def visit_For(self, node):
+        if node.target.id == self.directives[0]:
+            node.iter = ast.Name('first', ctx=ast.Load())
+        if node.target.id == self.directives[1]:
+            node.iter = ast.Name('second', ctx=ast.Load())
+
+
+# class SparseFusionTransformer(ast.NodeTransformer):
+
+
 class TileFusionLoopBodyExtractor(ast.NodeVisitor):
     def __init__(self, transformation):
         self.first_loop = None
         self.second_loop = None
         self.transformation = transformation
+        self.ret_stmnt = None
 
     # TODO: Fix generic visits(use return value to have one return statement.)
     def visit_For(self, node):
@@ -19,12 +82,16 @@ class TileFusionLoopBodyExtractor(ast.NodeVisitor):
             self.first_loop = node.body
         elif iter_var == self.transformation[1]:
             self.second_loop = node.body
-        else:
-            self.generic_visit(node)
-            return node
+        self.generic_visit(node)
 
     def visit_Name(self, node):
+        self.generic_visit(node)
         return node.id
+
+    def visit_Return(self, node):
+        print("TEST")
+        self.ret_stmnt = node
+        self.generic_visit(node)
 
 class LegalFusionTransformer(ast.NodeTransformer):
     def __init__(self, transformation):
