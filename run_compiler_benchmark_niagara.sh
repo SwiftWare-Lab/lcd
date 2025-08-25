@@ -22,7 +22,7 @@ source ~/.virtualenvs/myenv/bin/activate
 
 export PYTHONPATH="$SCRATCH/projects/gpu-backend"
 
-python compiler/benchmarks/spmm_softmax.py $MAT_FILE $MAT_DIR > spmm_softmax_benchmark
+python compiler/fusion_benchmark/spmm_softmax.py $MAT_FILE $MAT_DIR > spmm_softmax_benchmark
 
 deactivate
 
