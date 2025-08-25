@@ -11,6 +11,8 @@ function_props = {
     'Ap': ['monotonically_increasing'],
     'Ai': [],
 }
+
+
 @numba.njit(numba.float32[:, :](numba.int64, numba.int64, numba.int64, numba.int64, numba.int32[:], numba.int32[:],
                           numba.float32[:, :], numba.float32[:, :], numba.float32[:, :]), cache=True, parallel=True)
 def sddmm_spmm_unfused(m, n, k, nnz, Ap, Ai, B, C, D):
