@@ -2,8 +2,8 @@ import sympy
 
 from copy import deepcopy
 from sympy import Symbol, Eq, GreaterThan, And, Or, Not, StrictGreaterThan
-from spf_raising import *
-from SMT_Generator import generate_smt_file
+from compiler.spf_raising import *
+from compiler.SMT_Generator import generate_smt_file
 from z3 import Solver, CheckSatResult, Z3_L_FALSE
 
 

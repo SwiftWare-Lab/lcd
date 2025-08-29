@@ -3,8 +3,6 @@ import typing
 import sympy
 from sympy import Function
 
-from spf_raising import LoopBound
-from sympy import Expr
 def generate_smt_file(loop_nodes, dep_cons, func_props):
     f_content = []
     f_content.append("(set-logic AUFNIRA)\n")

@@ -46,12 +46,12 @@ def schedule_bipartite(DAG: list[list], num_threads):
     return schedule
 
 
-DAG = [[] for i in range(100)]
-DAG[0].extend([0, 1])
-DAG[99].extend([98, 99])
-for i in range(99):
-    DAG[i].extend([i-1, i, i+1])
-
-schedule = schedule_bipartite(DAG, 1)
-print(schedule)
+# DAG = [[] for i in range(100)]
+# DAG[0].extend([0, 1])
+# DAG[99].extend([98, 99])
+# for i in range(99):
+#     DAG[i].extend([i-1, i, i+1])
+#
+# schedule = schedule_bipartite(DAG, 1)
+# print(schedule)
 

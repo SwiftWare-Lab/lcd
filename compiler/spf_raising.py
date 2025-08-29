@@ -1,5 +1,5 @@
 import ast
-from spf_def import *
+from compiler.spf_def import *
 
 
 # from sympy import Symbol, Eq, GreaterThan, Lt, And, Or, Not

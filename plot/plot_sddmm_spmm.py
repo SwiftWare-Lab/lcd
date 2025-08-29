@@ -21,7 +21,6 @@ plt.axhline(y=1, color='r', linestyle='--', linewidth=2)
 plt.ylabel("Speed Up over Unfused")
 plt.xlabel("Unfused Gflops")
 # plt.xscale('log')
-plt
 plt.show()
 
 print(np.average(np.array(timings['sddmm_spmm_unfused']) / np.array(timings['sddmm_spmm_fused_v2'])))

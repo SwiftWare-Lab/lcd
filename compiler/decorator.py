@@ -3,9 +3,9 @@ import inspect
 
 import types
 import ast
-from legality_check import finalize_legality_of_fusion, transform_ast, generate_dag_generation_code
-from legality_check import extract_node_data, check_legality_of_fusion, extract_dag_creation_components
-from spf_raising import SPFBuilder, TileFusionLoopBodyExtractor, SparseFusionTransformer
+from compiler.legality_check import finalize_legality_of_fusion, transform_ast, generate_dag_generation_code
+from compiler.legality_check import extract_node_data, check_legality_of_fusion, extract_dag_creation_components
+from compiler.spf_raising import SPFBuilder, TileFusionLoopBodyExtractor, SparseFusionTransformer
 import numpy as np
 import scipy.io as scio
 import sys
@@ -57,16 +57,6 @@ def sparse_fusion(**kwargs):
         sp_fusion_transformer = SparseFusionTransformer(transformation)
         new_ast = sp_fusion_transformer.visit(cur_ast)
         new_ast = ast.fix_missing_locations(cur_ast)
-        # loop_body_extractor = TileFusionLoopBodyExtractor(transformation,)
-        # loop_body_extractor.visit(cur_ast)
-        # first_loop = ast.unparse(loop_body_extractor.first_loop)
-        # second_loop = ast.unparse(loop_body_extractor.second_loop)
-        # if loop_body_extractor.ret_stmnt:
-        #     ret_stmnt = ast.unparse(loop_body_extractor.ret_stmnt)
-        # else:
-        #     ret_stmnt = ""
-        # print(ret_stmnt)
-        # executer_code = generate_executer_code(arg_names, first_loop, second_loop, ret_stmnt, transformation)
         executer_code = ast.unparse(new_ast)
         print(dag_code.expandtabs(4))
         print(executer_code)
@@ -80,8 +70,8 @@ def sparse_fusion(**kwargs):
             # py_file.write(executer_code)
 
         def wrapper(*args, **kwargs):
-            import generated_code
-            import scheduler
+            from compiler import generated_code
+            from compiler import scheduler
             DAG = generated_code.extract_dag(*args, **kwargs)
             schedule = scheduler.schedule_bipartite(DAG, num_threads)
             new_code_obj = compile(new_ast, old_code_obj.co_filename, 'exec')
@@ -112,60 +102,60 @@ def generate_executer_code(arg_names, loop_body_1, loop_body_2, ret_stmnt, trans
 
 #TODO: test this using function signature.
 
-
-@sparse_fusion(transformation=('i1', 'j1'), num_threads=8)
-def spmm_spmm_fused(m, n, Ap, Ai, Ax, B):
-    y = np.zeros((m,n))
-    z = np.zeros((m,n))
-    for i1 in range(m):
-        for i2 in range(Ap[i1], Ap[i1 + 1]):
-            for i3 in range(n):
-                y[i1][i3] += Ax[i2] * B[Ai[i2]][i3]
-    for j1 in range(m):
-        for j2 in range(Ap[j1], Ap[j1 + 1]):
-            for j3 in range(n):
-                z[j1][j3] += Ax[j2] * y[Ai[j2]][j3]
-    return z
-
-
-def spmm_spmm_unfused(m, n, Ap, Ai, Ax, B):
-    y = np.zeros((m,n))
-    z = np.zeros((m,n))
-    for i1 in range(m):
-        for i2 in range(Ap[i1], Ap[i1 + 1]):
-            for i3 in range(n):
-                y[i1][i3] += Ax[i2] * B[Ai[i2]][i3]
-    for j1 in range(m):
-        for j2 in range(Ap[j1], Ap[j1 + 1]):
-            for j3 in range(n):
-                z[j1][j3] += Ax[j2] * y[Ai[j2]][j3]
-    return z
-
-
-if __name__ == '__main__':
-    mat_path = sys.argv[1]
-    matrix = scio.mmread(mat_path)
-
-    # matrix = scio.mmread("/home/salehm32/projects/fused-gnn/fusion/data/tri-banded/tri-banded-1000.mtx")
-    A = matrix.tocsr()
-    m = A.shape[0]
-    p = A.shape[1]
-    n = 128
-    k = 128
-    Ap = A.indptr
-    Ai = A.indices
-    Ax = A.data.astype(np.float32)
-    nnz = A.nnz
-    B = np.random.rand(m, k).astype(np.float32)
-
-    unfused_res = spmm_spmm_unfused(m,n,Ap,Ai,Ax,B)
-    fused_res = spmm_spmm_fused(m,n,Ap,Ai,Ax,B)
-
-    print("SpMM_SpMM_FUSED_TEST: ")
-    if np.allclose(unfused_res, fused_res, atol=1e-6):
-        print("PASS")
-    else:
-        print("FAIL")
+#
+# @sparse_fusion(transformation=('i1', 'j1'), num_threads=8)
+# def spmm_spmm_fused(m, n, Ap, Ai, Ax, B):
+#     y = np.zeros((m,n))
+#     z = np.zeros((m,n))
+#     for i1 in range(m):
+#         for i2 in range(Ap[i1], Ap[i1 + 1]):
+#             for i3 in range(n):
+#                 y[i1][i3] += Ax[i2] * B[Ai[i2]][i3]
+#     for j1 in range(m):
+#         for j2 in range(Ap[j1], Ap[j1 + 1]):
+#             for j3 in range(n):
+#                 z[j1][j3] += Ax[j2] * y[Ai[j2]][j3]
+#     return z
+#
+#
+# def spmm_spmm_unfused(m, n, Ap, Ai, Ax, B):
+#     y = np.zeros((m,n))
+#     z = np.zeros((m,n))
+#     for i1 in range(m):
+#         for i2 in range(Ap[i1], Ap[i1 + 1]):
+#             for i3 in range(n):
+#                 y[i1][i3] += Ax[i2] * B[Ai[i2]][i3]
+#     for j1 in range(m):
+#         for j2 in range(Ap[j1], Ap[j1 + 1]):
+#             for j3 in range(n):
+#                 z[j1][j3] += Ax[j2] * y[Ai[j2]][j3]
+#     return z
+#
+#
+# if __name__ == '__main__':
+#     mat_path = sys.argv[1]
+#     matrix = scio.mmread(mat_path)
+#
+#     # matrix = scio.mmread("/home/salehm32/projects/fused-gnn/fusion/data/tri-banded/tri-banded-1000.mtx")
+#     A = matrix.tocsr()
+#     m = A.shape[0]
+#     p = A.shape[1]
+#     n = 128
+#     k = 128
+#     Ap = A.indptr
+#     Ai = A.indices
+#     Ax = A.data.astype(np.float32)
+#     nnz = A.nnz
+#     B = np.random.rand(m, k).astype(np.float32)
+#
+#     unfused_res = spmm_spmm_unfused(m,n,Ap,Ai,Ax,B)
+#     fused_res = spmm_spmm_fused(m,n,Ap,Ai,Ax,B)
+#
+#     print("SpMM_SpMM_FUSED_TEST: ")
+#     if np.allclose(unfused_res, fused_res, atol=1e-6):
+#         print("PASS")
+#     else:
+#         print("FAIL")
 
 
 

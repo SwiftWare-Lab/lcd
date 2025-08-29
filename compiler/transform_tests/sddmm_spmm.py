@@ -1,5 +1,5 @@
 import numpy as np
-from decorator import fusion
+from compiler.decorator import fusion
 from numba import njit, prange
 import numba
 import sys
