@@ -3,12 +3,13 @@ import typing
 import sympy
 from sympy import Function
 
-def generate_smt_file(loop_nodes, dep_cons, func_props):
+def generate_smt_file(loop_nodes, dep_cons, known_funcs, func_props):
     f_content = []
     f_content.append("(set-logic AUFNIRA)\n")
     generate_function_prop(func_props, f_content)
     generate_loop_bound_s_expressions_v2(loop_nodes, f_content)
-    generate_dep_constraints(dep_cons, f_content)
+    generate_dep_constraints(dep_cons, f_content, known_funcs)
+
     # generate_func_props(func_props, f_content)
     with open("smt_file.smt2", "w") as f:
         f.writelines(f_content)
@@ -46,8 +47,9 @@ def generate_loop_bound_s_expressions_v2(loop_nodes, f_content):
         smt_expr = sympy.smtlib_code(sympy_expr, symbol_table=known_funcs, auto_declare=False).split("\n")[0]
         f_content.append(smt_expr + "\n")
 
-def generate_dep_constraints(dep_cons, f_content):
-    smt_expr = sympy.smtlib_code(dep_cons, auto_declare=False).split("\n")[0]
+def generate_dep_constraints(dep_cons, f_content, known_funcs):
+    symbol_table = {Function(f): typing.Callable[[int],int] for f in known_funcs}
+    smt_expr = sympy.smtlib_code(dep_cons, auto_declare=False, symbol_table=symbol_table).split("\n")[0]
     f_content.append(smt_expr + "\n")
 
 

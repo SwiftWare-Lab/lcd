@@ -1,10 +1,13 @@
-from compiler.decorator import sparse_fusion
+from compiler.decorator import sparse_fusion, fusion
 import numpy as np
 import scipy.io as scio
 import sys
 
-
-@sparse_fusion(transformation=('i1', 'j1'), num_threads=8)
+function_props = {
+    'Ap': ['monotonically_increasing'],
+    'Ai': [],
+}
+@fusion(transformation=[('i1', 'j1')], num_threads=8, function_props=function_props)
 def spmm_spmm_fused(m, n, Ap, Ai, Ax, B):
     y = np.zeros((m,n))
     z = np.zeros((m,n))

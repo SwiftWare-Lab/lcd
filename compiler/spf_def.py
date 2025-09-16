@@ -18,6 +18,20 @@ class DependencePremise:
     def get_sympy_expression(self):
         raise NotImplementedError("This functionality is only implemented for subclass objects.")
 
+    def get_sympy_expressions(self, func):
+        known_funcs = set()
+        if isinstance(self.left, Access):
+            left_sym = self.left.get_sympy_expr()[1]
+            known_funcs.update(self.left.get_sympy_expr()[0])
+        else:
+            left_sym = sympy.Symbol(str(self.left))
+        if isinstance(self.right, Access):
+            right_sym = self.right.get_sympy_expr()[1]
+            known_funcs.update(self.right.get_sympy_expr()[0])
+        else:
+            right_sym = sympy.Symbol(str(self.right))
+        return func(left_sym, right_sym), known_funcs
+
     def __repr__(self):
         raise NotImplementedError("This functionality is only implemented for subclass objects.")
 
@@ -26,7 +40,7 @@ class DependencePremise:
 
 class Equality(DependencePremise):
     def get_sympy_expression(self):
-        return sympy.Eq(sympy.Symbol(str(self.left)), sympy.Symbol(str(self.right)))
+        return self.get_sympy_expressions(sympy.Eq)
 
     def __repr__(self):
         return str(self.left) + ' = ' + str(self.right)
@@ -40,14 +54,14 @@ class Equality(DependencePremise):
 
 class GreaterThanOrEqual(DependencePremise):
     def get_sympy_expression(self):
-        return sympy.Gt(sympy.Symbol(str(self.left)), sympy.Symbol(str(self.right)))
+        return self.get_sympy_expressions(sympy.GreaterThan)
 
     def __repr__(self):
         return str(self.left) + ' >= ' + str(self.right)
 
 class GreaterThan(DependencePremise):
     def get_sympy_expression(self):
-        return sympy.StrictGreaterThan(sympy.Symbol(str(self.left)), sympy.Symbol(str(self.right)))
+        return self.get_sympy_expressions(sympy.Gt)
 
     def __repr__(self):
         return str(self.left) + ' > ' + str(self.right)
@@ -191,9 +205,12 @@ class DataDependence:
 
     def get_condition_statement_sympy(self):
         condition = sympy.true
+        known_funcs = set()
         for premise in self.premises:
-            condition = sympy.And(premise.get_sympy_expression(), condition)
-        return condition
+            premise_expr = premise.get_sympy_expression()[0]
+            known_funcs.update(premise.get_sympy_expression()[1])
+            condition = sympy.And(premise_expr, condition)
+        return condition, known_funcs
 
     def __repr__(self):
         condition = ' and '.join(map(str, self.premises))

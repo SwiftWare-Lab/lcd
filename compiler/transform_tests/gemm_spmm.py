@@ -1,10 +1,14 @@
-from compiler.decorator import sparse_fusion
+from compiler.decorator import fusion
 import numpy as np
 import scipy.io as scio
 import sys
 
+function_props = {
+    'Ap': ['monotonically_increasing'],
+    'Ai': [],
+}
 
-@sparse_fusion(transformation=('i1', 'j1'), num_threads=8)
+@fusion(transformation=[('i1', 'j1')], num_threads=8, function_props=function_props)
 def gemm_spmm_fused(m, n, Ap, Ai, Ax, B, C):
     y = np.zeros((m,n))
     z = np.zeros((m,n))
@@ -20,17 +24,17 @@ def gemm_spmm_fused(m, n, Ap, Ai, Ax, B, C):
 
 
 def gemm_spmm_unfused(m, n, Ap, Ai, Ax, B, C):
-    y = np.zeros((m,n))
-    z = np.zeros((m,n))
+    X = np.zeros((m,n))
+    Y = np.zeros((m,n))
     for i1 in range(m):
         for i2 in range(n):
             for i3 in range(n):
-                y[i1][i3] += C[i1][i2] * B[i2][i3]
+                X[i1][i3] += C[i1][i2] * B[i2][i3]
     for j1 in range(m):
         for j2 in range(Ap[j1], Ap[j1 + 1]):
             for j3 in range(n):
-                z[j1][j3] += Ax[j2] * y[Ai[j2]][j3]
-    return z
+                Y[j1][j3] += Ax[j2] * X[Ai[j2]][j3]
+    return Y
 
 
 if __name__ == '__main__':
