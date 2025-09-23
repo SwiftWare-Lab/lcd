@@ -2,7 +2,7 @@ import numpy as np
 import scipy.io as sio
 import os
 
-# compute wavefronts of sparse matrix L
+# compute wavefronts of sparse matrix L (CSC)
 def compute_wavefront(L):
     wavefront_list = []
     incoming_edges = np.zeros(L.shape[0], dtype=int)
@@ -77,6 +77,22 @@ def get_matrix_signature(A, name):
     dict['density'] = A.nnz / (A.shape[0] * A.shape[1])
     dict["wavefronts"] = len(compute_wavefront(A))
     return dict
+
+def get_L_signature(L, Ls, name):
+    dict = {}
+    dict['lname'] = name
+    dict['lnnz'] = L.nnz
+    dict['lnnz_per_row'] = L.nnz / L.shape[0]
+    dict['lnnz_per_col'] = L.nnz / L.shape[1]
+    dict['max lnnz per row'] = max(L.getnnz(axis=1))
+    dict['max lnnz per col'] = max(L.getnnz(axis=0))
+    dict['ldensity'] = L.nnz / (L.shape[0] * L.shape[1])
+    dict["lwavefronts"] = len(compute_wavefront(L))
+    dict['num supernodes'] = len(Ls['supernodes'])
+    dict['max supernode width'] = Ls['max_width']
+    dict['average supernode width'] = L.shape[0] / len(Ls['supernodes'])
+    return dict
+
 
 import scipy.sparse as sp
 
