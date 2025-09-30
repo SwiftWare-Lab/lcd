@@ -393,6 +393,7 @@ def MTTKRP_GeMM(Av, Aip, Akp, Aj, Ak, B, C, D, m, n, k, l, q):
     return Y
 
 
+
 '''
 SpTTM - SpTTM 
 A (m*n*k) sparse SPLATT(CSF) Av, Aip, Ajp, Aj, Ak
@@ -473,4 +474,47 @@ def batchNormalization(Ap, Ai, Ax, X, mean, var, gamma, beta, epsilon, m, n):
     return Y
 
 
+'''
+GAT Simple Model(Single Head)
+Using CSR format
+Converted to Loops
+Operations:
+GeMM
+Scatter(SDDMM?)
+UpdateEdge(Vector Op?)
+LeakyRelu(Element Op?)
+Sofmax(Vector Op?)
+Gather(SpMM?)
+'''
 
+#How to compare operation fusion with loop fusion?
+def GAT_MODEL(Ap, Ai, Ax, W, X, m, f, h, nnz):
+    H = np.zeros((m, h))
+    O = np.zeros((m, h))
+    COEFF = np.zeros(nnz)
+    for i1 in range(m):
+        for i2 in range(f):
+            for i3 in range(h):
+                H[i1][i3] += X[i1][i2] * W[i2][i3]
+    for j1 in range(m):
+        for j2 in range(Ap[j1], Ap[j1 + 1]):
+            for j3 in range(h):
+                COEFF[j2] += H[j1][j3] * H[Ai[j2]][j3]
+    for m1 in range(m):
+        for m2 in range(Ap[m1], Ap[m1 + 1]):
+            if COEFF[m2] < 0:
+                COEFF[m2] = COEFF[m2]
+    for p1 in range(m):
+        max_val = np.max(COEFF[Ap[p1]:Ap[p1 + 1]])
+        for p2 in range(Ap[p1],Ap[p1 + 1]):
+            COEFF[p2] -= max_val
+        sum = 0
+        for p2 in range(Ap[p1],Ap[p1 + 1]):
+            COEFF[p2] = np.exp(COEFF[p2])
+            sum += COEFF[p2]
+        for p2 in range(Ap[p1],Ap[p1 + 1]):
+            COEFF[p2] /= sum
+    for q1 in range(m):
+        for q2 in range(Ap[q1], Ap[q1 + 1]):
+            for q3 in range(h):
+                O[q1][q3] = COEFF[q2] * H[Ai[q2]][q3]
