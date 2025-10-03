@@ -1,0 +1,2 @@
+,name,n,nnz,nnz_per_row,nnz_per_col,max nnz per row,max nnz per col,density,wavefronts
+0,tmt_sym.mtx,726713,2903837,3.9958511819659206,3.9958511819659206,5,5,5.4985271791834195e-06,726235

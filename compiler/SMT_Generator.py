@@ -54,14 +54,29 @@ def generate_dep_constraints(dep_cons, f_content, known_funcs):
 
 
 def generate_function_prop(f_props, f_content):
+    declared_funcs = set()
     for func, props in f_props.items():
-        f_content.append(f"(declare-fun {func} (Int) Int)\n")
+        if isinstance(func, str) and func not in declared_funcs:
+            f_content.append(f"(declare-fun {func} (Int) Int)\n")
+            declared_funcs.add(func)
+        elif isinstance(func, tuple):
+            if func[0] not in declared_funcs:
+                f_content.append(f"(declare-fun {func[0]} (Int) Int)\n")
+                declared_funcs.add(func[0])
+            if func[1] not in declared_funcs:
+                f_content.append(f"(declare-fun {func[1]} (Int) Int)\n")
+                declared_funcs.add(func[1])
         for p in props:
             if p == 'monotonically_increasing':
                 generate_function_prop_monotonicity(func, f_content)
+            if p == 'triangularity' and isinstance(func, tuple) and len(func) == 2:
+                generate_function_prop_triangularity(func[0], func[1], f_content)
 
 def generate_function_prop_monotonicity(func_name, f_content):
     f_content.append(f"(assert ( forall ((x1 Int) (x2 Int)) (=> (> x2 x1) (>= ({func_name} x2) ({func_name} x1))) ))\n")
+
+def generate_function_prop_triangularity(cmprs_func, idx_func, f_content):
+    f_content.append(f"(assert ( forall ((x1 Int) (x2 Int)) (= (> x2 ({cmprs_func} x1)) (> ({idx_func} x2) x1)) ))\n")
 
 #TODO implement all the handy function properties
 

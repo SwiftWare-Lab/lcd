@@ -233,10 +233,10 @@ class SPFBuilder(ast.NodeVisitor):
         else:
             start = node.args[0]
             end = node.args[1]
-        assert ((isinstance(start, ast.Constant) or isinstance(start, ast.Name)) and
-                (isinstance(end, ast.Constant) or isinstance(end, ast.Name))) or \
-               (isinstance(start, ast.Subscript) and isinstance(end, ast.Subscript)), \
-            "This functionality is not supported yet."
+        # assert ((isinstance(start, ast.Constant) or isinstance(start, ast.Name)) and
+        #         (isinstance(end, ast.Constant) or isinstance(end, ast.Name))) or \
+        #        (isinstance(start, ast.Subscript) and isinstance(end, ast.Subscript)), \
+        #     "This functionality is not supported yet."
 
         start_sym = self.visit_loop_bound(start)
         end_sym = self.visit_loop_bound(end)
@@ -251,6 +251,8 @@ class SPFBuilder(ast.NodeVisitor):
         elif isinstance(node, ast.Subscript):
             # Handle subscripted access to arrays or lists
             return self.visit_Subscript(node)
+        elif isinstance(node, ast.BinOp):
+            return self.visit_BinOp(node)
         else:
             raise NotImplementedError(f"Unsupported loop bound type: {type(node)}")
 

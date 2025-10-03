@@ -1,0 +1,8 @@
+,tmt_sym.mtx
+triton,1
+triton-sync-free,1
+triton-sync-free-csr,0
+cusparse,1
+numba-sptrsv,1
+numba-sync-free,0
+triton-spmv,0

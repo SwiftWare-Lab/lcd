@@ -36,8 +36,8 @@ mtx_list = [
     "/home/kazem/Downloads/gyro_k/gyro_k.mtx",
     "/home/kazem/Downloads/cant/cant.mtx"
             ]
-method_list = ["triton", "triton-sync-free", "cusparse",  "numba-sptrsv", "numba-sync-free", "triton-spmv"]
-mtx_list = get_matrix_list("/home/mehdi/projects/fused-gnn/fusion/data/spd_list.txt", "/home/mehdi/projects/fused-gnn/fusion/data/")
+method_list = ["triton", "triton-sync-free", "triton-sync-free-csr", "cusparse",  "numba-sptrsv", "numba-sync-free", "triton-spmv"]
+mtx_list = get_matrix_list("/home/salehm32/projects/fused-gnn/fusion/data/SPD/spd_list.txt", "/home/salehm32/projects/fused-gnn/fusion/data/SPD/")
 #mtx_list = mtx_list[60:]
 
 def correctness_test():
@@ -98,6 +98,15 @@ def correctness_test():
         else:
             BLOCKSIZE = 1024
         y_sync_free = sptrsv_sync_free_triton(val_f32, indices_i32, indptr_i32, b_f32, n, n, A.nnz, dep_count, BLOCKSIZE)
+
+        map_ptr, map_vals, outgoing_edges = incoming_edge_csr(A.tocsr())
+        y_sync_free_csr = sptrsv_sync_free_triton_csr(val_f32, indices_i32, indptr_i32, b_f32, n, n, A.nnz,
+                                                      torch.tensor(outgoing_edges, dtype=torch.int32, device=DEVICE),
+                                                       torch.tensor(map_ptr, dtype=torch.int32, device=DEVICE),
+                                                       torch.tensor(map_vals, dtype=torch.int32, device=DEVICE),
+                                                       BLOCKSIZE)
+
+
         print(" triton solvers are done!")
         ########### numba sptrsv
         # Transfer data to the GPU
@@ -136,6 +145,15 @@ def correctness_test():
             method_correctness[mat_name]['triton-sync-free'] = 1
         else:
             print("\nWarning: triton-sync-free Solutions do not match!")
+
+        if np.allclose(x_cpu, y_sync_free_csr.cpu().numpy(), atol=1e-5):
+            # print(x_cpu)
+            print("\ntriton-sync-free-csr Solutions match within tolerance!")
+            method_correctness[mat_name]['triton-sync-free_csr'] = 1
+        else:
+            print(y_sync_free_csr.cpu().numpy())
+            print(x_cpu)
+            print("\nWarning: triton-sync-free-csr Solutions do not match!")
 
         if np.allclose(x_cpu, y_numba_cpu, atol=1e-5):
             print("\nnumba-sptrsv Solutions match within tolerance!")
@@ -266,5 +284,5 @@ def benchmark(matrices, provider):
     return perf(ms), perf(min_ms), perf(max_ms)
 
 # Call the benchmark function
-benchmark.run(print_data=True, save_path=".", show_plots=True)
+# benchmark.run(print_data=True, save_path=".", show_plots=True)
 

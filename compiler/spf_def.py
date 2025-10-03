@@ -77,6 +77,8 @@ class LoopBound:
         consts = []
         if isinstance(self.start, Access):
             f1, start = self.start.get_sympy_expr()
+        elif isinstance(self.start, Expression):
+            start = self.start.get_sympy_expr()
         elif self.start.isnumeric():
             start = int(self.start)
         else:
@@ -84,6 +86,8 @@ class LoopBound:
             consts.append(start)
         if isinstance(self.end, Access):
             f2, end = self.end.get_sympy_expr()
+        elif isinstance(self.end, Expression):
+            end = self.end.get_sympy_expr()
         elif self.end.isnumeric():
             end = int(self.end)
         else:

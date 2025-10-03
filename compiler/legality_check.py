@@ -130,13 +130,13 @@ def check_legality_of_fusion(mapping: tuple[str, str],
 def extract_latest_write_access_in_loop(loop_node):
     last_write_access = {}
     # BFS
-    queue = [loop_node]
-    while len(queue) > 0:
-        cur_node = queue.pop(0)
+    stack = [loop_node]
+    while len(stack) > 0:
+        cur_node = stack.pop()
         if isinstance(cur_node, AssignNode):
             last_write_access[cur_node.write_access] = cur_node
-        for c in cur_node.children:
-            queue.append(c)
+        for c in reversed(cur_node.children):
+            stack.append(c)
     return last_write_access
 
 
@@ -159,10 +159,10 @@ def extract_raw_data_dependencies(node_data, last_write_accesses):
                 r_index = r_access.get_index()
                 w_index = w_access.get_index()
                 if r_arr == w_arr:
-                    premises = [Equality(w_index[i], r_index[i]) for i in range(len(r_index))]
-                    # if wi != ri:
-                    raw_dependence = DataDependence(wi, ri, r_arr, premises, 'RAW')
-                    dependences.append(raw_dependence)
+                    if wi != ri or r_index != w_index or isinstance(r_index, Access):
+                        premises = [Equality(w_index[i], r_index[i]) for i in range(len(r_index))]
+                        raw_dependence = DataDependence(wi, ri, r_arr, premises, 'RAW')
+                        dependences.append(raw_dependence)
     return dependences
 
 

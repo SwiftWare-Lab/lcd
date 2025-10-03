@@ -1,6 +1,6 @@
 import numpy as np
 import numba
-from numba import njit, frange
+from numba import njit
 from compiler.loop_carried_compiler import MyCompiler
 
 import numpy as np
@@ -49,31 +49,43 @@ def sptrsv_csr_numba(A, IA, JA, b):
 
 
 @triton.jit
-def sptrsv_sync_free(
-    data_ptr, indices_ptr, indptr_ptr, rhs_vec, y_ptr,
+def sptrsv_sync_free_csr(
+    data_ptr, indices_ptr, indptr_ptr, map_ptr, map_vals, rhs_vec, y_ptr,
     M, N, nnz, BLOCK_SIZE: tl.constexpr, count_dep
 ):
     row = tl.program_id(axis=0)  # Get the row id based on the program grid
     is_valid_row = row < M
-    while tl.load(count_dep + row, mask=is_valid_row) > 1:
+    while tl.atomic_add(count_dep + row, 0) != 1:
         pass  # Busy-wait: Do nothing, just keep looping
     # Load start and end pointers safely (use `mask` for invalid threads)
     start = tl.load(indptr_ptr + row, mask=is_valid_row, other=0)
-    print("row: ", row)
+    # print("row: ", row)
     end = tl.load(indptr_ptr + row + 1, mask=is_valid_row, other=0)
     # define an array of float64 with size 2
-    y_val_row = tl.load(rhs_vec + row)  / tl.load(data_ptr + end-1) # b[i] / A[i, i]
+    y_val_row = tl.load(rhs_vec + row) / tl.load(data_ptr + end-1) # b[i] / A[i, i]
     y_val =  tl.cast(0.0, REAL_TYPE_TL)
-    for i in range(start, end-1):
-        col = tl.load(indices_ptr + i)
-        val = tl.load(data_ptr + i) # A[j, i]
-        x_val = tl.load(y_ptr + col)
-        y_val += val * x_val
+    for i in range(start, end-1, 32):
+        nnz_indx = i + tl.arange(0, 32)
+        mask = nnz_indx < end - 1
+        indices_vec = tl.load(indices_ptr + nnz_indx, mask=mask, other=0)
+        y_vec = tl.load(y_ptr + indices_vec, mask=is_valid_row, other=0)
+        val_vec = tl.load(data_ptr + nnz_indx, mask=mask, other=0)
+        product = y_vec * val_vec
+        y_val += tl.sum(product, axis=0)
         # atomid update dount_dep[col]
-        tl.atomic_add(count_dep + col, -1)
     y_val = (y_val_row - y_val) / tl.load(data_ptr + end-1)
-    print("val: ", y_val)
     tl.store(y_ptr + row, y_val)
+    # print("val: ", y_val)
+    start_col = tl.load(map_ptr + row, mask=is_valid_row, other=0)
+    end_col = tl.load(map_ptr + row + 1, mask=is_valid_row, other=0)
+
+    #TODO: Fix this part, need to decrement count_dep of all dependent rows
+    for i in range(start_col, end_col, 32):
+        nnz_indx = i + tl.arange(0, 32)
+        values = tl.load(map_vals + nnz_indx, mask=nnz_indx < end_col, other=0)
+        count_dep_vec = tl.load(count_dep + values, mask=values < M, other=M+1)
+        count_dep_vec -= 1
+        tl.store(count_dep + values, count_dep_vec, mask=values < M)
 
 
 @triton.jit
@@ -184,6 +196,28 @@ def sptrsv_sync_free_triton(data, indices, indptr, x, M, N, nnz, dep_counts, max
     return y
 
 
+def sptrsv_sync_free_triton_csr(data, indices, indptr, x, M, N, nnz, dep_counts, map_ptr, map_vals, max_col_length):
+    # Allocate result vector on GPU
+    # print(dep_counts)
+    # print(map_ptr)
+    # print(map_vals)
+    y = torch.zeros(M, dtype=REAL_TYPE, device=DEVICE)
+    d_dep_count = dep_counts.clone().detach()
+    grid = (M,)  # One thread per row
+    # copy wavefront to GPU
+    sptrsv_sync_free_csr[grid](
+        data,
+        indices,
+        indptr,
+        map_ptr, map_vals,
+        x,
+        y,
+        M,
+        N,
+        nnz,
+        BLOCK_SIZE= max_col_length,
+        count_dep=d_dep_count)
+    return y
 
 @triton.jit
 def sptrsv_kernel_csc(
@@ -348,6 +382,15 @@ def simple_sptrsv_csc(L, b):
             x[L.indices[j]] += L.data[j] * x[i]
     return x
 
+def simple_sptrsv_csr(L, b):
+    n = L.shape[0]
+    x = np.zeros(n)
+    for i in range(n):
+        x[i] = b[i]
+        for j in range(L.indptr[i], L.indptr[i + 1]):
+            x[i] -= L.data[j] * x[L.indices[j]]
+        x[i] /= L.data[L.indptr[i + 1] - 1]
+    return x
 
 def simple_sptrsv_csc_waves(L, b):
     n = L.shape[0]
@@ -357,17 +400,6 @@ def simple_sptrsv_csc_waves(L, b):
             x[i] = (b[i] - x[i]) / L.data[L.indptr[i]]
             for j in range(L.indptr[i]+1, L.indptr[i + 1]):
                 x[L.indices[j]] += L.data[j] * x[i]
-    return x
-
-
-def simple_sptrsv_csr(L, b):
-    n = L.shape[0]
-    x = np.zeros(n)
-    for i in range(n):
-        x[i] = b[i]
-        for j in range(L.indptr[i], L.indptr[i + 1]):
-            x[i] -= L.data[j] * x[L.indices[j]]
-        x[i] /= L.data[L.indptr[i + 1] - 1]
     return x
 
 
