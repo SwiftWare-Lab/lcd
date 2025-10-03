@@ -28,16 +28,148 @@ print(f"Compute Capability: {device.compute_capability}")
 
 
 mtx_list = [
-    # "/home/kazem/Downloads/LFAT5/LFAT5.mtx", "/home/kazem/Downloads/ex5/ex5.mtx", "/home/kazem/Downloads/mesh1e1/mesh1e1.mtx","/home/kazem/Downloads/nos4/nos4.mtx",
-    # "/home/kazem/Downloads/bcsstk03/bcsstk03.mtx",
-    "/home/kazem/UFDB/Trefethen_20000b/Trefethen_20000b.mtx",
-    "/home/kazem/Downloads/msc23052/msc23052.mtx",
-    "/home/kazem/Downloads/olafu/olafu.mtx",
-    "/home/kazem/Downloads/gyro_k/gyro_k.mtx",
-    "/home/kazem/Downloads/cant/cant.mtx"
-            ]
+    "/home/mad29/projects/testdata/matrices/1138_bus.mtx",
+# "/home/mad29/projects/testdata/matrices/2cubes_sphere.mtx",
+# "/home/mad29/projects/testdata/matrices/Chem97ZtZ.mtx",
+# "/home/mad29/projects/testdata/matrices/Dubcova1.mtx",
+# "/home/mad29/projects/testdata/matrices/Dubcova2.mtx",
+# "/home/mad29/projects/testdata/matrices/Dubcova3.mtx",
+# "/home/mad29/projects/testdata/matrices/Emilia_923.mtx",
+# "/home/mad29/projects/testdata/matrices/Fault_639.mtx",
+# "/home/mad29/projects/testdata/matrices/Flan_1565.mtx",
+# "/home/mad29/projects/testdata/matrices/G2_circuit.mtx",
+# "/home/mad29/projects/testdata/matrices/G3_circuit.mtx",
+# "/home/mad29/projects/testdata/matrices/Geo_1438.mtx",
+# "/home/mad29/projects/testdata/matrices/Hook_1498.mtx",
+# "/home/mad29/projects/testdata/matrices/Kuu.mtx",
+# "/home/mad29/projects/testdata/matrices/LF10000.mtx",
+# "/home/mad29/projects/testdata/matrices/Muu.mtx",
+# "/home/mad29/projects/testdata/matrices/PFlow_742.mtx",
+# "/home/mad29/projects/testdata/matrices/Pres_Poisson.mtx",
+# "/home/mad29/projects/testdata/matrices/Serena.mtx",
+# "/home/mad29/projects/testdata/matrices/StocF-1465.mtx",
+# "/home/mad29/projects/testdata/matrices/Trefethen_2000.mtx",
+# "/home/mad29/projects/testdata/matrices/Trefethen_20000.mtx",
+# "/home/mad29/projects/testdata/matrices/bcsstk08.mtx",
+# "/home/mad29/projects/testdata/matrices/bcsstk09.mtx",
+# "/home/mad29/projects/testdata/matrices/bcsstk10.mtx",
+# "/home/mad29/projects/testdata/matrices/bcsstk11.mtx",
+# "/home/mad29/projects/testdata/matrices/bcsstk12.mtx",
+# "/home/mad29/projects/testdata/matrices/bcsstk13.mtx",
+# "/home/mad29/projects/testdata/matrices/bcsstk14.mtx",
+# "/home/mad29/projects/testdata/matrices/bcsstk15.mtx",
+# "/home/mad29/projects/testdata/matrices/bcsstk16.mtx",
+# "/home/mad29/projects/testdata/matrices/bcsstk17.mtx",
+# "/home/mad29/projects/testdata/matrices/bcsstk18.mtx",
+# "/home/mad29/projects/testdata/matrices/bcsstk21.mtx",
+# "/home/mad29/projects/testdata/matrices/bcsstk23.mtx",
+# "/home/mad29/projects/testdata/matrices/bcsstk24.mtx",
+# "/home/mad29/projects/testdata/matrices/bcsstk25.mtx",
+# "/home/mad29/projects/testdata/matrices/bcsstk26.mtx",
+# "/home/mad29/projects/testdata/matrices/bcsstk27.mtx",
+# "/home/mad29/projects/testdata/matrices/bcsstk28.mtx",
+# "/home/mad29/projects/testdata/matrices/bcsstk36.mtx",
+# "/home/mad29/projects/testdata/matrices/bcsstk38.mtx",
+# "/home/mad29/projects/testdata/matrices/bcsstm08.mtx",
+# "/home/mad29/projects/testdata/matrices/bcsstm09.mtx",
+# "/home/mad29/projects/testdata/matrices/bcsstm11.mtx",
+# "/home/mad29/projects/testdata/matrices/bcsstm12.mtx",
+# "/home/mad29/projects/testdata/matrices/bcsstm21.mtx",
+# "/home/mad29/projects/testdata/matrices/bcsstm23.mtx",
+# "/home/mad29/projects/testdata/matrices/bcsstm24.mtx",
+# "/home/mad29/projects/testdata/matrices/bcsstm25.mtx",
+# "/home/mad29/projects/testdata/matrices/bcsstm26.mtx",
+# "/home/mad29/projects/testdata/matrices/bcsstm39.mtx",
+# "/home/mad29/projects/testdata/matrices/bibd_81_2.mtx",
+# "/home/mad29/projects/testdata/matrices/bmw7st_1.mtx",
+# "/home/mad29/projects/testdata/matrices/bmwcra_1.mtx",
+# "/home/mad29/projects/testdata/matrices/bodyy4.mtx",
+# "/home/mad29/projects/testdata/matrices/bodyy5.mtx",
+# "/home/mad29/projects/testdata/matrices/bodyy6.mtx",
+# "/home/mad29/projects/testdata/matrices/bone010.mtx",
+# "/home/mad29/projects/testdata/matrices/boneS01.mtx",
+# "/home/mad29/projects/testdata/matrices/cbuckle.mtx",
+# "/home/mad29/projects/testdata/matrices/cfd1.mtx",
+# "/home/mad29/projects/testdata/matrices/cfd2.mtx",
+# "/home/mad29/projects/testdata/matrices/crystm01.mtx",
+# "/home/mad29/projects/testdata/matrices/crystm02.mtx",
+# "/home/mad29/projects/testdata/matrices/crystm03.mtx",
+# "/home/mad29/projects/testdata/matrices/ct20stif.mtx",
+# "/home/mad29/projects/testdata/matrices/cvxbqp1.mtx",
+# "/home/mad29/projects/testdata/matrices/denormal.mtx",
+# "/home/mad29/projects/testdata/matrices/ecology2.mtx",
+# "/home/mad29/projects/testdata/matrices/ex10.mtx",
+# "/home/mad29/projects/testdata/matrices/ex10hs.mtx",
+# "/home/mad29/projects/testdata/matrices/ex13.mtx",
+# "/home/mad29/projects/testdata/matrices/ex15.mtx",
+# "/home/mad29/projects/testdata/matrices/ex3.mtx",
+# "/home/mad29/projects/testdata/matrices/ex33.mtx",
+# "/home/mad29/projects/testdata/matrices/ex9.mtx",
+# "/home/mad29/projects/testdata/matrices/finan512.mtx",
+# "/home/mad29/projects/testdata/matrices/fv1.mtx",
+# "/home/mad29/projects/testdata/matrices/fv2.mtx",
+# "/home/mad29/projects/testdata/matrices/fv3.mtx",
+# "/home/mad29/projects/testdata/matrices/gyro.mtx",
+# "/home/mad29/projects/testdata/matrices/inline_1.mtx",
+# "/home/mad29/projects/testdata/matrices/jnlbrng1.mtx",
+# "/home/mad29/projects/testdata/matrices/ldoor.mtx",
+# "/home/mad29/projects/testdata/matrices/msdoor.mtx",
+# "/home/mad29/projects/testdata/matrices/nasa1824.mtx",
+# "/home/mad29/projects/testdata/matrices/nasa2146.mtx",
+# "/home/mad29/projects/testdata/matrices/nasa2910.mtx",
+# "/home/mad29/projects/testdata/matrices/nasa4704.mtx",
+# "/home/mad29/projects/testdata/matrices/nasasrb.mtx",
+# "/home/mad29/projects/testdata/matrices/nd12k.mtx",
+# "/home/mad29/projects/testdata/matrices/nd24k.mtx",
+# "/home/mad29/projects/testdata/matrices/nd3k.mtx",
+# "/home/mad29/projects/testdata/matrices/nd6k.mtx",
+# "/home/mad29/projects/testdata/matrices/obstclae.mtx",
+# "/home/mad29/projects/testdata/matrices/offshore.mtx",
+# "/home/mad29/projects/testdata/matrices/oilpan.mtx",
+# "/home/mad29/projects/testdata/matrices/olafu.mtx",
+# "/home/mad29/projects/testdata/matrices/parabolic_fem.mtx",
+# "/home/mad29/projects/testdata/matrices/pdb1HYS.mtx",
+# "/home/mad29/projects/testdata/matrices/plat1919.mtx",
+# "/home/mad29/projects/testdata/matrices/plbuckle.mtx",
+# "/home/mad29/projects/testdata/matrices/pwtk.mtx",
+# "/home/mad29/projects/testdata/matrices/qa8fm.mtx",
+# "/home/mad29/projects/testdata/matrices/raefsky4.mtx",
+# "/home/mad29/projects/testdata/matrices/s1rmq4m1.mtx",
+# "/home/mad29/projects/testdata/matrices/s1rmt3m1.mtx",
+# "/home/mad29/projects/testdata/matrices/s2rmq4m1.mtx",
+# "/home/mad29/projects/testdata/matrices/s2rmt3m1.mtx",
+# "/home/mad29/projects/testdata/matrices/s3dkq4m2.mtx",
+# "/home/mad29/projects/testdata/matrices/s3dkt3m2.mtx",
+# "/home/mad29/projects/testdata/matrices/s3rmq4m1.mtx",
+# "/home/mad29/projects/testdata/matrices/s3rmt3m1.mtx",
+# "/home/mad29/projects/testdata/matrices/s3rmt3m3.mtx",
+# "/home/mad29/projects/testdata/matrices/shallow_water1.mtx",
+# "/home/mad29/projects/testdata/matrices/shallow_water2.mtx",
+# "/home/mad29/projects/testdata/matrices/ship_001.mtx",
+# "/home/mad29/projects/testdata/matrices/ship_003.mtx",
+# "/home/mad29/projects/testdata/matrices/shipsec1.mtx",
+# "/home/mad29/projects/testdata/matrices/shipsec5.mtx",
+# "/home/mad29/projects/testdata/matrices/shipsec8.mtx",
+# "/home/mad29/projects/testdata/matrices/smt.mtx",
+# "/home/mad29/projects/testdata/matrices/sts4098.mtx",
+# "/home/mad29/projects/testdata/matrices/t2dah_e.mtx",
+# "/home/mad29/projects/testdata/matrices/t2dal_e.mtx",
+# "/home/mad29/projects/testdata/matrices/t3dl_e.mtx",
+# "/home/mad29/projects/testdata/matrices/ted_B.mtx",
+# "/home/mad29/projects/testdata/matrices/thermal1.mtx",
+# "/home/mad29/projects/testdata/matrices/thermal2.mtx",
+# "/home/mad29/projects/testdata/matrices/thermomech_TC.mtx",
+# "/home/mad29/projects/testdata/matrices/thermomech_TK.mtx",
+# "/home/mad29/projects/testdata/matrices/thermomech_dM.mtx",
+# "/home/mad29/projects/testdata/matrices/tmt_sym.mtx",
+# "/home/mad29/projects/testdata/matrices/torsion1.mtx",
+# "/home/mad29/projects/testdata/matrices/vanbody.mtx",
+# "/home/mad29/projects/testdata/matrices/wathen100.mtx",
+# "/home/mad29/projects/testdata/matrices/wathen120.mtx",
+# "/home/mad29/projects/testdata/matrices/x104.mtx"
+]
 method_list = ["triton", "triton-sync-free", "cusparse",  "numba-sptrsv", "numba-sync-free", "triton-spmv"]
-mtx_list = get_matrix_list("/home/kazem/UFDB/spd_list.txt", "/home/kazem/UFDB/")
+# mtx_list = get_matrix_list("/home/mad29/projects/gpu-backend/testlist.txt", "")
 #mtx_list = mtx_list[60:]
 
 def correctness_test():
@@ -98,6 +230,26 @@ def correctness_test():
         else:
             BLOCKSIZE = 1024
         y_sync_free = sptrsv_sync_free_triton(val_f32, indices_i32, indptr_i32, b_f32, n, n, A.nnz, dep_count, BLOCKSIZE)
+
+        # map_ptr, map_vals, outgoing_edges = incoming_edge_csr(A.tocsr())
+        # y_sync_free_csr = sptrsv_sync_free_triton_csr(val_f32, indices_i32, indptr_i32, b_f32, n, n, A.nnz,
+        #                                               torch.tensor(outgoing_edges, dtype=torch.int32, device=DEVICE),
+        #                                                torch.tensor(map_ptr, dtype=torch.int32, device=DEVICE),
+        #                                                torch.tensor(map_vals, dtype=torch.int32, device=DEVICE))
+
+        A_csr = A.tocsr()
+        val_f32_csr     = torch.tensor(A_csr.data,    dtype=REAL_TYPE, device=DEVICE)
+        indices_i32_csr = torch.tensor(A_csr.indices, dtype=torch.int32, device=DEVICE)
+        indptr_i32_csr  = torch.tensor(A_csr.indptr,  dtype=torch.int32, device=DEVICE)
+
+        map_ptr, map_vals, outgoing_edges = incoming_edge_csr(A_csr)
+
+        y_sync_free_csr = sptrsv_sync_free_triton_csr(
+            val_f32_csr, indices_i32_csr, indptr_i32_csr, b_f32, n, n, A.nnz,
+            torch.tensor(outgoing_edges, dtype=torch.int32, device=DEVICE),
+            torch.tensor(map_ptr, dtype=torch.int32, device=DEVICE),
+            torch.tensor(map_vals, dtype=torch.int32, device=DEVICE))
+
         print(" triton solvers are done!")
         ########### numba sptrsv
         # Transfer data to the GPU
@@ -136,6 +288,15 @@ def correctness_test():
             method_correctness[mat_name]['triton-sync-free'] = 1
         else:
             print("\nWarning: triton-sync-free Solutions do not match!")
+
+        if np.allclose(x_cpu, y_sync_free_csr.cpu().numpy(), atol=1e-5):
+            # print(x_cpu)
+            print("\ntriton-sync-free-csr Solutions match within tolerance!")
+            method_correctness[mat_name]['triton-sync-free_csr'] = 1
+        else:
+            print(y_sync_free_csr.cpu().numpy())
+            print(x_cpu)
+            print("\nWarning: triton-sync-free-csr Solutions do not match!")
 
         if np.allclose(x_cpu, y_numba_cpu, atol=1e-5):
             print("\nnumba-sptrsv Solutions match within tolerance!")

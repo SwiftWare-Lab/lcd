@@ -1,6 +1,9 @@
 import numpy as np
 import numba
 from numba import njit
+import sys
+import os
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 from compiler.loop_carried_compiler import MyCompiler
 
 import numpy as np
@@ -47,33 +50,45 @@ def sptrsv_csr_numba(A, IA, JA, b):
     return x
 
 
-
 @triton.jit
-def sptrsv_sync_free(
-    data_ptr, indices_ptr, indptr_ptr, rhs_vec, y_ptr,
-    M, N, nnz, BLOCK_SIZE: tl.constexpr, count_dep
+def sptrsv_sync_free_csr(
+    data_ptr, indices_ptr, indptr_ptr, map_ptr, map_vals, rhs_vec, y_ptr,
+    M, N, nnz, count_dep
 ):
     row = tl.program_id(axis=0)  # Get the row id based on the program grid
     is_valid_row = row < M
-    while tl.load(count_dep + row, mask=is_valid_row) > 1:
+    while tl.atomic_add(count_dep + row, 0) != 1:
         pass  # Busy-wait: Do nothing, just keep looping
     # Load start and end pointers safely (use `mask` for invalid threads)
     start = tl.load(indptr_ptr + row, mask=is_valid_row, other=0)
-    print("row: ", row)
+    # print("row: ", row)
     end = tl.load(indptr_ptr + row + 1, mask=is_valid_row, other=0)
     # define an array of float64 with size 2
-    y_val_row = tl.load(rhs_vec + row)  / tl.load(data_ptr + end-1) # b[i] / A[i, i]
+    # y_val_row = tl.load(rhs_vec + row) / tl.load(data_ptr + end-1) # b[i] / A[i, i]
+    rhs_val = tl.load(rhs_vec + row)
+    diag = tl.load(data_ptr + end-1)
     y_val =  tl.cast(0.0, REAL_TYPE_TL)
-    for i in range(start, end-1):
-        col = tl.load(indices_ptr + i)
-        val = tl.load(data_ptr + i) # A[j, i]
-        x_val = tl.load(y_ptr + col)
-        y_val += val * x_val
+    for i in range(start, end-1, 32):
+        nnz_indx = i + tl.arange(0, 32)
+        mask = nnz_indx < end - 1
+        indices_vec = tl.load(indices_ptr + nnz_indx, mask=mask, other=0)
+        y_vec = tl.load(y_ptr + indices_vec, mask=is_valid_row, other=0)
+        val_vec = tl.load(data_ptr + nnz_indx, mask=mask, other=0)
+        product = y_vec * val_vec
+        y_val += tl.sum(product, axis=0)
         # atomid update dount_dep[col]
-        tl.atomic_add(count_dep + col, -1)
-    y_val = (y_val_row - y_val) / tl.load(data_ptr + end-1)
-    print("val: ", y_val)
+    # y_val = (y_val_row - y_val) / tl.load(data_ptr + end-1)
+    y_val = (rhs_val - y_val) / diag
     tl.store(y_ptr + row, y_val)
+    # print("val: ", y_val)
+    start_col = tl.load(map_ptr + row, mask=is_valid_row, other=0)
+    end_col = tl.load(map_ptr + row + 1, mask=is_valid_row, other=0)
+
+    #TODO: Fix this part, need to decrement count_dep of all dependent rows
+    for i in range(start_col, end_col, 32):
+        nnz_indx = i + tl.arange(0, 32)
+        values = tl.load(map_vals + nnz_indx, mask=nnz_indx < end_col, other=0)
+        tl.atomic_add(count_dep + values, -1, mask=values < M)
 
 
 @triton.jit
@@ -183,6 +198,28 @@ def sptrsv_sync_free_triton(data, indices, indptr, x, M, N, nnz, dep_counts, max
         count_dep=d_dep_count)
     return y
 
+
+def sptrsv_sync_free_triton_csr(data, indices, indptr, x, M, N, nnz, dep_counts, map_ptr, map_vals):
+    # Allocate result vector on GPU
+    # print(dep_counts)
+    # print(map_ptr)
+    # print(map_vals)
+    y = torch.zeros(M, dtype=REAL_TYPE, device=DEVICE)
+    d_dep_count = dep_counts.clone().detach()
+    grid = (M,)  # One thread per row
+    # copy wavefront to GPU
+    sptrsv_sync_free_csr[grid](
+        data,
+        indices,
+        indptr,
+        map_ptr, map_vals,
+        x,
+        y,
+        M,
+        N,
+        nnz,
+        count_dep=d_dep_count)
+    return y
 
 
 @triton.jit
