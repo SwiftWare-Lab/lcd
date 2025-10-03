@@ -51,7 +51,7 @@ def sptrsv_csr_numba(A, IA, JA, b):
 @triton.jit
 def sptrsv_sync_free_csr(
     data_ptr, indices_ptr, indptr_ptr, map_ptr, map_vals, rhs_vec, y_ptr,
-    M, N, nnz, BLOCK_SIZE: tl.constexpr, count_dep
+    M, N, nnz, count_dep
 ):
     row = tl.program_id(axis=0)  # Get the row id based on the program grid
     is_valid_row = row < M
@@ -196,7 +196,7 @@ def sptrsv_sync_free_triton(data, indices, indptr, x, M, N, nnz, dep_counts, max
     return y
 
 
-def sptrsv_sync_free_triton_csr(data, indices, indptr, x, M, N, nnz, dep_counts, map_ptr, map_vals, max_col_length):
+def sptrsv_sync_free_triton_csr(data, indices, indptr, x, M, N, nnz, dep_counts, map_ptr, map_vals):
     # Allocate result vector on GPU
     # print(dep_counts)
     # print(map_ptr)
@@ -215,7 +215,6 @@ def sptrsv_sync_free_triton_csr(data, indices, indptr, x, M, N, nnz, dep_counts,
         M,
         N,
         nnz,
-        BLOCK_SIZE= max_col_length,
         count_dep=d_dep_count)
     return y
 

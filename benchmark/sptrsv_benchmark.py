@@ -103,8 +103,7 @@ def correctness_test():
         y_sync_free_csr = sptrsv_sync_free_triton_csr(val_f32, indices_i32, indptr_i32, b_f32, n, n, A.nnz,
                                                       torch.tensor(outgoing_edges, dtype=torch.int32, device=DEVICE),
                                                        torch.tensor(map_ptr, dtype=torch.int32, device=DEVICE),
-                                                       torch.tensor(map_vals, dtype=torch.int32, device=DEVICE),
-                                                       BLOCKSIZE)
+                                                       torch.tensor(map_vals, dtype=torch.int32, device=DEVICE))
 
 
         print(" triton solvers are done!")
