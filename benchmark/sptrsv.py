@@ -1,6 +1,9 @@
 import numpy as np
 import numba
 from numba import njit
+import sys
+import os
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 from compiler.loop_carried_compiler import MyCompiler
 
 import numpy as np
@@ -47,7 +50,6 @@ def sptrsv_csr_numba(A, IA, JA, b):
     return x
 
 
-
 @triton.jit
 def sptrsv_sync_free_csr(
     data_ptr, indices_ptr, indptr_ptr, map_ptr, map_vals, rhs_vec, y_ptr,
@@ -62,7 +64,9 @@ def sptrsv_sync_free_csr(
     # print("row: ", row)
     end = tl.load(indptr_ptr + row + 1, mask=is_valid_row, other=0)
     # define an array of float64 with size 2
-    y_val_row = tl.load(rhs_vec + row) / tl.load(data_ptr + end-1) # b[i] / A[i, i]
+    # y_val_row = tl.load(rhs_vec + row) / tl.load(data_ptr + end-1) # b[i] / A[i, i]
+    rhs_val = tl.load(rhs_vec + row)
+    diag = tl.load(data_ptr + end-1)
     y_val =  tl.cast(0.0, REAL_TYPE_TL)
     for i in range(start, end-1, 32):
         nnz_indx = i + tl.arange(0, 32)
@@ -73,7 +77,8 @@ def sptrsv_sync_free_csr(
         product = y_vec * val_vec
         y_val += tl.sum(product, axis=0)
         # atomid update dount_dep[col]
-    y_val = (y_val_row - y_val) / tl.load(data_ptr + end-1)
+    # y_val = (y_val_row - y_val) / tl.load(data_ptr + end-1)
+    y_val = (rhs_val - y_val) / diag
     tl.store(y_ptr + row, y_val)
     # print("val: ", y_val)
     start_col = tl.load(map_ptr + row, mask=is_valid_row, other=0)
@@ -83,9 +88,7 @@ def sptrsv_sync_free_csr(
     for i in range(start_col, end_col, 32):
         nnz_indx = i + tl.arange(0, 32)
         values = tl.load(map_vals + nnz_indx, mask=nnz_indx < end_col, other=0)
-        count_dep_vec = tl.load(count_dep + values, mask=values < M, other=M+1)
-        count_dep_vec -= 1
-        tl.store(count_dep + values, count_dep_vec, mask=values < M)
+        tl.atomic_add(count_dep + values, -1, mask=values < M)
 
 
 @triton.jit
