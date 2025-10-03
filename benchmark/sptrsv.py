@@ -64,7 +64,6 @@ def sptrsv_sync_free_csr(
     # print("row: ", row)
     end = tl.load(indptr_ptr + row + 1, mask=is_valid_row, other=0)
     # define an array of float64 with size 2
-    # y_val_row = tl.load(rhs_vec + row) / tl.load(data_ptr + end-1) # b[i] / A[i, i]
     rhs_val = tl.load(rhs_vec + row)
     diag = tl.load(data_ptr + end-1)
     y_val =  tl.cast(0.0, REAL_TYPE_TL)
@@ -77,14 +76,12 @@ def sptrsv_sync_free_csr(
         product = y_vec * val_vec
         y_val += tl.sum(product, axis=0)
         # atomid update dount_dep[col]
-    # y_val = (y_val_row - y_val) / tl.load(data_ptr + end-1)
     y_val = (rhs_val - y_val) / diag
     tl.store(y_ptr + row, y_val)
     # print("val: ", y_val)
     start_col = tl.load(map_ptr + row, mask=is_valid_row, other=0)
     end_col = tl.load(map_ptr + row + 1, mask=is_valid_row, other=0)
 
-    #TODO: Fix this part, need to decrement count_dep of all dependent rows
     for i in range(start_col, end_col, 32):
         nnz_indx = i + tl.arange(0, 32)
         values = tl.load(map_vals + nnz_indx, mask=nnz_indx < end_col, other=0)
