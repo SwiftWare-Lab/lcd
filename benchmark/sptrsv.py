@@ -359,6 +359,17 @@ def simple_sptrsv_csc_waves(L, b):
     return x
 
 
+def simple_sptrsv_csr(L, b):
+    n = L.shape[0]
+    x = np.zeros(n)
+    for i in range(n):
+        x[i] = b[i]
+        for j in range(L.indptr[i], L.indptr[i + 1]):
+            x[i] -= L.data[j] * x[L.indices[j]]
+        x[i] /= L.data[L.indptr[i + 1] - 1]
+    return x
+
+
 def simple_sptrsv_csc_syncfree(L, b):
     n = L.shape[0]
     x = np.zeros(n)
