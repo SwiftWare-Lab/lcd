@@ -1,7 +1,6 @@
 import numpy as np
 import numba
 from numba import njit
-from compiler.loop_carried_compiler import MyCompiler
 
 import numpy as np
 from scipy.sparse.linalg import spsolve_triangular  # CPU sparse solver
@@ -35,7 +34,7 @@ DEVICE = torch.device("cuda:0")
 
 
 
-@njit(numba.float64[:](numba.float32[:], numba.int32[:], numba.int32[:], numba.float32[:]), pipeline_class=MyCompiler)
+@njit(numba.float64[:](numba.float32[:], numba.int32[:], numba.int32[:], numba.float32[:]))
 def sptrsv_csr_numba(A, IA, JA, b):
     n = len(IA) - 1
     x = np.zeros(n)
