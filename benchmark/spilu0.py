@@ -81,7 +81,7 @@ def ilu0_csr_numba(A_data, A_indices, A_indptr):
 #                                 break
 
 @cuda.jit
-def ilu0_csr_numba_wavefront_kernel(data, indices, indptr, M, wavefronts, wave_start, wave_end):
+def ilu0_csr_numba_wavefront_kernel(data, indices, indptr, M, wavefronts, wave_start, wave_end, diag_pos):
     gid = cuda.grid(1)
     span = wave_end - wave_start
     if gid >= span:
@@ -94,13 +94,10 @@ def ilu0_csr_numba_wavefront_kernel(data, indices, indptr, M, wavefronts, wave_s
     for ptr in range(row_start, row_end):
         col = indices[ptr]
         if col < row:
-            diag_val = 0.0
+            diag_ptr = diag_pos[col]
+            diag_val = data[diag_ptr]
             col_start = indptr[col]
             col_end = indptr[col + 1]
-            for diag_ptr in range(col_start, col_end):
-                if indices[diag_ptr] == col:
-                    diag_val = data[diag_ptr]
-                    break
             if diag_val != 0.0:
                 l_val = data[ptr] / diag_val
                 data[ptr] = l_val
@@ -149,7 +146,7 @@ def ilu0_csr_numba_wavefront_kernel(data, indices, indptr, M, wavefronts, wave_s
 #                             break
 
 @cuda.jit
-def ilu0_csr_numba_sync_free_kernel(data, indices, indptr, M, dep_counts, succ_offsets, succ_indices):
+def ilu0_csr_numba_sync_free_kernel(data, indices, indptr, M, dep_counts, succ_offsets, succ_indices, diag_pos):
     row = cuda.grid(1)
     if row >= M:
         return
@@ -160,13 +157,10 @@ def ilu0_csr_numba_sync_free_kernel(data, indices, indptr, M, dep_counts, succ_o
     for ptr in range(row_start, row_end):
         col = indices[ptr]
         if col < row:
-            diag_val = 0.0
+            diag_ptr = diag_pos[col]
+            diag_val = data[diag_ptr]
             col_start = indptr[col]
             col_end = indptr[col + 1]
-            for diag_ptr in range(col_start, col_end):
-                if indices[diag_ptr] == col:
-                    diag_val = data[diag_ptr]
-                    break
             if diag_val != 0.0:
                 l_val = data[ptr] / diag_val
                 data[ptr] = l_val
@@ -222,7 +216,7 @@ def ilu0_csr_numba_sync_free_kernel(data, indices, indptr, M, dep_counts, succ_o
 #         s = succ_indices[p]
 #         cuda.atomic.add(dep_counts, s, -1)
 
-def ilu0_csr_numba_wavefront(data, indices, indptr, M, wave_start, wavefronts, threads_per_block=1):
+def ilu0_csr_numba_wavefront(data, indices, indptr, M, wave_start, wavefronts, diag_pos, threads_per_block=1):
     num_waves = len(wave_start) - 1
     for i in range(num_waves):
         start = wave_start[i]
@@ -230,7 +224,7 @@ def ilu0_csr_numba_wavefront(data, indices, indptr, M, wave_start, wavefronts, t
         grid_len = end - start
         blocks_per_grid = (grid_len + threads_per_block - 1) // threads_per_block
         ilu0_csr_numba_wavefront_kernel[blocks_per_grid, threads_per_block](
-            data, indices, indptr, M, wavefronts, start, end
+            data, indices, indptr, M, wavefronts, start, end, diag_pos
         )
         cuda.synchronize()
 
@@ -246,10 +240,10 @@ def ilu0_csr_numba_wavefront(data, indices, indptr, M, wave_start, wavefronts, t
 #         )
 #         cuda.synchronize()
 
-def ilu0_csr_numba_sync_free(data, indices, indptr, M, dep_counts, succ_offsets, succ_indices, threads_per_block=1):
+def ilu0_csr_numba_sync_free(data, indices, indptr, M, dep_counts, succ_offsets, succ_indices, diag_pos, threads_per_block=1):
     blocks_per_grid = (M + threads_per_block - 1) // threads_per_block
     ilu0_csr_numba_sync_free_kernel[blocks_per_grid, threads_per_block](
-        data, indices, indptr, M, dep_counts, succ_offsets, succ_indices
+        data, indices, indptr, M, dep_counts, succ_offsets, succ_indices, diag_pos
     )
     cuda.synchronize()
 
@@ -434,6 +428,19 @@ def prepare_for_ilu0(A):
         eps = 0.0
         A = A + csr_matrix((np.full(len(missing), eps, dtype=A.dtype), (missing, missing)), shape=A.shape)
     return A
+
+def find_diagonal_positions(A):
+    """Pre-compute diagonal positions for each row to avoid linear search"""
+    n = A.shape[0]
+    diag_pos = np.zeros(n, dtype=np.int32)
+    for i in range(n):
+        row_start = A.indptr[i]
+        row_end = A.indptr[i + 1]
+        for ptr in range(row_start, row_end):
+            if A.indices[ptr] == i:
+                diag_pos[i] = ptr
+                break
+    return diag_pos
 
 def compute_ilu_dependency_graph(A):
     return compute_ilu_dependency_counts_csr(A)

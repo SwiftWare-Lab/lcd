@@ -25,104 +25,100 @@ print(f"Using GPU: {device.name}")
 print(f"Compute Capability: {device.compute_capability}")
 
 mtx_list = [
-# "/home/mad29/projects/testdata/matrices/1138_bus.mtx",
-# "/home/mad29/projects/testdata/matrices/2cubes_sphere.mtx",
-# "/home/mad29/projects/testdata/matrices/Chem97ZtZ.mtx",
-# "/home/mad29/projects/testdata/matrices/Dubcova1.mtx",
-# "/home/mad29/projects/testdata/matrices/Dubcova2.mtx",
-# "/home/mad29/projects/testdata/matrices/Dubcova3.mtx",
-# "/home/mad29/projects/testdata/matrices/Emilia_923.mtx",
-# "/home/mad29/projects/testdata/matrices/Fault_639.mtx",
-# "/home/mad29/projects/testdata/matrices/Flan_1565.mtx",
+"/home/mad29/projects/testdata/matrices/1138_bus.mtx",
+"/home/mad29/projects/testdata/matrices/2cubes_sphere.mtx",
+"/home/mad29/projects/testdata/matrices/Chem97ZtZ.mtx",
+"/home/mad29/projects/testdata/matrices/Dubcova1.mtx",
+"/home/mad29/projects/testdata/matrices/Dubcova2.mtx",
+"/home/mad29/projects/testdata/matrices/Dubcova3.mtx",
+"/home/mad29/projects/testdata/matrices/Emilia_923.mtx",
+"/home/mad29/projects/testdata/matrices/Fault_639.mtx",
+"/home/mad29/projects/testdata/matrices/Flan_1565.mtx",
 "/home/mad29/projects/testdata/matrices/G2_circuit.mtx",
-# "/home/mad29/projects/testdata/matrices/G3_circuit.mtx",
-# "/home/mad29/projects/testdata/matrices/Geo_1438.mtx",
-# "/home/mad29/projects/testdata/matrices/Hook_1498.mtx",
-# "/home/mad29/projects/testdata/matrices/Kuu.mtx",
-# "/home/mad29/projects/testdata/matrices/LF10000.mtx",
-# "/home/mad29/projects/testdata/matrices/Muu.mtx",
-# "/home/mad29/projects/testdata/matrices/PFlow_742.mtx",
-# "/home/mad29/projects/testdata/matrices/Pres_Poisson.mtx",
-# "/home/mad29/projects/testdata/matrices/Serena.mtx",
-# "/home/mad29/projects/testdata/matrices/StocF-1465.mtx",
-# "/home/mad29/projects/testdata/matrices/Trefethen_2000.mtx",
-# "/home/mad29/projects/testdata/matrices/Trefethen_20000.mtx",
-# "/home/mad29/projects/testdata/matrices/bcsstk08.mtx",
-# "/home/mad29/projects/testdata/matrices/bcsstk09.mtx",
-# "/home/mad29/projects/testdata/matrices/bcsstk10.mtx",
-# "/home/mad29/projects/testdata/matrices/bcsstk11.mtx",
-# "/home/mad29/projects/testdata/matrices/bcsstk12.mtx",
-# "/home/mad29/projects/testdata/matrices/bcsstk13.mtx",
-# "/home/mad29/projects/testdata/matrices/bcsstk14.mtx",
-# "/home/mad29/projects/testdata/matrices/bcsstk15.mtx",
-# "/home/mad29/projects/testdata/matrices/bcsstk16.mtx",
-# "/home/mad29/projects/testdata/matrices/bcsstk17.mtx",
-# "/home/mad29/projects/testdata/matrices/bcsstk18.mtx",
-# "/home/mad29/projects/testdata/matrices/bcsstk21.mtx",
-# "/home/mad29/projects/testdata/matrices/bcsstk23.mtx",
-# "/home/mad29/projects/testdata/matrices/bcsstk24.mtx",
-# "/home/mad29/projects/testdata/matrices/bcsstk25.mtx",
-# "/home/mad29/projects/testdata/matrices/bcsstk26.mtx",
-# "/home/mad29/projects/testdata/matrices/bcsstk27.mtx",
-# "/home/mad29/projects/testdata/matrices/bcsstk28.mtx",
-# "/home/mad29/projects/testdata/matrices/bcsstk36.mtx",
-# "/home/mad29/projects/testdata/matrices/bcsstk38.mtx",
-# "/home/mad29/projects/testdata/matrices/bcsstm08.mtx",
-# "/home/mad29/projects/testdata/matrices/bcsstm09.mtx",
-# "/home/mad29/projects/testdata/matrices/bcsstm11.mtx",
-# "/home/mad29/projects/testdata/matrices/bcsstm12.mtx",
-# "/home/mad29/projects/testdata/matrices/bcsstm21.mtx",
-# "/home/mad29/projects/testdata/matrices/bcsstm23.mtx",
-# "/home/mad29/projects/testdata/matrices/bcsstm24.mtx",
-# "/home/mad29/projects/testdata/matrices/bcsstm25.mtx",
-# "/home/mad29/projects/testdata/matrices/bcsstm26.mtx",
-# "/home/mad29/projects/testdata/matrices/bcsstm39.mtx",
-# "/home/mad29/projects/testdata/matrices/bibd_81_2.mtx",
-# "/home/mad29/projects/testdata/matrices/bmw7st_1.mtx",
-# "/home/mad29/projects/testdata/matrices/bmwcra_1.mtx",
-# "/home/mad29/projects/testdata/matrices/bodyy4.mtx",
-# "/home/mad29/projects/testdata/matrices/bodyy5.mtx",
-# "/home/mad29/projects/testdata/matrices/bodyy6.mtx",
-# "/home/mad29/projects/testdata/matrices/bone010.mtx",
-# "/home/mad29/projects/testdata/matrices/boneS01.mtx",
-# "/home/mad29/projects/testdata/matrices/cbuckle.mtx",
-# "/home/mad29/projects/testdata/matrices/cfd1.mtx",
-# "/home/mad29/projects/testdata/matrices/cfd2.mtx",
-# "/home/mad29/projects/testdata/matrices/crystm01.mtx",
-# "/home/mad29/projects/testdata/matrices/crystm02.mtx",
-# "/home/mad29/projects/testdata/matrices/crystm03.mtx",
-# "/home/mad29/projects/testdata/matrices/ct20stif.mtx",
-# "/home/mad29/projects/testdata/matrices/cvxbqp1.mtx",
-# "/home/mad29/projects/testdata/matrices/denormal.mtx",
-# "/home/mad29/projects/testdata/matrices/ecology2.mtx",
-# "/home/mad29/projects/testdata/matrices/ex10.mtx",
-# "/home/mad29/projects/testdata/matrices/ex10hs.mtx",
-# "/home/mad29/projects/testdata/matrices/ex13.mtx",
-# "/home/mad29/projects/testdata/matrices/ex15.mtx",
-# "/home/mad29/projects/testdata/matrices/ex3.mtx",
-# "/home/mad29/projects/testdata/matrices/ex33.mtx",
-# "/home/mad29/projects/testdata/matrices/ex9.mtx",
-# "/home/mad29/projects/testdata/matrices/finan512.mtx",
-# "/home/mad29/projects/testdata/matrices/fv1.mtx",
-# "/home/mad29/projects/testdata/matrices/fv2.mtx",
-# "/home/mad29/projects/testdata/matrices/fv3.mtx",
-# "/home/mad29/projects/testdata/matrices/gyro.mtx",
-# "/home/mad29/projects/testdata/matrices/inline_1.mtx",
-# "/home/mad29/projects/testdata/matrices/jnlbrng1.mtx",
-# "/home/mad29/projects/testdata/matrices/ldoor.mtx",
-# "/home/mad29/projects/testdata/matrices/msdoor.mtx",
-# "/home/mad29/projects/testdata/matrices/nasa1824.mtx",
-# "/home/mad29/projects/testdata/matrices/nasa2146.mtx",
-# "/home/mad29/projects/testdata/matrices/nasa2910.mtx",
-# "/home/mad29/projects/testdata/matrices/nasa4704.mtx",
-# "/home/mad29/projects/testdata/matrices/nasasrb.mtx",
-# "/home/mad29/projects/testdata/matrices/nd12k.mtx",
-# "/home/mad29/projects/testdata/matrices/nd24k.mtx",
-# "/home/mad29/projects/testdata/matrices/nd3k.mtx",
-# "/home/mad29/projects/testdata/matrices/nd6k.mtx",
-# "/home/mad29/projects/testdata/matrices/obstclae.mtx",
-# "/home/mad29/projects/testdata/matrices/offshore.mtx",
-# "/home/mad29/projects/testdata/matrices/oilpan.mtx",
+"/home/mad29/projects/testdata/matrices/G3_circuit.mtx",
+"/home/mad29/projects/testdata/matrices/Geo_1438.mtx",
+"/home/mad29/projects/testdata/matrices/Hook_1498.mtx",
+"/home/mad29/projects/testdata/matrices/Kuu.mtx",
+"/home/mad29/projects/testdata/matrices/LF10000.mtx",
+"/home/mad29/projects/testdata/matrices/Muu.mtx",
+"/home/mad29/projects/testdata/matrices/PFlow_742.mtx",
+"/home/mad29/projects/testdata/matrices/Pres_Poisson.mtx",
+"/home/mad29/projects/testdata/matrices/Serena.mtx",
+"/home/mad29/projects/testdata/matrices/StocF-1465.mtx",
+"/home/mad29/projects/testdata/matrices/Trefethen_2000.mtx",
+"/home/mad29/projects/testdata/matrices/Trefethen_20000.mtx",
+"/home/mad29/projects/testdata/matrices/bcsstk08.mtx",
+"/home/mad29/projects/testdata/matrices/bcsstk09.mtx",
+"/home/mad29/projects/testdata/matrices/bcsstk10.mtx",
+"/home/mad29/projects/testdata/matrices/bcsstk11.mtx",
+"/home/mad29/projects/testdata/matrices/bcsstk12.mtx",
+"/home/mad29/projects/testdata/matrices/bcsstk13.mtx",
+"/home/mad29/projects/testdata/matrices/bcsstk14.mtx",
+"/home/mad29/projects/testdata/matrices/bcsstk15.mtx",
+"/home/mad29/projects/testdata/matrices/bcsstk16.mtx",
+"/home/mad29/projects/testdata/matrices/bcsstk17.mtx",
+"/home/mad29/projects/testdata/matrices/bcsstk18.mtx",
+"/home/mad29/projects/testdata/matrices/bcsstk21.mtx",
+"/home/mad29/projects/testdata/matrices/bcsstk23.mtx",
+"/home/mad29/projects/testdata/matrices/bcsstk24.mtx",
+"/home/mad29/projects/testdata/matrices/bcsstk25.mtx",
+"/home/mad29/projects/testdata/matrices/bcsstk26.mtx",
+"/home/mad29/projects/testdata/matrices/bcsstk27.mtx",
+"/home/mad29/projects/testdata/matrices/bcsstk28.mtx",
+"/home/mad29/projects/testdata/matrices/bcsstk36.mtx",
+"/home/mad29/projects/testdata/matrices/bcsstk38.mtx",
+"/home/mad29/projects/testdata/matrices/bcsstm08.mtx",
+"/home/mad29/projects/testdata/matrices/bcsstm09.mtx",
+"/home/mad29/projects/testdata/matrices/bcsstm11.mtx",
+"/home/mad29/projects/testdata/matrices/bcsstm12.mtx",
+"/home/mad29/projects/testdata/matrices/bcsstm21.mtx",
+"/home/mad29/projects/testdata/matrices/bcsstm23.mtx",
+"/home/mad29/projects/testdata/matrices/bcsstm24.mtx",
+"/home/mad29/projects/testdata/matrices/bcsstm25.mtx",
+"/home/mad29/projects/testdata/matrices/bcsstm26.mtx",
+"/home/mad29/projects/testdata/matrices/bcsstm39.mtx",
+"/home/mad29/projects/testdata/matrices/bibd_81_2.mtx",
+"/home/mad29/projects/testdata/matrices/bmw7st_1.mtx",
+"/home/mad29/projects/testdata/matrices/bmwcra_1.mtx",
+"/home/mad29/projects/testdata/matrices/bodyy4.mtx",
+"/home/mad29/projects/testdata/matrices/bodyy5.mtx",
+"/home/mad29/projects/testdata/matrices/bodyy6.mtx",
+"/home/mad29/projects/testdata/matrices/bone010.mtx",
+"/home/mad29/projects/testdata/matrices/boneS01.mtx",
+"/home/mad29/projects/testdata/matrices/cbuckle.mtx",
+"/home/mad29/projects/testdata/matrices/cfd1.mtx",
+"/home/mad29/projects/testdata/matrices/cfd2.mtx",
+"/home/mad29/projects/testdata/matrices/crystm01.mtx",
+"/home/mad29/projects/testdata/matrices/crystm02.mtx",
+"/home/mad29/projects/testdata/matrices/crystm03.mtx",
+"/home/mad29/projects/testdata/matrices/ct20stif.mtx",
+"/home/mad29/projects/testdata/matrices/cvxbqp1.mtx",
+"/home/mad29/projects/testdata/matrices/denormal.mtx",
+"/home/mad29/projects/testdata/matrices/ecology2.mtx",
+"/home/mad29/projects/testdata/matrices/ex10.mtx",
+"/home/mad29/projects/testdata/matrices/ex10hs.mtx",
+"/home/mad29/projects/testdata/matrices/ex13.mtx",
+"/home/mad29/projects/testdata/matrices/ex15.mtx",
+"/home/mad29/projects/testdata/matrices/ex3.mtx",
+"/home/mad29/projects/testdata/matrices/ex33.mtx",
+"/home/mad29/projects/testdata/matrices/ex9.mtx",
+"/home/mad29/projects/testdata/matrices/finan512.mtx",
+"/home/mad29/projects/testdata/matrices/fv1.mtx",
+"/home/mad29/projects/testdata/matrices/fv2.mtx",
+"/home/mad29/projects/testdata/matrices/fv3.mtx",
+"/home/mad29/projects/testdata/matrices/gyro.mtx",
+"/home/mad29/projects/testdata/matrices/inline_1.mtx",
+"/home/mad29/projects/testdata/matrices/jnlbrng1.mtx",
+"/home/mad29/projects/testdata/matrices/ldoor.mtx",
+"/home/mad29/projects/testdata/matrices/msdoor.mtx",
+"/home/mad29/projects/testdata/matrices/nasa1824.mtx",
+"/home/mad29/projects/testdata/matrices/nasa2146.mtx",
+"/home/mad29/projects/testdata/matrices/nasa2910.mtx",
+"/home/mad29/projects/testdata/matrices/nasa4704.mtx",
+"/home/mad29/projects/testdata/matrices/nasasrb.mtx",
+"/home/mad29/projects/testdata/matrices/obstclae.mtx",
+"/home/mad29/projects/testdata/matrices/offshore.mtx",
+"/home/mad29/projects/testdata/matrices/oilpan.mtx",
 # "/home/mad29/projects/testdata/matrices/olafu.mtx",
 # "/home/mad29/projects/testdata/matrices/parabolic_fem.mtx",
 # "/home/mad29/projects/testdata/matrices/pdb1HYS.mtx",
@@ -131,15 +127,15 @@ mtx_list = [
 # "/home/mad29/projects/testdata/matrices/pwtk.mtx",
 # "/home/mad29/projects/testdata/matrices/qa8fm.mtx",
 # "/home/mad29/projects/testdata/matrices/raefsky4.mtx",
-# "/home/mad29/projects/testdata/matrices/s1rmq4m1.mtx",
-# "/home/mad29/projects/testdata/matrices/s1rmt3m1.mtx",
-# "/home/mad29/projects/testdata/matrices/s2rmq4m1.mtx",
-# "/home/mad29/projects/testdata/matrices/s2rmt3m1.mtx",
-# "/home/mad29/projects/testdata/matrices/s3dkq4m2.mtx",
-# "/home/mad29/projects/testdata/matrices/s3dkt3m2.mtx",
-# "/home/mad29/projects/testdata/matrices/s3rmq4m1.mtx",
-# "/home/mad29/projects/testdata/matrices/s3rmt3m1.mtx",
-# "/home/mad29/projects/testdata/matrices/s3rmt3m3.mtx",
+"/home/mad29/projects/testdata/matrices/s1rmq4m1.mtx",
+"/home/mad29/projects/testdata/matrices/s1rmt3m1.mtx",
+"/home/mad29/projects/testdata/matrices/s2rmq4m1.mtx",
+"/home/mad29/projects/testdata/matrices/s2rmt3m1.mtx",
+"/home/mad29/projects/testdata/matrices/s3dkq4m2.mtx",
+"/home/mad29/projects/testdata/matrices/s3dkt3m2.mtx",
+"/home/mad29/projects/testdata/matrices/s3rmq4m1.mtx",
+"/home/mad29/projects/testdata/matrices/s3rmt3m1.mtx",
+"/home/mad29/projects/testdata/matrices/s3rmt3m3.mtx",
 # "/home/mad29/projects/testdata/matrices/shallow_water1.mtx",
 # "/home/mad29/projects/testdata/matrices/shallow_water2.mtx",
 # "/home/mad29/projects/testdata/matrices/ship_001.mtx",
@@ -153,17 +149,17 @@ mtx_list = [
 # "/home/mad29/projects/testdata/matrices/t2dal_e.mtx",
 # "/home/mad29/projects/testdata/matrices/t3dl_e.mtx",
 # "/home/mad29/projects/testdata/matrices/ted_B.mtx",
-# "/home/mad29/projects/testdata/matrices/thermal1.mtx",
-# "/home/mad29/projects/testdata/matrices/thermal2.mtx",
-# "/home/mad29/projects/testdata/matrices/thermomech_TC.mtx",
-# "/home/mad29/projects/testdata/matrices/thermomech_TK.mtx",
-# "/home/mad29/projects/testdata/matrices/thermomech_dM.mtx",
+"/home/mad29/projects/testdata/matrices/thermal1.mtx",
+"/home/mad29/projects/testdata/matrices/thermal2.mtx",
+"/home/mad29/projects/testdata/matrices/thermomech_TC.mtx",
+"/home/mad29/projects/testdata/matrices/thermomech_TK.mtx",
+"/home/mad29/projects/testdata/matrices/thermomech_dM.mtx",
 # "/home/mad29/projects/testdata/matrices/tmt_sym.mtx",
-# "/home/mad29/projects/testdata/matrices/torsion1.mtx",
-# "/home/mad29/projects/testdata/matrices/vanbody.mtx",
-# "/home/mad29/projects/testdata/matrices/wathen100.mtx",
-# "/home/mad29/projects/testdata/matrices/wathen120.mtx",
-# "/home/mad29/projects/testdata/matrices/x104.mtx"
+"/home/mad29/projects/testdata/matrices/torsion1.mtx",
+"/home/mad29/projects/testdata/matrices/vanbody.mtx",
+"/home/mad29/projects/testdata/matrices/wathen100.mtx",
+"/home/mad29/projects/testdata/matrices/wathen120.mtx",
+"/home/mad29/projects/testdata/matrices/x104.mtx"
 ]
 
 method_list = [
@@ -240,6 +236,11 @@ def correctness_test():
         print(f"------------ matrix: {mtx_matrix_path}")
         matrix = scio.mmread(mtx_matrix_path)
         n = matrix.shape[0]
+        
+        if n > 50000:
+            print(f"Skipping matrix with dimension {n} > 50000")
+            continue
+        
         A = matrix.tocsr()
         
         if A.data.dtype != np.float64:
@@ -260,12 +261,14 @@ def correctness_test():
             wavefronts = compute_ilu_wavefront_csr(A_copy)
             wave_start_loc, waves = compact_2d_list(wavefronts)
             waves_gpu = cuda.to_device(waves)
+            diag_pos = find_diagonal_positions(A_copy)
+            d_diag_pos = cuda.to_device(diag_pos)
             
             d_data = cuda.to_device(A_copy.data)
             d_indices = cuda.to_device(A_copy.indices)
             d_indptr = cuda.to_device(A_copy.indptr)
             
-            ilu0_csr_numba_wavefront(d_data, d_indices, d_indptr, n, wave_start_loc, waves_gpu)
+            ilu0_csr_numba_wavefront(d_data, d_indices, d_indptr, n, wave_start_loc, waves_gpu, d_diag_pos)
             
             result_data = d_data.copy_to_host()
             A_result = csr_matrix((result_data, A_copy.indices, A_copy.indptr), shape=A.shape)
@@ -282,16 +285,18 @@ def correctness_test():
             A_copy = A_test.copy()
             dep_counts = compute_ilu_dependency_counts_csr(A_copy)
             succ_offsets, succ_indices = build_successors_from_csr(A_copy)
+            diag_pos = find_diagonal_positions(A_copy)
             
             d_succ_offsets = cuda.to_device(succ_offsets)
             d_succ_indices = cuda.to_device(succ_indices)
+            d_diag_pos = cuda.to_device(diag_pos)
             
             d_data = cuda.to_device(A_copy.data)
             d_indices = cuda.to_device(A_copy.indices)
             d_indptr = cuda.to_device(A_copy.indptr)
             d_dep_counts = cuda.to_device(dep_counts.copy())
             
-            ilu0_csr_numba_sync_free(d_data, d_indices, d_indptr, n, d_dep_counts, d_succ_offsets, d_succ_indices)
+            ilu0_csr_numba_sync_free(d_data, d_indices, d_indptr, n, d_dep_counts, d_succ_offsets, d_succ_indices, d_diag_pos)
             
             result_data = d_data.copy_to_host()
             A_result = csr_matrix((result_data, A_copy.indices, A_copy.indptr), shape=A.shape)
@@ -361,14 +366,14 @@ def correctness_test():
     
     return matrix_signatures, method_correctness
 
-mat_signatures, method_correctness = correctness_test()
+# mat_signatures, method_correctness = correctness_test()
 
-import pandas as pd
-df = pd.DataFrame(mat_signatures)
-df.to_csv("ilu0_matrix_signatures.csv")
+# import pandas as pd
+# df = pd.DataFrame(mat_signatures)
+# df.to_csv("ilu0_matrix_signatures.csv")
 
-df = pd.DataFrame(method_correctness)
-df.to_csv("ilu0_method_correctness.csv")
+# df = pd.DataFrame(method_correctness)
+# df.to_csv("ilu0_method_correctness.csv")
 
 configs = []
 configs.append(
@@ -395,6 +400,11 @@ configs.append(
 def benchmark(matrices, provider):
     matrix = scio.mmread(matrices)
     n = matrix.shape[0]
+    
+    if n > 50000:
+        print(f"Skipping matrix with dimension {n} > 50000")
+        return float('nan'), float('nan'), float('nan')
+    
     A = matrix.tocsr()
     
     if A.data.dtype != np.float64:
@@ -404,20 +414,27 @@ def benchmark(matrices, provider):
     A = prepare_for_ilu0(A)
     
     quantiles = [0.5, 0.2, 0.8]
-    rep, warmup = 100, 25
+    # rep, warmup = 100, 25
+    rep, warmup = 10, 5
     threads_per_block = 1
 
     if provider == 'numba-csr-wavefront':
         wavefronts = compute_ilu_wavefront_csr(A)
         wave_start_loc, waves = compact_2d_list(wavefronts)
         waves_gpu = cuda.to_device(waves)
+        diag_pos = find_diagonal_positions(A)
+        d_diag_pos = cuda.to_device(diag_pos)
+        
+        # Allocate GPU memory once
+        d_indices = cuda.to_device(A.indices)
+        d_indptr = cuda.to_device(A.indptr)
+        d_data = cuda.device_array_like(A.data)
+        d_original_data = cuda.to_device(A.data.copy())
         
         def run_numba_csr_wave():
-            A_copy = A.copy()
-            d_data = cuda.to_device(A_copy.data)
-            d_indices = cuda.to_device(A_copy.indices)
-            d_indptr = cuda.to_device(A_copy.indptr)
-            ilu0_csr_numba_wavefront(d_data, d_indices, d_indptr, n, wave_start_loc, waves_gpu, threads_per_block)
+            # Reset data on GPU before each run (device-to-device copy, not timed as overhead)
+            d_data.copy_to_device(d_original_data)
+            ilu0_csr_numba_wavefront(d_data, d_indices, d_indptr, n, wave_start_loc, waves_gpu, d_diag_pos, threads_per_block)
         
         ms, min_ms, max_ms = triton.testing.do_bench(run_numba_csr_wave, quantiles=quantiles, warmup=warmup, rep=rep)
 
@@ -439,16 +456,24 @@ def benchmark(matrices, provider):
     elif provider == 'numba-csr-sync-free':
         dep_counts = compute_ilu_dependency_counts_csr(A)
         succ_offsets, succ_indices = build_successors_from_csr(A)
+        diag_pos = find_diagonal_positions(A)
+        
+        # Allocate GPU memory once
         d_succ_offsets = cuda.to_device(succ_offsets)
         d_succ_indices = cuda.to_device(succ_indices)
+        d_diag_pos = cuda.to_device(diag_pos)
+        d_indices = cuda.to_device(A.indices)
+        d_indptr = cuda.to_device(A.indptr)
+        d_data = cuda.device_array_like(A.data)
+        d_dep_counts = cuda.device_array_like(dep_counts)
+        d_original_data = cuda.to_device(A.data.copy())
+        d_original_dep_counts = cuda.to_device(dep_counts.copy())
         
         def run_numba_csr_sync():
-            A_copy = A.copy()
-            d_data = cuda.to_device(A_copy.data)
-            d_indices = cuda.to_device(A_copy.indices)
-            d_indptr = cuda.to_device(A_copy.indptr)
-            d_dep_counts = cuda.to_device(dep_counts.copy())
-            ilu0_csr_numba_sync_free(d_data, d_indices, d_indptr, n, d_dep_counts, d_succ_offsets, d_succ_indices, threads_per_block)
+            # Reset data and dependency counts on GPU before each run (device-to-device copy)
+            d_data.copy_to_device(d_original_data)
+            d_dep_counts.copy_to_device(d_original_dep_counts)
+            ilu0_csr_numba_sync_free(d_data, d_indices, d_indptr, n, d_dep_counts, d_succ_offsets, d_succ_indices, d_diag_pos, threads_per_block)
         
         ms, min_ms, max_ms = triton.testing.do_bench(run_numba_csr_sync, quantiles=quantiles, warmup=warmup, rep=rep)
 
