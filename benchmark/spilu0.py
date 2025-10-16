@@ -22,7 +22,7 @@ config.CUDA_ENABLE_PYNVJITLINK = 1
 REAL_TYPE = np.float64
 NUM_RUNS = 1
 
-@njit(numba.void(numba.float64[:], numba.int32[:], numba.int32[:]), pipeline_class=MyCompiler)
+@njit(numba.void(numba.float64[:], numba.int32[:], numba.int32[:]))
 def ilu0_csr_numba(A_data, A_indices, A_indptr):
     n = len(A_indptr) - 1
     for i in range(n):
@@ -48,7 +48,7 @@ def ilu0_csr_numba(A_data, A_indices, A_indptr):
                             A_data[j_ptr] = A_data[j_ptr] - l_ik * u_kj
                             break
 
-@njit(numba.void(numba.float64[:], numba.int32[:], numba.int32[:]), pipeline_class=MyCompiler)
+@njit(numba.void(numba.float64[:], numba.int32[:], numba.int32[:]))
 def ilu0_csc_numba(A_data, A_indices, A_indptr):
     n = len(A_indptr) - 1
     for k in range(n):
