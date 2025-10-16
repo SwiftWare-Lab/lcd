@@ -28,7 +28,7 @@ print(f"Compute Capability: {device.compute_capability}")
 
 
 mtx_list = [
-    "/home/mad29/projects/testdata/matrices/1138_bus.mtx",
+# "/home/mad29/projects/testdata/matrices/1138_bus.mtx",
 # "/home/mad29/projects/testdata/matrices/2cubes_sphere.mtx",
 # "/home/mad29/projects/testdata/matrices/Chem97ZtZ.mtx",
 # "/home/mad29/projects/testdata/matrices/Dubcova1.mtx",
@@ -37,7 +37,7 @@ mtx_list = [
 # "/home/mad29/projects/testdata/matrices/Emilia_923.mtx",
 # "/home/mad29/projects/testdata/matrices/Fault_639.mtx",
 # "/home/mad29/projects/testdata/matrices/Flan_1565.mtx",
-# "/home/mad29/projects/testdata/matrices/G2_circuit.mtx",
+"/home/mad29/projects/testdata/matrices/G2_circuit.mtx",
 # "/home/mad29/projects/testdata/matrices/G3_circuit.mtx",
 # "/home/mad29/projects/testdata/matrices/Geo_1438.mtx",
 # "/home/mad29/projects/testdata/matrices/Hook_1498.mtx",
@@ -265,6 +265,11 @@ def correctness_test():
 
         #d_in_edges = cuda.to_device(in_edge)
         y_numba_gpu_sync_free = sptrsc_numba_csc_sync_free(d_data, d_indices, d_indptr, d_b, A.shape[0], A.shape[1], A.nnz, in_edge)
+
+        # dep_count_csc1 = (A.indptr[1:] - A.indptr[:-1]).astype(np.int32)
+        # dep_count_csc1[dep_count_csc1 == 0] = 1
+        # y_numba_gpu_sync_free = sptrsc_numba_csc_sync_free(
+        #     d_data, d_indices, d_indptr, d_b, A.shape[0], A.shape[1], A.nnz, dep_count_csc1)
         y_numba_cpu_sync_free = y_numba_gpu_sync_free.copy_to_host()
 
         # Validate results
@@ -309,6 +314,11 @@ def correctness_test():
             method_correctness[mat_name]['numba-sync-free'] = 1
         else:
             print("\nWarning: numba-sptrsv-sync-free Solutions do not match!")
+
+            # abs_err = np.max(np.abs(x_cpu - y_numba_cpu_sync_free))
+            # rel_err = np.linalg.norm(x_cpu - y_numba_cpu_sync_free) / np.linalg.norm(x_cpu)
+            # print(f"  Max abs error: {abs_err:.3e}")
+            # print(f"  Relative L2 error: {rel_err:.3e}")
 
         # print (x_cpu[:5])
         # print (x_gpu[:5])
