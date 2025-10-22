@@ -14,8 +14,8 @@ from cupyx.scipy.sparse import csc_matrix as cp_csc_matrix
 import time
 from scipy.sparse import csr_matrix, csc_matrix
 
-from numba import cuda
 from numba import config
+from numba import int32, float64
 
 config.CUDA_ENABLE_PYNVJITLINK = 1
 
@@ -48,37 +48,6 @@ def ilu0_csr_numba(A_data, A_indices, A_indptr):
                             A_data[j_ptr] = A_data[j_ptr] - l_ik * u_kj
                             break
 
-# @njit(numba.void(numba.float64[:], numba.int32[:], numba.int32[:]), pipeline_class=MyCompiler)
-# def ilu0_csc_numba(A_data, A_indices, A_indptr):
-#     n = len(A_indptr) - 1
-#     for k in range(n):
-#         col_start = A_indptr[k]
-#         col_end = A_indptr[k + 1]
-#         diag_val = 0.0
-#         for dptr in range(col_start, col_end):
-#             if A_indices[dptr] == k:
-#                 diag_val = A_data[dptr]
-#                 break
-#         for i_ptr in range(col_start, col_end):
-#             i = A_indices[i_ptr]
-#             if i <= k:
-#                 continue
-#             if diag_val != 0.0:
-#                 A_data[i_ptr] = A_data[i_ptr] / diag_val
-#                 l_ik = A_data[i_ptr]
-#                 for j in range(k + 1, n):
-#                     j_start = A_indptr[j]
-#                     j_end = A_indptr[j + 1]
-#                     u_kj = 0.0
-#                     for kj_ptr in range(j_start, j_end):
-#                         if A_indices[kj_ptr] == k:
-#                             u_kj = A_data[kj_ptr]
-#                             break
-#                     if u_kj != 0.0:
-#                         for ij_ptr in range(j_start, j_end):
-#                             if A_indices[ij_ptr] == i:
-#                                 A_data[ij_ptr] = A_data[ij_ptr] - l_ik * u_kj
-#                                 break
 
 @cuda.jit
 def ilu0_csr_numba_wavefront_kernel(data, indices, indptr, M, wavefronts, wave_start, wave_end, diag_pos):
@@ -108,42 +77,6 @@ def ilu0_csr_numba_wavefront_kernel(data, indices, indptr, M, wavefronts, wave_s
                             data[j_ptr] = data[j_ptr] - l_val * data[cj_ptr]
                             break
 
-# @cuda.jit
-# def ilu0_csc_numba_wavefront_kernel(data, indices, indptr, N, wavefronts, wave_start, wave_end):
-#     gid = cuda.grid(1)
-#     span = wave_end - wave_start
-#     if gid >= span:
-#         return
-#     col = wavefronts[wave_start + gid]
-#     if col >= N:
-#         return
-#     col_start = indptr[col]
-#     col_end = indptr[col + 1]
-#     diag_val = 0.0
-#     for dptr in range(col_start, col_end):
-#         if indices[dptr] == col:
-#             diag_val = data[dptr]
-#             break
-#     for ptr in range(col_start, col_end):
-#         row = indices[ptr]
-#         if row <= col:
-#             continue
-#         if diag_val != 0.0:
-#             l_val = data[ptr] / diag_val
-#             data[ptr] = l_val
-#             for j in range(col + 1, N):
-#                 j_start = indptr[j]
-#                 j_end = indptr[j + 1]
-#                 u_val = 0.0
-#                 for kj_ptr in range(j_start, j_end):
-#                     if indices[kj_ptr] == col:
-#                         u_val = data[kj_ptr]
-#                         break
-#                 if u_val != 0.0:
-#                     for ij_ptr in range(j_start, j_end):
-#                         if indices[ij_ptr] == row:
-#                             data[ij_ptr] = data[ij_ptr] - l_val * u_val
-#                             break
 
 @cuda.jit
 def ilu0_csr_numba_sync_free_kernel(data, indices, indptr, M, dep_counts, succ_offsets, succ_indices, diag_pos):
@@ -176,45 +109,6 @@ def ilu0_csr_numba_sync_free_kernel(data, indices, indptr, M, dep_counts, succ_o
         s = succ_indices[p]
         cuda.atomic.add(dep_counts, s, -1)
 
-# @cuda.jit
-# def ilu0_csc_numba_sync_free_kernel(data, indices, indptr, N, dep_counts, succ_offsets, succ_indices):
-#     col = cuda.grid(1)
-#     if col >= N:
-#         return
-#     while cuda.atomic.add(dep_counts, col, 0) > 0:
-#         pass
-#     col_start = indptr[col]
-#     col_end = indptr[col + 1]
-#     diag_val = 0.0
-#     for dptr in range(col_start, col_end):
-#         if indices[dptr] == col:
-#             diag_val = data[dptr]
-#             break
-#     for ptr in range(col_start, col_end):
-#         row = indices[ptr]
-#         if row <= col:
-#             continue
-#         if diag_val != 0.0:
-#             l_val = data[ptr] / diag_val
-#             data[ptr] = l_val
-#             for j in range(col + 1, N):
-#                 j_start = indptr[j]
-#                 j_end = indptr[j + 1]
-#                 u_val = 0.0
-#                 for kj_ptr in range(j_start, j_end):
-#                     if indices[kj_ptr] == col:
-#                         u_val = data[kj_ptr]
-#                         break
-#                 if u_val != 0.0:
-#                     for ij_ptr in range(j_start, j_end):
-#                         if indices[ij_ptr] == row:
-#                             data[ij_ptr] = data[ij_ptr] - l_val * u_val
-#                             break
-#     s0 = succ_offsets[col]
-#     s1 = succ_offsets[col + 1]
-#     for p in range(s0, s1):
-#         s = succ_indices[p]
-#         cuda.atomic.add(dep_counts, s, -1)
 
 def ilu0_csr_numba_wavefront(data, indices, indptr, M, wave_start, wavefronts, diag_pos, threads_per_block=1):
     num_waves = len(wave_start) - 1
@@ -228,17 +122,6 @@ def ilu0_csr_numba_wavefront(data, indices, indptr, M, wave_start, wavefronts, d
         )
         cuda.synchronize()
 
-# def ilu0_csc_numba_wavefront(data, indices, indptr, N, wave_start, wavefronts, threads_per_block=1):
-#     num_waves = len(wave_start) - 1
-#     for i in range(num_waves):
-#         start = wave_start[i]
-#         end = wave_start[i + 1]
-#         grid_len = end - start
-#         blocks_per_grid = (grid_len + threads_per_block - 1) // threads_per_block
-#         ilu0_csc_numba_wavefront_kernel[blocks_per_grid, threads_per_block](
-#             data, indices, indptr, N, wavefronts, start, end
-#         )
-#         cuda.synchronize()
 
 def ilu0_csr_numba_sync_free(data, indices, indptr, M, dep_counts, succ_offsets, succ_indices, diag_pos, threads_per_block=1):
     blocks_per_grid = (M + threads_per_block - 1) // threads_per_block
@@ -247,12 +130,6 @@ def ilu0_csr_numba_sync_free(data, indices, indptr, M, dep_counts, succ_offsets,
     )
     cuda.synchronize()
 
-# def ilu0_csc_numba_sync_free(data, indices, indptr, N, dep_counts, succ_offsets, succ_indices, threads_per_block=1):
-#     blocks_per_grid = (N + threads_per_block - 1) // threads_per_block
-#     ilu0_csc_numba_sync_free_kernel[blocks_per_grid, threads_per_block](
-#         data, indices, indptr, N, dep_counts, succ_offsets, succ_indices
-#     )
-#     cuda.synchronize()
 
 def simple_ilu0_csr(A):
     A_copy = A.copy()
@@ -284,41 +161,6 @@ def simple_ilu0_csr(A):
                             break
     return A_copy
 
-# def simple_ilu0_csc(A):
-#     A_copy = A.copy()
-#     data = A_copy.data
-#     indices = A_copy.indices
-#     indptr = A_copy.indptr
-#     n = A.shape[0]
-#     for k in range(n):
-#         col_start = indptr[k]
-#         col_end = indptr[k + 1]
-#         diag_val = 0.0
-#         for dptr in range(col_start, col_end):
-#             if indices[dptr] == k:
-#                 diag_val = data[dptr]
-#                 break
-#         for i_ptr in range(col_start, col_end):
-#             i = indices[i_ptr]
-#             if i <= k:
-#                 continue
-#             if diag_val != 0.0:
-#                 data[i_ptr] = data[i_ptr] / diag_val
-#                 l_ik = data[i_ptr]
-#                 for j in range(k + 1, n):
-#                     j_start = indptr[j]
-#                     j_end = indptr[j + 1]
-#                     u_kj = 0.0
-#                     for kj_ptr in range(j_start, j_end):
-#                         if indices[kj_ptr] == k:
-#                             u_kj = data[kj_ptr]
-#                             break
-#                     if u_kj != 0.0:
-#                         for ij_ptr in range(j_start, j_end):
-#                             if indices[ij_ptr] == i:
-#                                 data[ij_ptr] = data[ij_ptr] - l_ik * u_kj
-#                                 break
-#     return A_copy
 
 def cpu_ilu0_solver(A):
     A = prepare_for_ilu0(A)
@@ -381,42 +223,6 @@ def build_successors_from_csr(A):
                 write[col] += 1
     return offsets, succ
 
-# def compute_ilu_dependency_counts_csc(A):
-#     n = A.shape[1]
-#     dep_counts = np.zeros(n, dtype=np.int32)
-#     indptr = A.indptr
-#     indices = A.indices
-#     for j in range(n):
-#         for p in range(indptr[j], indptr[j + 1]):
-#             k = indices[p]
-#             if k < j:
-#                 dep_counts[j] += 1
-#     return dep_counts
-
-# def build_successors_from_csc(A):
-#     Ar = A.tocsr()
-#     n = A.shape[1]
-#     counts = np.zeros(n, dtype=np.int32)
-#     for row in range(n):
-#         s = Ar.indptr[row]
-#         e = Ar.indptr[row + 1]
-#         for c in Ar.indices[s:e]:
-#             if c > row:
-#                 counts[row] += 1
-#     offsets = np.zeros(n + 1, dtype=np.int32)
-#     for i in range(n):
-#         offsets[i + 1] = offsets[i] + counts[i]
-#     succ = np.empty(offsets[-1], dtype=np.int32)
-#     write = offsets.copy()
-#     for row in range(n):
-#         s = Ar.indptr[row]
-#         e = Ar.indptr[row + 1]
-#         for c in Ar.indices[s:e]:
-#             if c > row:
-#                 pos = write[row]
-#                 succ[pos] = c
-#                 write[row] += 1
-#     return offsets, succ
 
 def prepare_for_ilu0(A):
     A = A.tocsr(copy=True)
@@ -474,37 +280,144 @@ def compute_ilu_wavefront_csr(A):
     
     return wavefront_list
 
-# def compute_ilu_wavefront_csc(A):
-#     """Compute wavefronts for ILU0 factorization in CSC format"""
-#     n = A.shape[1]
-#     dep_counts = compute_ilu_dependency_counts_csc(A)
-#     
-#     # Convert to CSR once for efficient row access
-#     A_csr = A.tocsr()
-#     
-#     wavefront_list = []
-#     remaining = set(range(n))
-#     
-#     while remaining:
-#         # Find all columns with no dependencies
-#         wavefront = [j for j in remaining if dep_counts[j] == 0]
-#         if not wavefront:
-#             break  # Circular dependency or error
-#         
-#         wavefront_list.append(np.array(wavefront, dtype=np.int32))
-#         
-#         # Remove processed columns
-#         for j in wavefront:
-#             remaining.remove(j)
-#         
-#         # Update dependencies: for each col in wavefront, decrement dep count of cols that depend on it
-#         for j in wavefront:
-#             # Find all cols k > j where A[j, k] != 0
-#             row_start = A_csr.indptr[j]
-#             row_end = A_csr.indptr[j + 1]
-#             for ptr in range(row_start, row_end):
-#                 k = A_csr.indices[ptr]
-#                 if k > j and k in remaining:
-#                     dep_counts[k] -= 1
-#     
-#     return wavefront_list
+########################################################
+########################################################
+
+
+# many alternatives to this, may choose for tradeoffs
+@cuda.jit(device=True, inline=True)
+def bin_search_col(colind, start, end, key):
+    lo = start
+    hi = end - 1
+    while lo <= hi:
+        mid = (lo + hi) >> 1
+        c = colind[mid]
+        if c < key:
+            lo = mid + 1
+        elif c > key:
+            hi = mid - 1
+        else:
+            return mid
+    return -1
+
+@cuda.jit
+def ilu0_csr_wavefront_block_kernel(data, indices, indptr,
+                                    rows,    # wavefront rows to process (int32*)
+                                    diag_pos # diag position per row (int32*)
+                                   ):
+    # One block per row
+    b = cuda.blockIdx.x
+    tid = cuda.threadIdx.x
+    if b >= rows.size:
+        return
+
+    row = rows[b]
+    row_start = indptr[row]
+    row_end   = indptr[row + 1]
+
+    # Shared l_ik
+    sh_l = cuda.shared.array(1, dtype=float64)
+
+    # lower
+    k_ptr = row_start
+    while k_ptr < row_end:
+        k = indices[k_ptr]
+        if k >= row:
+            break
+
+        diag_ptr = diag_pos[k]
+        u_kk = data[diag_ptr]
+
+        if u_kk != 0.0:
+            # only thread 0 does l_ik
+            if tid == 0:
+                l_ik = data[k_ptr] / u_kk
+                data[k_ptr] = l_ik
+                sh_l[0] = l_ik
+            cuda.syncthreads()
+            l_ik = sh_l[0]
+
+            k_row_start = indptr[k]
+            k_row_end   = indptr[k + 1]
+
+            # Each thread updates a strided subset
+            for j_ptr in range(k_ptr + 1 + tid, row_end, cuda.blockDim.x):
+                jcol = indices[j_ptr]
+                # find position of jcol in row k
+                pos = bin_search_col(indices, k_row_start, k_row_end, jcol)
+                if pos != -1:
+                    data[j_ptr] -= l_ik * data[pos]
+
+        cuda.syncthreads()
+        k_ptr += 1
+
+
+def ilu0_csr_numba_wavefront_block(data, indices, indptr, wave_rows, diag_pos, threads_per_block=128):
+    blocks = wave_rows.size
+    ilu0_csr_wavefront_block_kernel[blocks, threads_per_block](
+        data, indices, indptr, wave_rows, diag_pos
+    )
+    cuda.synchronize()
+
+
+@cuda.jit
+def ilu0_csr_sync_free_block_kernel(data, indices, indptr,
+                                    dep_counts, succ_offsets, succ_indices,
+                                    diag_pos):
+    i = cuda.blockIdx.x  # one row per block
+    tid = cuda.threadIdx.x
+    if i >= dep_counts.size:
+        return
+
+    while cuda.atomic.add(dep_counts, i, 0) > 0:
+        pass
+
+    # same body as wavefront one, but for a single row i
+    row_start = indptr[i]
+    row_end   = indptr[i + 1]
+    sh_l = cuda.shared.array(1, dtype=float64)
+
+    k_ptr = row_start
+    while k_ptr < row_end:
+        k = indices[k_ptr]
+        if k >= i:
+            break
+
+        diag_ptr = diag_pos[k]
+        u_kk = data[diag_ptr]
+
+        if u_kk != 0.0:
+            if tid == 0:
+                l_ik = data[k_ptr] / u_kk
+                data[k_ptr] = l_ik
+                sh_l[0] = l_ik
+            cuda.syncthreads()
+            l_ik = sh_l[0]
+
+            k_row_start = indptr[k]
+            k_row_end   = indptr[k + 1]
+            for j_ptr in range(k_ptr + 1 + tid, row_end, cuda.blockDim.x):
+                jcol = indices[j_ptr]
+                pos = bin_search_col(indices, k_row_start, k_row_end, jcol)
+                if pos != -1:
+                    data[j_ptr] -= l_ik * data[pos]
+        cuda.syncthreads()
+        k_ptr += 1
+
+    # release successor
+    s0 = succ_offsets[i]
+    s1 = succ_offsets[i + 1]
+    for p in range(s0 + tid, s1, cuda.blockDim.x):
+        s = succ_indices[p]
+        cuda.atomic.add(dep_counts, s, -1)
+
+
+def ilu0_csr_numba_sync_free_block(data, indices, indptr,
+                                   dep_counts, succ_offsets, succ_indices, diag_pos,
+                                   threads_per_block=128):
+    M = dep_counts.size
+    blocks = M
+    ilu0_csr_sync_free_block_kernel[blocks, threads_per_block](
+        data, indices, indptr, dep_counts, succ_offsets, succ_indices, diag_pos
+    )
+    cuda.synchronize()
