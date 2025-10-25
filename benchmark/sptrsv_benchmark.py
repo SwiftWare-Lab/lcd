@@ -37,7 +37,7 @@ mtx_list = [
     "/home/kazem/Downloads/cant/cant.mtx"
             ]
 method_list = ["triton", "triton-sync-free", "cusparse",  "numba-sptrsv", "numba-sync-free", "triton-spmv"]
-mtx_list = get_matrix_list("/home/kazem/UFDB/spd_list.txt", "/home/kazem/UFDB/")
+mtx_list = get_matrix_list("/home/mehdi/projects/fused-gnn/fusion/data/spd_list.txt", "/home/mehdi/projects/fused-gnn/fusion/data/")
 #mtx_list = mtx_list[60:]
 
 def correctness_test():
