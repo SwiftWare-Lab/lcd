@@ -11,7 +11,7 @@ from numba import cuda
 from scipy.sparse import csr_matrix, csc_matrix
 from scipy.sparse.linalg import spilu
 from numba.core.errors import NumbaPerformanceWarning
-
+import pandas as pd
 from bench_utils import *
 from spilu0 import *
 
@@ -119,14 +119,6 @@ mtx_list = [
 "/home/mad29/projects/testdata/matrices/obstclae.mtx",
 "/home/mad29/projects/testdata/matrices/offshore.mtx",
 "/home/mad29/projects/testdata/matrices/oilpan.mtx",
-# "/home/mad29/projects/testdata/matrices/olafu.mtx",
-# "/home/mad29/projects/testdata/matrices/parabolic_fem.mtx",
-# "/home/mad29/projects/testdata/matrices/pdb1HYS.mtx",
-# "/home/mad29/projects/testdata/matrices/plat1919.mtx",
-# "/home/mad29/projects/testdata/matrices/plbuckle.mtx",
-# "/home/mad29/projects/testdata/matrices/pwtk.mtx",
-# "/home/mad29/projects/testdata/matrices/qa8fm.mtx",
-# "/home/mad29/projects/testdata/matrices/raefsky4.mtx",
 "/home/mad29/projects/testdata/matrices/s1rmq4m1.mtx",
 "/home/mad29/projects/testdata/matrices/s1rmt3m1.mtx",
 "/home/mad29/projects/testdata/matrices/s2rmq4m1.mtx",
@@ -136,25 +128,11 @@ mtx_list = [
 "/home/mad29/projects/testdata/matrices/s3rmq4m1.mtx",
 "/home/mad29/projects/testdata/matrices/s3rmt3m1.mtx",
 "/home/mad29/projects/testdata/matrices/s3rmt3m3.mtx",
-# "/home/mad29/projects/testdata/matrices/shallow_water1.mtx",
-# "/home/mad29/projects/testdata/matrices/shallow_water2.mtx",
-# "/home/mad29/projects/testdata/matrices/ship_001.mtx",
-# "/home/mad29/projects/testdata/matrices/ship_003.mtx",
-# "/home/mad29/projects/testdata/matrices/shipsec1.mtx",
-# "/home/mad29/projects/testdata/matrices/shipsec5.mtx",
-# "/home/mad29/projects/testdata/matrices/shipsec8.mtx",
-# "/home/mad29/projects/testdata/matrices/smt.mtx",
-# "/home/mad29/projects/testdata/matrices/sts4098.mtx",
-# "/home/mad29/projects/testdata/matrices/t2dah_e.mtx",
-# "/home/mad29/projects/testdata/matrices/t2dal_e.mtx",
-# "/home/mad29/projects/testdata/matrices/t3dl_e.mtx",
-# "/home/mad29/projects/testdata/matrices/ted_B.mtx",
 "/home/mad29/projects/testdata/matrices/thermal1.mtx",
 "/home/mad29/projects/testdata/matrices/thermal2.mtx",
 "/home/mad29/projects/testdata/matrices/thermomech_TC.mtx",
 "/home/mad29/projects/testdata/matrices/thermomech_TK.mtx",
 "/home/mad29/projects/testdata/matrices/thermomech_dM.mtx",
-# "/home/mad29/projects/testdata/matrices/tmt_sym.mtx",
 "/home/mad29/projects/testdata/matrices/torsion1.mtx",
 "/home/mad29/projects/testdata/matrices/vanbody.mtx",
 "/home/mad29/projects/testdata/matrices/wathen100.mtx",
@@ -164,7 +142,10 @@ mtx_list = [
 
 method_list = [
     "numba-csr-wavefront", "numba-csr-sync-free",
-    # "numba-csc-wavefront", "numba-csc-sync-free",
+    "numba-csr-wavefront-block-32", "numba-csr-wavefront-block-64", 
+    "numba-csr-wavefront-block-128", "numba-csr-wavefront-block-256",
+    "numba-csr-sync-free-block-32", "numba-csr-sync-free-block-64",
+    "numba-csr-sync-free-block-128", "numba-csr-sync-free-block-256",
 ]
 
 def validate_ilu0_factorization(A_result, A_original, tol=1e-3):
@@ -308,72 +289,76 @@ def correctness_test():
                 print("Warning: numba-csr-sync-free incorrect")
         except Exception as e:
             print(f"numba-csr-sync-free failed: {e}")
-        
-        # # Test numba-csc-wavefront
-        # try:
-        #     A_csc = A_test.tocsc()
-        #     A_copy = A_csc.copy()
-        #     
-        #     wavefronts = compute_ilu_wavefront_csc(A_copy)
-        #     wave_start_loc, waves = compact_2d_list(wavefronts)
-        #     waves_gpu = cuda.to_device(waves)
-        #     
-        #     d_data = cuda.to_device(A_copy.data)
-        #     d_indices = cuda.to_device(A_copy.indices)
-        #     d_indptr = cuda.to_device(A_copy.indptr)
-        #     
-        #     ilu0_csc_numba_wavefront(d_data, d_indices, d_indptr, n, wave_start_loc, waves_gpu)
-        #     
-        #     result_data = d_data.copy_to_host()
-        #     A_result = csc_matrix((result_data, A_copy.indices, A_copy.indptr), shape=A.shape)
-        #     
-        #     if validate_ilu0_factorization(A_result, A_csc):
-        #         print("numba-csc-wavefront: correct")
-        #         method_correctness[mat_name]['numba-csc-wavefront'] = 1
-        #     else:
-        #         print("Warning: numba-csc-wavefront incorrect")
-        # except Exception as e:
-        #     print(f"numba-csc-wavefront failed: {e}")
-        
-        # # Test numba-csc-sync-free
-        # try:
-        #     A_csc = A_test.tocsc()
-        #     A_copy = A_csc.copy()
-        #     
-        #     dep_counts = compute_ilu_dependency_counts_csc(A_copy)
-        #     succ_offsets, succ_indices = build_successors_from_csc(A_copy)
-        #     
-        #     d_succ_offsets = cuda.to_device(succ_offsets)
-        #     d_succ_indices = cuda.to_device(succ_indices)
-        #     
-        #     d_data = cuda.to_device(A_copy.data)
-        #     d_indices = cuda.to_device(A_copy.indices)
-        #     d_indptr = cuda.to_device(A_copy.indptr)
-        #     d_dep_counts = cuda.to_device(dep_counts.copy())
-        #     
-        #     ilu0_csc_numba_sync_free(d_data, d_indices, d_indptr, n, d_dep_counts, d_succ_offsets, d_succ_indices)
-        #     
-        #     result_data = d_data.copy_to_host()
-        #     A_result = csc_matrix((result_data, A_copy.indices, A_copy.indptr), shape=A.shape)
-        #     
-        #     if validate_ilu0_factorization(A_result, A_csc):
-        #         print("numba-csc-sync-free: correct")
-        #         method_correctness[mat_name]['numba-csc-sync-free'] = 1
-        #     else:
-        #         print("Warning: numba-csc-sync-free incorrect")
-        # except Exception as e:
-        #     print(f"numba-csc-sync-free failed: {e}")
+
+        # Test wavefront-block variants with different block sizes
+        for block_size in [32, 64, 128, 256]:
+            method_name = f'numba-csr-wavefront-block-{block_size}'
+            try:
+                A_copy = A_test.copy()
+                wavefronts = compute_ilu_wavefront_csr(A_copy)
+                diag_pos = find_diagonal_positions(A_copy)
+                d_diag_pos = cuda.to_device(diag_pos)
+                
+                d_data = cuda.to_device(A_copy.data)
+                d_indices = cuda.to_device(A_copy.indices)
+                d_indptr = cuda.to_device(A_copy.indptr)
+                
+                # Process each wavefront
+                for wave_rows in wavefronts:
+                    d_wave_rows = cuda.to_device(wave_rows)
+                    ilu0_csr_numba_wavefront_block(d_data, d_indices, d_indptr, d_wave_rows, d_diag_pos, block_size)
+                
+                result_data = d_data.copy_to_host()
+                A_result = csr_matrix((result_data, A_copy.indices, A_copy.indptr), shape=A.shape)
+                
+                if validate_ilu0_factorization(A_result, A_test):
+                    print(f"{method_name}: correct")
+                    method_correctness[mat_name][method_name] = 1
+                else:
+                    print(f"Warning: {method_name} incorrect")
+            except Exception as e:
+                print(f"{method_name} failed: {e}")
+
+        # Test sync-free-block variants with different block sizes
+        for block_size in [32, 64, 128, 256]:
+            method_name = f'numba-csr-sync-free-block-{block_size}'
+            try:
+                A_copy = A_test.copy()
+                dep_counts = compute_ilu_dependency_counts_csr(A_copy)
+                succ_offsets, succ_indices = build_successors_from_csr(A_copy)
+                diag_pos = find_diagonal_positions(A_copy)
+                
+                d_succ_offsets = cuda.to_device(succ_offsets)
+                d_succ_indices = cuda.to_device(succ_indices)
+                d_diag_pos = cuda.to_device(diag_pos)
+                
+                d_data = cuda.to_device(A_copy.data)
+                d_indices = cuda.to_device(A_copy.indices)
+                d_indptr = cuda.to_device(A_copy.indptr)
+                d_dep_counts = cuda.to_device(dep_counts.copy())
+                
+                ilu0_csr_numba_sync_free_block(d_data, d_indices, d_indptr, d_dep_counts, d_succ_offsets, d_succ_indices, d_diag_pos, block_size)
+                
+                result_data = d_data.copy_to_host()
+                A_result = csr_matrix((result_data, A_copy.indices, A_copy.indptr), shape=A.shape)
+                
+                if validate_ilu0_factorization(A_result, A_test):
+                    print(f"{method_name}: correct")
+                    method_correctness[mat_name][method_name] = 1
+                else:
+                    print(f"Warning: {method_name} incorrect")
+            except Exception as e:
+                print(f"{method_name} failed: {e}")
     
     return matrix_signatures, method_correctness
 
-# mat_signatures, method_correctness = correctness_test()
+mat_signatures, method_correctness = correctness_test()
 
-# import pandas as pd
-# df = pd.DataFrame(mat_signatures)
-# df.to_csv("ilu0_matrix_signatures.csv")
+df = pd.DataFrame(mat_signatures)
+df.to_csv("ilu0_matrix_signatures.csv")
 
-# df = pd.DataFrame(method_correctness)
-# df.to_csv("ilu0_method_correctness.csv")
+df = pd.DataFrame(method_correctness)
+df.to_csv("ilu0_method_correctness.csv")
 
 configs = []
 configs.append(
@@ -384,11 +369,13 @@ configs.append(
         line_vals=method_list,
         line_names=[
             "Numba CSR Wavefront", "Numba CSR Sync-free",
-            # "Numba CSC Wavefront", "Numba CSC Sync-free"
+            "Wavefront Block 32", "Wavefront Block 64", "Wavefront Block 128", "Wavefront Block 256",
+            "Sync-free Block 32", "Sync-free Block 64", "Sync-free Block 128", "Sync-free Block 256",
         ],
         styles=[
             ("red", "-"), ("purple", "-"),
-            # ("red", "--"), ("purple", "--")
+            ("green", "-"), ("green", "--"), ("green", "-."), ("green", ":"),
+            ("blue", "-"), ("blue", "--"), ("blue", "-."), ("blue", ":"),
         ],
         ylabel="GFLOP/S",
         plot_name="ilu0-performance",
@@ -438,21 +425,6 @@ def benchmark(matrices, provider):
         
         ms, min_ms, max_ms = triton.testing.do_bench(run_numba_csr_wave, quantiles=quantiles, warmup=warmup, rep=rep)
 
-    # elif provider == 'numba-csc-wavefront':
-    #     A_csc = A.tocsc()
-    #     wavefronts = compute_ilu_wavefront_csc(A_csc)
-    #     wave_start_loc, waves = compact_2d_list(wavefronts)
-    #     waves_gpu = cuda.to_device(waves)
-    #     
-    #     def run_numba_csc_wave():
-    #         A_copy = A_csc.copy()
-    #         d_data = cuda.to_device(A_copy.data)
-    #         d_indices = cuda.to_device(A_copy.indices)
-    #         d_indptr = cuda.to_device(A_copy.indptr)
-    #         ilu0_csc_numba_wavefront(d_data, d_indices, d_indptr, n, wave_start_loc, waves_gpu, threads_per_block)
-    #     
-    #     ms, min_ms, max_ms = triton.testing.do_bench(run_numba_csc_wave, quantiles=quantiles, warmup=warmup, rep=rep)
-
     elif provider == 'numba-csr-sync-free':
         dep_counts = compute_ilu_dependency_counts_csr(A)
         succ_offsets, succ_indices = build_successors_from_csr(A)
@@ -477,22 +449,57 @@ def benchmark(matrices, provider):
         
         ms, min_ms, max_ms = triton.testing.do_bench(run_numba_csr_sync, quantiles=quantiles, warmup=warmup, rep=rep)
 
-    # elif provider == 'numba-csc-sync-free':
-    #     A_csc = A.tocsc()
-    #     dep_counts = compute_ilu_dependency_counts_csc(A_csc)
-    #     succ_offsets, succ_indices = build_successors_from_csc(A_csc)
-    #     d_succ_offsets = cuda.to_device(succ_offsets)
-    #     d_succ_indices = cuda.to_device(succ_indices)
-    #     
-    #     def run_numba_csc_sync():
-    #         A_copy = A_csc.copy()
-    #         d_data = cuda.to_device(A_copy.data)
-    #         d_indices = cuda.to_device(A_copy.indices)
-    #         d_indptr = cuda.to_device(A_copy.indptr)
-    #         d_dep_counts = cuda.to_device(dep_counts.copy())
-    #         ilu0_csc_numba_sync_free(d_data, d_indices, d_indptr, n, d_dep_counts, d_succ_offsets, d_succ_indices, threads_per_block)
-    #     
-    #     ms, min_ms, max_ms = triton.testing.do_bench(run_numba_csc_sync, quantiles=quantiles, warmup=warmup, rep=rep)
+    elif provider.startswith('numba-csr-wavefront-block-'):
+        # Extract block size from provider name
+        threads_per_block = int(provider.split('-')[-1])
+        
+        wavefronts = compute_ilu_wavefront_csr(A)
+        diag_pos = find_diagonal_positions(A)
+        d_diag_pos = cuda.to_device(diag_pos)
+        
+        # Allocate GPU memory once
+        d_indices = cuda.to_device(A.indices)
+        d_indptr = cuda.to_device(A.indptr)
+        d_data = cuda.device_array_like(A.data)
+        d_original_data = cuda.to_device(A.data.copy())
+        
+        # Pre-upload wavefront arrays
+        d_wavefronts = [cuda.to_device(wave_rows) for wave_rows in wavefronts]
+        
+        def run_numba_csr_wave_block():
+            # Reset data on GPU before each run (device-to-device copy)
+            d_data.copy_to_device(d_original_data)
+            for d_wave_rows in d_wavefronts:
+                ilu0_csr_numba_wavefront_block(d_data, d_indices, d_indptr, d_wave_rows, d_diag_pos, threads_per_block)
+        
+        ms, min_ms, max_ms = triton.testing.do_bench(run_numba_csr_wave_block, quantiles=quantiles, warmup=warmup, rep=rep)
+
+    elif provider.startswith('numba-csr-sync-free-block-'):
+        # Extract block size from provider name
+        threads_per_block = int(provider.split('-')[-1])
+        
+        dep_counts = compute_ilu_dependency_counts_csr(A)
+        succ_offsets, succ_indices = build_successors_from_csr(A)
+        diag_pos = find_diagonal_positions(A)
+        
+        # Allocate GPU memory once
+        d_succ_offsets = cuda.to_device(succ_offsets)
+        d_succ_indices = cuda.to_device(succ_indices)
+        d_diag_pos = cuda.to_device(diag_pos)
+        d_indices = cuda.to_device(A.indices)
+        d_indptr = cuda.to_device(A.indptr)
+        d_data = cuda.device_array_like(A.data)
+        d_dep_counts = cuda.device_array_like(dep_counts)
+        d_original_data = cuda.to_device(A.data.copy())
+        d_original_dep_counts = cuda.to_device(dep_counts.copy())
+        
+        def run_numba_csr_sync_block():
+            # Reset data and dependency counts on GPU before each run (device-to-device copy)
+            d_data.copy_to_device(d_original_data)
+            d_dep_counts.copy_to_device(d_original_dep_counts)
+            ilu0_csr_numba_sync_free_block(d_data, d_indices, d_indptr, d_dep_counts, d_succ_offsets, d_succ_indices, d_diag_pos, threads_per_block)
+        
+        ms, min_ms, max_ms = triton.testing.do_bench(run_numba_csr_sync_block, quantiles=quantiles, warmup=warmup, rep=rep)
 
     else:
         raise ValueError(f"Unknown provider: {provider}")

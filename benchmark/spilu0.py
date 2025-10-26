@@ -301,11 +301,7 @@ def bin_search_col(colind, start, end, key):
     return -1
 
 @cuda.jit
-def ilu0_csr_wavefront_block_kernel(data, indices, indptr,
-                                    rows,    # wavefront rows to process (int32*)
-                                    diag_pos # diag position per row (int32*)
-                                   ):
-    # One block per row
+def ilu0_csr_wavefront_block_kernel(data, indices, indptr, rows, diag_pos):
     b = cuda.blockIdx.x
     tid = cuda.threadIdx.x
     if b >= rows.size:
@@ -315,10 +311,8 @@ def ilu0_csr_wavefront_block_kernel(data, indices, indptr,
     row_start = indptr[row]
     row_end   = indptr[row + 1]
 
-    # Shared l_ik
     sh_l = cuda.shared.array(1, dtype=float64)
 
-    # lower
     k_ptr = row_start
     while k_ptr < row_end:
         k = indices[k_ptr]
@@ -343,7 +337,6 @@ def ilu0_csr_wavefront_block_kernel(data, indices, indptr,
             # Each thread updates a strided subset
             for j_ptr in range(k_ptr + 1 + tid, row_end, cuda.blockDim.x):
                 jcol = indices[j_ptr]
-                # find position of jcol in row k
                 pos = bin_search_col(indices, k_row_start, k_row_end, jcol)
                 if pos != -1:
                     data[j_ptr] -= l_ik * data[pos]
@@ -372,7 +365,6 @@ def ilu0_csr_sync_free_block_kernel(data, indices, indptr,
     while cuda.atomic.add(dep_counts, i, 0) > 0:
         pass
 
-    # same body as wavefront one, but for a single row i
     row_start = indptr[i]
     row_end   = indptr[i + 1]
     sh_l = cuda.shared.array(1, dtype=float64)
@@ -404,7 +396,6 @@ def ilu0_csr_sync_free_block_kernel(data, indices, indptr,
         cuda.syncthreads()
         k_ptr += 1
 
-    # release successor
     s0 = succ_offsets[i]
     s1 = succ_offsets[i + 1]
     for p in range(s0 + tid, s1, cuda.blockDim.x):
