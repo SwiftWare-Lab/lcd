@@ -28,145 +28,155 @@ print(f"Compute Capability: {device.compute_capability}")
 mtx_list = [
 "/home/mad29/projects/testdata/matrices/1138_bus.mtx",
 "/home/mad29/projects/testdata/matrices/2cubes_sphere.mtx",
-"/home/mad29/projects/testdata/matrices/Chem97ZtZ.mtx",
-"/home/mad29/projects/testdata/matrices/Dubcova1.mtx",
-"/home/mad29/projects/testdata/matrices/Dubcova2.mtx",
-"/home/mad29/projects/testdata/matrices/Dubcova3.mtx",
-"/home/mad29/projects/testdata/matrices/Emilia_923.mtx",
-"/home/mad29/projects/testdata/matrices/Fault_639.mtx",
-"/home/mad29/projects/testdata/matrices/Flan_1565.mtx",
-"/home/mad29/projects/testdata/matrices/G2_circuit.mtx",
-"/home/mad29/projects/testdata/matrices/G3_circuit.mtx",
-"/home/mad29/projects/testdata/matrices/Geo_1438.mtx",
-"/home/mad29/projects/testdata/matrices/Hook_1498.mtx",
-"/home/mad29/projects/testdata/matrices/Kuu.mtx",
-"/home/mad29/projects/testdata/matrices/LF10000.mtx",
-"/home/mad29/projects/testdata/matrices/Muu.mtx",
-"/home/mad29/projects/testdata/matrices/PFlow_742.mtx",
-"/home/mad29/projects/testdata/matrices/Pres_Poisson.mtx",
-"/home/mad29/projects/testdata/matrices/Serena.mtx",
-"/home/mad29/projects/testdata/matrices/StocF-1465.mtx",
-"/home/mad29/projects/testdata/matrices/Trefethen_2000.mtx",
-"/home/mad29/projects/testdata/matrices/Trefethen_20000.mtx",
-"/home/mad29/projects/testdata/matrices/bcsstk08.mtx",
-"/home/mad29/projects/testdata/matrices/bcsstk09.mtx",
-"/home/mad29/projects/testdata/matrices/bcsstk10.mtx",
-"/home/mad29/projects/testdata/matrices/bcsstk11.mtx",
-"/home/mad29/projects/testdata/matrices/bcsstk12.mtx",
-"/home/mad29/projects/testdata/matrices/bcsstk13.mtx",
-"/home/mad29/projects/testdata/matrices/bcsstk14.mtx",
-"/home/mad29/projects/testdata/matrices/bcsstk15.mtx",
-"/home/mad29/projects/testdata/matrices/bcsstk16.mtx",
-"/home/mad29/projects/testdata/matrices/bcsstk17.mtx",
-"/home/mad29/projects/testdata/matrices/bcsstk18.mtx",
-"/home/mad29/projects/testdata/matrices/bcsstk21.mtx",
-"/home/mad29/projects/testdata/matrices/bcsstk23.mtx",
-"/home/mad29/projects/testdata/matrices/bcsstk24.mtx",
-"/home/mad29/projects/testdata/matrices/bcsstk25.mtx",
-"/home/mad29/projects/testdata/matrices/bcsstk26.mtx",
-"/home/mad29/projects/testdata/matrices/bcsstk27.mtx",
-"/home/mad29/projects/testdata/matrices/bcsstk28.mtx",
-"/home/mad29/projects/testdata/matrices/bcsstk36.mtx",
-"/home/mad29/projects/testdata/matrices/bcsstk38.mtx",
-"/home/mad29/projects/testdata/matrices/bcsstm08.mtx",
-"/home/mad29/projects/testdata/matrices/bcsstm09.mtx",
-"/home/mad29/projects/testdata/matrices/bcsstm11.mtx",
-"/home/mad29/projects/testdata/matrices/bcsstm12.mtx",
-"/home/mad29/projects/testdata/matrices/bcsstm21.mtx",
-"/home/mad29/projects/testdata/matrices/bcsstm23.mtx",
-"/home/mad29/projects/testdata/matrices/bcsstm24.mtx",
-"/home/mad29/projects/testdata/matrices/bcsstm25.mtx",
-"/home/mad29/projects/testdata/matrices/bcsstm26.mtx",
-"/home/mad29/projects/testdata/matrices/bcsstm39.mtx",
-"/home/mad29/projects/testdata/matrices/bibd_81_2.mtx",
-"/home/mad29/projects/testdata/matrices/bmw7st_1.mtx",
-"/home/mad29/projects/testdata/matrices/bmwcra_1.mtx",
-"/home/mad29/projects/testdata/matrices/bodyy4.mtx",
-"/home/mad29/projects/testdata/matrices/bodyy5.mtx",
-"/home/mad29/projects/testdata/matrices/bodyy6.mtx",
-"/home/mad29/projects/testdata/matrices/bone010.mtx",
-"/home/mad29/projects/testdata/matrices/boneS01.mtx",
-"/home/mad29/projects/testdata/matrices/cbuckle.mtx",
-"/home/mad29/projects/testdata/matrices/cfd1.mtx",
-"/home/mad29/projects/testdata/matrices/cfd2.mtx",
-"/home/mad29/projects/testdata/matrices/crystm01.mtx",
-"/home/mad29/projects/testdata/matrices/crystm02.mtx",
-"/home/mad29/projects/testdata/matrices/crystm03.mtx",
-"/home/mad29/projects/testdata/matrices/ct20stif.mtx",
-"/home/mad29/projects/testdata/matrices/cvxbqp1.mtx",
-"/home/mad29/projects/testdata/matrices/denormal.mtx",
-"/home/mad29/projects/testdata/matrices/ecology2.mtx",
-"/home/mad29/projects/testdata/matrices/ex10.mtx",
-"/home/mad29/projects/testdata/matrices/ex10hs.mtx",
-"/home/mad29/projects/testdata/matrices/ex13.mtx",
-"/home/mad29/projects/testdata/matrices/ex15.mtx",
-"/home/mad29/projects/testdata/matrices/ex3.mtx",
-"/home/mad29/projects/testdata/matrices/ex33.mtx",
-"/home/mad29/projects/testdata/matrices/ex9.mtx",
-"/home/mad29/projects/testdata/matrices/finan512.mtx",
-"/home/mad29/projects/testdata/matrices/fv1.mtx",
-"/home/mad29/projects/testdata/matrices/fv2.mtx",
-"/home/mad29/projects/testdata/matrices/fv3.mtx",
-"/home/mad29/projects/testdata/matrices/gyro.mtx",
-"/home/mad29/projects/testdata/matrices/inline_1.mtx",
-"/home/mad29/projects/testdata/matrices/jnlbrng1.mtx",
-"/home/mad29/projects/testdata/matrices/ldoor.mtx",
-"/home/mad29/projects/testdata/matrices/msdoor.mtx",
-"/home/mad29/projects/testdata/matrices/nasa1824.mtx",
-"/home/mad29/projects/testdata/matrices/nasa2146.mtx",
-"/home/mad29/projects/testdata/matrices/nasa2910.mtx",
-"/home/mad29/projects/testdata/matrices/nasa4704.mtx",
-"/home/mad29/projects/testdata/matrices/nasasrb.mtx",
-"/home/mad29/projects/testdata/matrices/nd12k.mtx",
-"/home/mad29/projects/testdata/matrices/nd24k.mtx",
-"/home/mad29/projects/testdata/matrices/nd3k.mtx",
-"/home/mad29/projects/testdata/matrices/nd6k.mtx",
-"/home/mad29/projects/testdata/matrices/obstclae.mtx",
-"/home/mad29/projects/testdata/matrices/offshore.mtx",
-"/home/mad29/projects/testdata/matrices/oilpan.mtx",
-"/home/mad29/projects/testdata/matrices/olafu.mtx",
-"/home/mad29/projects/testdata/matrices/parabolic_fem.mtx",
-"/home/mad29/projects/testdata/matrices/pdb1HYS.mtx",
-"/home/mad29/projects/testdata/matrices/plat1919.mtx",
-"/home/mad29/projects/testdata/matrices/plbuckle.mtx",
-"/home/mad29/projects/testdata/matrices/pwtk.mtx",
-"/home/mad29/projects/testdata/matrices/qa8fm.mtx",
-"/home/mad29/projects/testdata/matrices/raefsky4.mtx",
-"/home/mad29/projects/testdata/matrices/s1rmq4m1.mtx",
-"/home/mad29/projects/testdata/matrices/s1rmt3m1.mtx",
-"/home/mad29/projects/testdata/matrices/s2rmq4m1.mtx",
-"/home/mad29/projects/testdata/matrices/s2rmt3m1.mtx",
-"/home/mad29/projects/testdata/matrices/s3dkq4m2.mtx",
-"/home/mad29/projects/testdata/matrices/s3dkt3m2.mtx",
-"/home/mad29/projects/testdata/matrices/s3rmq4m1.mtx",
-"/home/mad29/projects/testdata/matrices/s3rmt3m1.mtx",
-"/home/mad29/projects/testdata/matrices/s3rmt3m3.mtx",
-"/home/mad29/projects/testdata/matrices/shallow_water1.mtx",
-"/home/mad29/projects/testdata/matrices/shallow_water2.mtx",
-"/home/mad29/projects/testdata/matrices/ship_001.mtx",
-"/home/mad29/projects/testdata/matrices/ship_003.mtx",
-"/home/mad29/projects/testdata/matrices/shipsec1.mtx",
-"/home/mad29/projects/testdata/matrices/shipsec5.mtx",
-"/home/mad29/projects/testdata/matrices/shipsec8.mtx",
-"/home/mad29/projects/testdata/matrices/smt.mtx",
-"/home/mad29/projects/testdata/matrices/sts4098.mtx",
-"/home/mad29/projects/testdata/matrices/t2dah_e.mtx",
-"/home/mad29/projects/testdata/matrices/t2dal_e.mtx",
-"/home/mad29/projects/testdata/matrices/t3dl_e.mtx",
-"/home/mad29/projects/testdata/matrices/ted_B.mtx",
-"/home/mad29/projects/testdata/matrices/thermal1.mtx",
-"/home/mad29/projects/testdata/matrices/thermal2.mtx",
-"/home/mad29/projects/testdata/matrices/thermomech_TC.mtx",
-"/home/mad29/projects/testdata/matrices/thermomech_TK.mtx",
-"/home/mad29/projects/testdata/matrices/thermomech_dM.mtx",
-"/home/mad29/projects/testdata/matrices/tmt_sym.mtx",
-"/home/mad29/projects/testdata/matrices/torsion1.mtx",
-"/home/mad29/projects/testdata/matrices/vanbody.mtx",
-"/home/mad29/projects/testdata/matrices/wathen100.mtx",
-"/home/mad29/projects/testdata/matrices/wathen120.mtx",
-"/home/mad29/projects/testdata/matrices/x104.mtx"
+# "/home/mad29/projects/testdata/matrices/Chem97ZtZ.mtx",
+# "/home/mad29/projects/testdata/matrices/Dubcova1.mtx",
+# "/home/mad29/projects/testdata/matrices/Dubcova2.mtx",
+# "/home/mad29/projects/testdata/matrices/Dubcova3.mtx",
+# "/home/mad29/projects/testdata/matrices/Emilia_923.mtx",
+# "/home/mad29/projects/testdata/matrices/Fault_639.mtx",
+# "/home/mad29/projects/testdata/matrices/Flan_1565.mtx",
+# "/home/mad29/projects/testdata/matrices/G2_circuit.mtx",
+# "/home/mad29/projects/testdata/matrices/G3_circuit.mtx",
+# "/home/mad29/projects/testdata/matrices/Geo_1438.mtx",
+# "/home/mad29/projects/testdata/matrices/Hook_1498.mtx",
+# "/home/mad29/projects/testdata/matrices/Kuu.mtx",
+# "/home/mad29/projects/testdata/matrices/LF10000.mtx",
+# "/home/mad29/projects/testdata/matrices/Muu.mtx",
+# "/home/mad29/projects/testdata/matrices/PFlow_742.mtx",
+# "/home/mad29/projects/testdata/matrices/Pres_Poisson.mtx",
+# "/home/mad29/projects/testdata/matrices/Serena.mtx",
+# "/home/mad29/projects/testdata/matrices/StocF-1465.mtx",
+# "/home/mad29/projects/testdata/matrices/Trefethen_2000.mtx",
+# "/home/mad29/projects/testdata/matrices/Trefethen_20000.mtx",
+# "/home/mad29/projects/testdata/matrices/bcsstk08.mtx",
+# "/home/mad29/projects/testdata/matrices/bcsstk09.mtx",
+# "/home/mad29/projects/testdata/matrices/bcsstk10.mtx",
+# "/home/mad29/projects/testdata/matrices/bcsstk11.mtx",
+# "/home/mad29/projects/testdata/matrices/bcsstk12.mtx",
+# "/home/mad29/projects/testdata/matrices/bcsstk13.mtx",
+# "/home/mad29/projects/testdata/matrices/bcsstk14.mtx",
+# "/home/mad29/projects/testdata/matrices/bcsstk15.mtx",
+# "/home/mad29/projects/testdata/matrices/bcsstk16.mtx",
+# "/home/mad29/projects/testdata/matrices/bcsstk17.mtx",
+# "/home/mad29/projects/testdata/matrices/bcsstk18.mtx",
+# "/home/mad29/projects/testdata/matrices/bcsstk21.mtx",
+# "/home/mad29/projects/testdata/matrices/bcsstk23.mtx",
+# "/home/mad29/projects/testdata/matrices/bcsstk24.mtx",
+# "/home/mad29/projects/testdata/matrices/bcsstk25.mtx",
+# "/home/mad29/projects/testdata/matrices/bcsstk26.mtx",
+# "/home/mad29/projects/testdata/matrices/bcsstk27.mtx",
+# "/home/mad29/projects/testdata/matrices/bcsstk28.mtx",
+# "/home/mad29/projects/testdata/matrices/bcsstk36.mtx",
+# "/home/mad29/projects/testdata/matrices/bcsstk38.mtx",
+# "/home/mad29/projects/testdata/matrices/bcsstm08.mtx",
+# "/home/mad29/projects/testdata/matrices/bcsstm09.mtx",
+# "/home/mad29/projects/testdata/matrices/bcsstm11.mtx",
+# "/home/mad29/projects/testdata/matrices/bcsstm12.mtx",
+# "/home/mad29/projects/testdata/matrices/bcsstm21.mtx",
+# "/home/mad29/projects/testdata/matrices/bcsstm23.mtx",
+# "/home/mad29/projects/testdata/matrices/bcsstm24.mtx",
+# "/home/mad29/projects/testdata/matrices/bcsstm25.mtx",
+# "/home/mad29/projects/testdata/matrices/bcsstm26.mtx",
+# "/home/mad29/projects/testdata/matrices/bcsstm39.mtx",
+# "/home/mad29/projects/testdata/matrices/bibd_81_2.mtx",
+# "/home/mad29/projects/testdata/matrices/bmw7st_1.mtx",
+# "/home/mad29/projects/testdata/matrices/bmwcra_1.mtx",
+# "/home/mad29/projects/testdata/matrices/bodyy4.mtx",
+# "/home/mad29/projects/testdata/matrices/bodyy5.mtx",
+# "/home/mad29/projects/testdata/matrices/bodyy6.mtx",
+# "/home/mad29/projects/testdata/matrices/bone010.mtx",
+# "/home/mad29/projects/testdata/matrices/boneS01.mtx",
+# "/home/mad29/projects/testdata/matrices/cbuckle.mtx",
+# "/home/mad29/projects/testdata/matrices/cfd1.mtx",
+# "/home/mad29/projects/testdata/matrices/cfd2.mtx",
+# "/home/mad29/projects/testdata/matrices/crystm01.mtx",
+# "/home/mad29/projects/testdata/matrices/crystm02.mtx",
+# "/home/mad29/projects/testdata/matrices/crystm03.mtx",
+# "/home/mad29/projects/testdata/matrices/ct20stif.mtx",
+# "/home/mad29/projects/testdata/matrices/cvxbqp1.mtx",
+# "/home/mad29/projects/testdata/matrices/denormal.mtx",
+# "/home/mad29/projects/testdata/matrices/ecology2.mtx",
+# "/home/mad29/projects/testdata/matrices/ex10.mtx",
+# "/home/mad29/projects/testdata/matrices/ex10hs.mtx",
+# "/home/mad29/projects/testdata/matrices/ex13.mtx",
+# "/home/mad29/projects/testdata/matrices/ex15.mtx",
+# "/home/mad29/projects/testdata/matrices/ex3.mtx",
+# "/home/mad29/projects/testdata/matrices/ex33.mtx",
+# "/home/mad29/projects/testdata/matrices/ex9.mtx",
+# "/home/mad29/projects/testdata/matrices/finan512.mtx",
+# "/home/mad29/projects/testdata/matrices/fv1.mtx",
+# "/home/mad29/projects/testdata/matrices/fv2.mtx",
+# "/home/mad29/projects/testdata/matrices/fv3.mtx",
+# "/home/mad29/projects/testdata/matrices/gyro.mtx",
+# "/home/mad29/projects/testdata/matrices/inline_1.mtx",
+# "/home/mad29/projects/testdata/matrices/jnlbrng1.mtx",
+# "/home/mad29/projects/testdata/matrices/ldoor.mtx",
+# "/home/mad29/projects/testdata/matrices/msdoor.mtx",
+# "/home/mad29/projects/testdata/matrices/nasa1824.mtx",
+# "/home/mad29/projects/testdata/matrices/nasa2146.mtx",
+# "/home/mad29/projects/testdata/matrices/nasa2910.mtx",
+# "/home/mad29/projects/testdata/matrices/nasa4704.mtx",
+# "/home/mad29/projects/testdata/matrices/nasasrb.mtx",
+# "/home/mad29/projects/testdata/matrices/nd12k.mtx",
+# "/home/mad29/projects/testdata/matrices/nd24k.mtx",
+# "/home/mad29/projects/testdata/matrices/nd3k.mtx",
+# "/home/mad29/projects/testdata/matrices/nd6k.mtx",
+# "/home/mad29/projects/testdata/matrices/obstclae.mtx",
+# "/home/mad29/projects/testdata/matrices/offshore.mtx",
+# "/home/mad29/projects/testdata/matrices/oilpan.mtx",
+# "/home/mad29/projects/testdata/matrices/olafu.mtx",
+# "/home/mad29/projects/testdata/matrices/parabolic_fem.mtx",
+# "/home/mad29/projects/testdata/matrices/pdb1HYS.mtx",
+# "/home/mad29/projects/testdata/matrices/plat1919.mtx",
+# "/home/mad29/projects/testdata/matrices/plbuckle.mtx",
+# "/home/mad29/projects/testdata/matrices/pwtk.mtx",
+# "/home/mad29/projects/testdata/matrices/qa8fm.mtx",
+# "/home/mad29/projects/testdata/matrices/raefsky4.mtx",
+# "/home/mad29/projects/testdata/matrices/s1rmq4m1.mtx",
+# "/home/mad29/projects/testdata/matrices/s1rmt3m1.mtx",
+# "/home/mad29/projects/testdata/matrices/s2rmq4m1.mtx",
+# "/home/mad29/projects/testdata/matrices/s2rmt3m1.mtx",
+# "/home/mad29/projects/testdata/matrices/s3dkq4m2.mtx",
+# "/home/mad29/projects/testdata/matrices/s3dkt3m2.mtx",
+# "/home/mad29/projects/testdata/matrices/s3rmq4m1.mtx",
+# "/home/mad29/projects/testdata/matrices/s3rmt3m1.mtx",
+# "/home/mad29/projects/testdata/matrices/s3rmt3m3.mtx",
+# "/home/mad29/projects/testdata/matrices/shallow_water1.mtx",
+# "/home/mad29/projects/testdata/matrices/shallow_water2.mtx",
+# "/home/mad29/projects/testdata/matrices/ship_001.mtx",
+# "/home/mad29/projects/testdata/matrices/ship_003.mtx",
+# "/home/mad29/projects/testdata/matrices/shipsec1.mtx",
+# "/home/mad29/projects/testdata/matrices/shipsec5.mtx",
+# "/home/mad29/projects/testdata/matrices/shipsec8.mtx",
+# "/home/mad29/projects/testdata/matrices/smt.mtx",
+# "/home/mad29/projects/testdata/matrices/sts4098.mtx",
+# "/home/mad29/projects/testdata/matrices/t2dah_e.mtx",
+# "/home/mad29/projects/testdata/matrices/t2dal_e.mtx",
+# "/home/mad29/projects/testdata/matrices/t3dl_e.mtx",
+# "/home/mad29/projects/testdata/matrices/ted_B.mtx",
+# "/home/mad29/projects/testdata/matrices/thermal1.mtx",
+# "/home/mad29/projects/testdata/matrices/thermal2.mtx",
+# "/home/mad29/projects/testdata/matrices/thermomech_TC.mtx",
+# "/home/mad29/projects/testdata/matrices/thermomech_TK.mtx",
+# "/home/mad29/projects/testdata/matrices/thermomech_dM.mtx",
+# "/home/mad29/projects/testdata/matrices/tmt_sym.mtx",
+# "/home/mad29/projects/testdata/matrices/torsion1.mtx",
+# "/home/mad29/projects/testdata/matrices/vanbody.mtx",
+# "/home/mad29/projects/testdata/matrices/wathen100.mtx",
+# "/home/mad29/projects/testdata/matrices/wathen120.mtx",
+# "/home/mad29/projects/testdata/matrices/x104.mtx"
 ]
-method_list = ["triton", "triton-sync-free", "triton-csr-wavefront", "triton-csr-sync-free", "cusparse", "numba-sptrsv", "numba-sync-free", "numba-csr-wavefront", "numba-csr-sync-free", "triton-spmv"]
+method_list = [
+    "triton", "triton-sync-free", "triton-csc-mapping",
+    "triton-csr-wavefront", "triton-csr-sync-free", "triton-csr-mapping", "triton-csr-sync-free-mapping",
+    "cusparse", 
+    "numba-sptrsv", "numba-sync-free", 
+    "numba-csc-wavefront-mapping", "numba-csc-sync-free-mapping",
+    "numba-csr-wavefront", "numba-csr-sync-free",
+    "numba-csr-wavefront-mapping", "numba-csr-wavefront-unrolling", "numba-csr-wavefront-mapping-unrolling",
+    "numba-csr-sync-free-mapping", "numba-csr-sync-free-unrolling", "numba-csr-sync-free-mapping-unrolling",
+    "triton-spmv"
+]
 # mtx_list = get_matrix_list("/home/mad29/projects/gpu-backend/testlist.txt", "")
 #mtx_list = mtx_list[60:]
 
@@ -258,15 +268,15 @@ def correctness_test():
         #wavefronts = compute_wavefront(A)
         #wave_start_loc, waves = compact_2d_list(wavefronts)
         waves_gpu = cuda.to_device(waves)
-        y_numba_gpu = sptrsc_numba_csc(d_data, d_indices, d_indptr, d_b, A.shape[0], A.shape[1], A.nnz, wave_start_loc, waves_gpu)
+        y_numba_gpu = sptrsv_numba_csc(d_data, d_indices, d_indptr, d_b, A.shape[0], A.shape[1], A.nnz, wave_start_loc, waves_gpu)
         y_numba_cpu = y_numba_gpu.copy_to_host()
 
         #d_in_edges = cuda.to_device(in_edge)
-        y_numba_gpu_sync_free = sptrsc_numba_csc_sync_free(d_data, d_indices, d_indptr, d_b, A.shape[0], A.shape[1], A.nnz, in_edge)
+        y_numba_gpu_sync_free = sptrsv_numba_csc_sync_free(d_data, d_indices, d_indptr, d_b, A.shape[0], A.shape[1], A.nnz, in_edge)
 
         # dep_count_csc1 = (A.indptr[1:] - A.indptr[:-1]).astype(np.int32)
         # dep_count_csc1[dep_count_csc1 == 0] = 1
-        # y_numba_gpu_sync_free = sptrsc_numba_csc_sync_free(
+        # y_numba_gpu_sync_free = sptrsv_numba_csc_sync_free(
         #     d_data, d_indices, d_indptr, d_b, A.shape[0], A.shape[1], A.nnz, dep_count_csc1)
         y_numba_cpu_sync_free = y_numba_gpu_sync_free.copy_to_host()
 
@@ -317,6 +327,45 @@ def correctness_test():
             # print(x_cpu)
             print("\nWarning: triton-csr-sync-free Solutions do not match!")
 
+        # Test triton-csr-mapping
+        try:
+            wave_start_loc_csr_int = [int(x) for x in wave_start_loc_csr]
+            y_csr_mapping = sptrsv_triton_csr_mapping(val_f32_csr, indices_i32_csr, indptr_i32_csr, b_f32, n, n, A_csr.nnz, wave_start_loc_csr_int, waves_gpu_csr)
+            if np.allclose(x_cpu, y_csr_mapping.cpu().numpy(), atol=1e-5):
+                print("\ntriton-csr-mapping Solutions match within tolerance!")
+                method_correctness[mat_name]['triton-csr-mapping'] = 1
+            else:
+                print("\nWarning: triton-csr-mapping Solutions do not match!")
+        except Exception as e:
+            print(f"\ntriton-csr-mapping failed: {e}")
+
+        # Test triton-csr-sync-free-mapping
+        try:
+            map_ptr_csr, map_vals_csr, outgoing_edges_csr = incoming_edge_csr(A_csr)
+            dep_count_csr_map = torch.tensor(outgoing_edges_csr, dtype=torch.int32, device=DEVICE)
+            map_ptr_gpu_csr = torch.tensor(map_ptr_csr, dtype=torch.int32, device=DEVICE)
+            map_vals_gpu_csr = torch.tensor(map_vals_csr, dtype=torch.int32, device=DEVICE)
+            y_csr_sync_free_map = sptrsv_triton_csr_sync_free_mapping(val_f32_csr, indices_i32_csr, indptr_i32_csr, b_f32, n, n, A_csr.nnz, dep_count_csr_map, map_ptr_gpu_csr, map_vals_gpu_csr)
+            if np.allclose(x_cpu, y_csr_sync_free_map.cpu().numpy(), atol=1e-5):
+                print("\ntriton-csr-sync-free-mapping Solutions match within tolerance!")
+                method_correctness[mat_name]['triton-csr-sync-free-mapping'] = 1
+            else:
+                print("\nWarning: triton-csr-sync-free-mapping Solutions do not match!")
+        except Exception as e:
+            print(f"\ntriton-csr-sync-free-mapping failed: {e}")
+
+        # Test triton-csc-mapping
+        try:
+            wave_start_loc_int = [int(x) for x in wave_start_loc]
+            y_csc_mapping = sptrsv_triton_csc_mapping(val_f32, indices_i32, indptr_i32, b_f32, n, n, A.nnz, wave_start_loc_int, waves_gpu)
+            if np.allclose(x_cpu, y_csc_mapping.cpu().numpy(), atol=1e-5):
+                print("\ntriton-csc-mapping Solutions match within tolerance!")
+                method_correctness[mat_name]['triton-csc-mapping'] = 1
+            else:
+                print("\nWarning: triton-csc-mapping Solutions do not match!")
+        except Exception as e:
+            print(f"\ntriton-csc-mapping failed: {e}")
+
         if np.allclose(x_cpu, y_numba_cpu, atol=1e-5):
             print("\nnumba-sptrsv Solutions match within tolerance!")
             method_correctness[mat_name]['numba-sptrsv'] = 1
@@ -334,6 +383,36 @@ def correctness_test():
             # print(f"  Max abs error: {abs_err:.3e}")
             # print(f"  Relative L2 error: {rel_err:.3e}")
 
+        # Test CSC wavefront mapping variant
+        succ_offsets_csc, succ_indices_csc = build_csc_successors(A)
+        d_succ_offsets_csc = cuda.to_device(succ_offsets_csc)
+        d_succ_indices_csc = cuda.to_device(succ_indices_csc)
+        
+        try:
+            y_opt = sptrsv_numba_csc_wavefront_mapping(d_data, d_indices, d_indptr, d_b, A.shape[0], A.shape[1], A.nnz, wave_start_loc, waves_gpu, threads_per_block=128)
+            y_opt_cpu = y_opt.copy_to_host()
+            
+            if np.allclose(x_cpu, y_opt_cpu, atol=1e-5):
+                print("\nnumba-csc-wavefront-mapping Solutions match within tolerance!")
+                method_correctness[mat_name]['numba-csc-wavefront-mapping'] = 1
+            else:
+                print("\nWarning: numba-csc-wavefront-mapping Solutions do not match!")
+        except Exception as e:
+            print(f"\nnumba-csc-wavefront-mapping failed: {e}")
+
+        # Test CSC sync-free mapping variant
+        try:
+            y_opt = sptrsv_numba_csc_sync_free_mapping(d_data, d_indices, d_indptr, d_b, A.shape[0], A.shape[1], A.nnz, in_edge, d_succ_offsets_csc, d_succ_indices_csc, threads_per_block=128)
+            y_opt_cpu = y_opt.copy_to_host()
+            
+            if np.allclose(x_cpu, y_opt_cpu, atol=1e-5):
+                print("\nnumba-csc-sync-free-mapping Solutions match within tolerance!")
+                method_correctness[mat_name]['numba-csc-sync-free-mapping'] = 1
+            else:
+                print("\nWarning: numba-csc-sync-free-mapping Solutions do not match!")
+        except Exception as e:
+            print(f"\nnumba-csc-sync-free-mapping failed: {e}")
+
         # Test numba-csr-wavefront
         A_csr_numba = A.tocsr()
         d_data_csr = cuda.to_device(A_csr_numba.data)
@@ -343,7 +422,7 @@ def correctness_test():
         wavefronts_csr_numba = compute_wavefront(A)
         wave_start_loc_csr_numba, waves_csr_numba = compact_2d_list(wavefronts_csr_numba)
         waves_gpu_csr_numba = cuda.to_device(waves_csr_numba)
-        y_numba_csr_wave = sptrsc_numba_csr_wavefront(d_data_csr, d_indices_csr, d_indptr_csr, d_b_csr, n, n, A_csr_numba.nnz, wave_start_loc_csr_numba, waves_gpu_csr_numba)
+        y_numba_csr_wave = sptrsv_numba_csr_wavefront(d_data_csr, d_indices_csr, d_indptr_csr, d_b_csr, n, n, A_csr_numba.nnz, wave_start_loc_csr_numba, waves_gpu_csr_numba)
         y_numba_csr_wave_cpu = y_numba_csr_wave.copy_to_host()
         
         if np.allclose(x_cpu, y_numba_csr_wave_cpu, atol=1e-5):
@@ -355,7 +434,7 @@ def correctness_test():
         # Test numba-csr-sync-free
         in_edges_csr = incoming_edge_csr_rows(A_csr_numba)
         succ_offsets_csr, succ_indices_csr = build_csr_successors(A_csr_numba)
-        y_numba_csr_sync_free = sptrsc_numba_csr_sync_free(d_data_csr, d_indices_csr, d_indptr_csr, d_b_csr, n, n, A_csr_numba.nnz, in_edges_csr, succ_offsets_csr, succ_indices_csr)
+        y_numba_csr_sync_free = sptrsv_numba_csr_sync_free(d_data_csr, d_indices_csr, d_indptr_csr, d_b_csr, n, n, A_csr_numba.nnz, in_edges_csr, succ_offsets_csr, succ_indices_csr)
         y_numba_csr_sync_free_cpu = y_numba_csr_sync_free.copy_to_host()
         
         if np.allclose(x_cpu, y_numba_csr_sync_free_cpu, atol=1e-5):
@@ -363,6 +442,50 @@ def correctness_test():
             method_correctness[mat_name]['numba-csr-sync-free'] = 1
         else:
             print("\nWarning: numba-csr-sync-free Solutions do not match!")
+
+        # Test CSR optimization variants
+        for opt_variant in ['mapping', 'unrolling', 'mapping-unrolling']:
+            method_name = f'numba-csr-wavefront-{opt_variant}'
+            try:
+                if opt_variant == 'mapping':
+                    func = sptrsv_numba_csr_wavefront_mapping
+                elif opt_variant == 'unrolling':
+                    func = sptrsv_numba_csr_wavefront_unrolling
+                else:  # 'mapping-unrolling'
+                    func = sptrsv_numba_csr_wavefront_mapping_unrolling
+                
+                y_csr_opt = func(d_data_csr, d_indices_csr, d_indptr_csr, d_b_csr, n, n, A_csr_numba.nnz, wave_start_loc_csr_numba, waves_gpu_csr_numba, threads_per_block=128)
+                y_csr_opt_cpu = y_csr_opt.copy_to_host()
+                
+                if np.allclose(x_cpu, y_csr_opt_cpu, atol=1e-5):
+                    print(f"\n{method_name} Solutions match within tolerance!")
+                    method_correctness[mat_name][method_name] = 1
+                else:
+                    print(f"\nWarning: {method_name} Solutions do not match!")
+            except Exception as e:
+                print(f"\n{method_name} failed: {e}")
+
+        # Test CSR sync-free optimization variants
+        for opt_variant in ['mapping', 'unrolling', 'mapping-unrolling']:
+            method_name = f'numba-csr-sync-free-{opt_variant}'
+            try:
+                if opt_variant == 'mapping':
+                    func = sptrsv_numba_csr_sync_free_mapping
+                elif opt_variant == 'unrolling':
+                    func = sptrsv_numba_csr_sync_free_unrolling
+                else:  # 'mapping-unrolling'
+                    func = sptrsv_numba_csr_sync_free_mapping_unrolling
+                
+                y_csr_opt = func(d_data_csr, d_indices_csr, d_indptr_csr, d_b_csr, n, n, A_csr_numba.nnz, in_edges_csr, succ_offsets_csr, succ_indices_csr, threads_per_block=128)
+                y_csr_opt_cpu = y_csr_opt.copy_to_host()
+                
+                if np.allclose(x_cpu, y_csr_opt_cpu, atol=1e-5):
+                    print(f"\n{method_name} Solutions match within tolerance!")
+                    method_correctness[mat_name][method_name] = 1
+                else:
+                    print(f"\nWarning: {method_name} Solutions do not match!")
+            except Exception as e:
+                print(f"\n{method_name} failed: {e}")
 
         # print (x_cpu[:5])
         # print (x_gpu[:5])
@@ -373,14 +496,14 @@ def correctness_test():
     return matrix_signtures, method_correctness
 
 
-# mat_signatures, method_correctness = correctness_test()
-# # convert to df and save as csv
-# import pandas as pd
-# df = pd.DataFrame(mat_signatures)
-# df.to_csv("matrix_signatures.csv")
+mat_signatures, method_correctness = correctness_test()
+# convert to df and save as csv
+import pandas as pd
+df = pd.DataFrame(mat_signatures)
+df.to_csv("matrix_signatures.csv")
 
-# df = pd.DataFrame(method_correctness)
-# df.to_csv("method_correctness.csv")
+df = pd.DataFrame(method_correctness)
+df.to_csv("method_correctness.csv")
 
 configs = []
 configs.append(
@@ -389,8 +512,28 @@ configs.append(
         x_vals=[mtx_list[i] for i in range(0, len(mtx_list))],  # Different possible values for `x_name`
         line_arg="provider",  # Argument name whose value corresponds to a different line in the plot
         line_vals=method_list,  # Label name for the lines
-        line_names=["Triton-Wavefront-CSC", "Triton-Sync-free-CSC", "Triton-Wavefront-CSR", "Triton-Sync-free-CSR", "[REF] cuSparse", "Numba-Wavefront-CSC", "Numba-Sync-free-CSC", "Numba-Wavefront-CSR", "Numba-Sync-free-CSR", "[REF] Triton-SpMV"],
-        styles=[("green", "-"), ("blue", "-"), ("cyan", "-"), ("magenta", "-"), ("yellow", "-"), ("red", "-"), ("purple", "-"), ("brown", "-"), ("pink", "-"), ("orange", "--")],  # Visual styles for the lines
+        line_names=[
+            "Triton-CSC-Wavefront", "Triton-CSC-Sync-free", "Triton-CSC-Mapping",
+            "Triton-CSR-Wavefront", "Triton-CSR-Sync-free", "Triton-CSR-Mapping", "Triton-CSR-Sync-free-Mapping",
+            "[REF] cuSparse",
+            "Numba-CSC-Wavefront", "Numba-CSC-Sync-free",
+            "Numba-CSC-Wavefront+Mapping", "Numba-CSC-Sync-free+Mapping",
+            "Numba-CSR-Wavefront", "Numba-CSR-Sync-free",
+            "Numba-CSR-Wavefront+Mapping", "Numba-CSR-Wavefront+Unrolling", "Numba-CSR-Wavefront+Mapping+Unrolling",
+            "Numba-CSR-Sync-free+Mapping", "Numba-CSR-Sync-free+Unrolling", "Numba-CSR-Sync-free+Mapping+Unrolling",
+            "[REF] Triton-SpMV"
+        ],
+        styles=[
+            ("green", "-"), ("blue", "-"), ("green", "--"),
+            ("cyan", "-"), ("magenta", "-"), ("cyan", "--"), ("magenta", "--"),
+            ("yellow", "-"),
+            ("red", "-"), ("purple", "-"),
+            ("red", "--"), ("purple", "--"),
+            ("brown", "-"), ("pink", "-"),
+            ("brown", "--"), ("brown", "-."), ("brown", ":"),
+            ("pink", "--"), ("pink", "-."), ("pink", ":"),
+            ("orange", "--")
+        ],  # Visual styles for the lines
         ylabel="GFLOP/S",  # Label name for the y-axis
         plot_name="sptrsv-performance",  # Name for the plot, used also as a file name for saving the plot.
         args={}
@@ -424,6 +567,7 @@ def benchmark(matrices, provider):
         indptr_i32 = torch.tensor(A.indptr, dtype=torch.int32, device=DEVICE)
         wavefronts = compute_wavefront(A)
         wave_start_loc, waves = compact_2d_list(wavefronts)
+        wave_start_loc = [int(x) for x in wave_start_loc]
         waves_gpu = torch.tensor(waves, dtype=torch.int32, device=DEVICE)
         ms, min_ms, max_ms = triton.testing.do_bench(lambda: sptrsv_triton(val_f32, indices_i32, indptr_i32, b_f32, A.shape[0], A.shape[1], A.nnz, wave_start_loc, waves_gpu), quantiles=quantiles, warmup=warmpup, rep=rep)
     if provider == 'triton-csr-wavefront':
@@ -434,6 +578,7 @@ def benchmark(matrices, provider):
         indptr_i32 = torch.tensor(A_csr.indptr, dtype=torch.int32, device=DEVICE)
         wavefronts = compute_wavefront(A)
         wave_start_loc, waves = compact_2d_list(wavefronts)
+        wave_start_loc = [int(x) for x in wave_start_loc]
         waves_gpu = torch.tensor(waves, dtype=torch.int32, device=DEVICE)
         ms, min_ms, max_ms = triton.testing.do_bench(lambda: sptrsv_triton_csr(val_f32, indices_i32, indptr_i32, b_f32, A.shape[0], A.shape[1], A_csr.nnz, wave_start_loc, waves_gpu), quantiles=quantiles, warmup=warmpup, rep=rep)
     if provider == 'triton-csr-sync-free':
@@ -447,6 +592,39 @@ def benchmark(matrices, provider):
         map_ptr_gpu = torch.tensor(map_ptr, dtype=torch.int32, device=DEVICE)
         map_vals_gpu = torch.tensor(map_vals, dtype=torch.int32, device=DEVICE)
         ms, min_ms, max_ms = triton.testing.do_bench(lambda: sptrsv_sync_free_triton_csr(val_f32, indices_i32, indptr_i32, b_f32, A.shape[0], A.shape[1], A_csr.nnz, dep_count_csr, map_ptr_gpu, map_vals_gpu), quantiles=quantiles, warmup=warmpup, rep=rep)
+    if provider == 'triton-csr-mapping':
+        A_csr = A.tocsr()
+        val_f32 = torch.tensor(A_csr.data, dtype=REAL_TYPE, device=DEVICE)
+        b_f32 = torch.tensor(b, dtype=REAL_TYPE, device=DEVICE)
+        indices_i32 = torch.tensor(A_csr.indices, dtype=torch.int32, device=DEVICE)
+        indptr_i32 = torch.tensor(A_csr.indptr, dtype=torch.int32, device=DEVICE)
+        wavefronts = compute_wavefront(A)
+        wave_start_loc, waves = compact_2d_list(wavefronts)
+        wave_start_loc = [int(x) for x in wave_start_loc]
+        waves_gpu = torch.tensor(waves, dtype=torch.int32, device=DEVICE)
+        ms, min_ms, max_ms = triton.testing.do_bench(lambda: sptrsv_triton_csr_mapping(val_f32, indices_i32, indptr_i32, b_f32, A.shape[0], A.shape[1], A_csr.nnz, wave_start_loc, waves_gpu), quantiles=quantiles, warmup=warmpup, rep=rep)
+    if provider == 'triton-csr-sync-free-mapping':
+        A_csr = A.tocsr()
+        val_f32 = torch.tensor(A_csr.data, dtype=REAL_TYPE, device=DEVICE)
+        b_f32 = torch.tensor(b, dtype=REAL_TYPE, device=DEVICE)
+        indices_i32 = torch.tensor(A_csr.indices, dtype=torch.int32, device=DEVICE)
+        indptr_i32 = torch.tensor(A_csr.indptr, dtype=torch.int32, device=DEVICE)
+        map_ptr, map_vals, outgoing_edges = incoming_edge_csr(A_csr)
+        dep_count_csr = torch.tensor(outgoing_edges, dtype=torch.int32, device=DEVICE)
+        map_ptr_gpu = torch.tensor(map_ptr, dtype=torch.int32, device=DEVICE)
+        map_vals_gpu = torch.tensor(map_vals, dtype=torch.int32, device=DEVICE)
+        ms, min_ms, max_ms = triton.testing.do_bench(lambda: sptrsv_triton_csr_sync_free_mapping(val_f32, indices_i32, indptr_i32, b_f32, A.shape[0], A.shape[1], A_csr.nnz, dep_count_csr, map_ptr_gpu, map_vals_gpu), quantiles=quantiles, warmup=warmpup, rep=rep)
+    if provider == 'triton-csc-mapping':
+        val_f32 = torch.tensor(A.data, dtype=REAL_TYPE, device=DEVICE)
+        b_f32 = torch.tensor(b, dtype=REAL_TYPE, device=DEVICE)
+        indices_i32 = torch.tensor(A.indices, dtype=torch.int32, device=DEVICE)
+        indptr_i32 = torch.tensor(A.indptr, dtype=torch.int32, device=DEVICE)
+        wavefronts = compute_wavefront(A)
+        wave_start_loc, waves = compact_2d_list(wavefronts)
+        # Convert to Python list with int values to avoid numpy.int32 issues
+        wave_start_loc = [int(x) for x in wave_start_loc]
+        waves_gpu = torch.tensor(waves, dtype=torch.int32, device=DEVICE)
+        ms, min_ms, max_ms = triton.testing.do_bench(lambda: sptrsv_triton_csc_mapping(val_f32, indices_i32, indptr_i32, b_f32, A.shape[0], A.shape[1], A.nnz, wave_start_loc, waves_gpu), quantiles=quantiles, warmup=warmpup, rep=rep)
     if provider == 'triton-sync-free':
         val_f32 = torch.tensor(A.data, dtype=REAL_TYPE, device=DEVICE)
         b_f32 = torch.tensor(b, dtype=REAL_TYPE, device=DEVICE)
@@ -480,7 +658,7 @@ def benchmark(matrices, provider):
         wavefronts = compute_wavefront(A)
         wave_start_loc, waves = compact_2d_list(wavefronts)
         waves_gpu = cuda.to_device(waves)
-        ms, min_ms, max_ms = triton.testing.do_bench(lambda: sptrsc_numba_csc(d_data, d_indices, d_indptr, d_x, A.shape[0], A.shape[1], A.nnz, wave_start_loc, waves_gpu), quantiles=quantiles, warmup=warmpup, rep=rep)
+        ms, min_ms, max_ms = triton.testing.do_bench(lambda: sptrsv_numba_csc(d_data, d_indices, d_indptr, d_x, A.shape[0], A.shape[1], A.nnz, wave_start_loc, waves_gpu), quantiles=quantiles, warmup=warmpup, rep=rep)
     if provider == 'numba-sync-free':
         # Transfer data to the GPU
         d_data = cuda.to_device(A.data)
@@ -489,7 +667,32 @@ def benchmark(matrices, provider):
         d_x = cuda.to_device(np.zeros(n))
         dep_count = incoming_edge(A)
         #dep_count_gpu = cuda.to_device(dep_count)
-        ms, min_ms, max_ms = triton.testing.do_bench(lambda: sptrsc_numba_csc_sync_free(d_data, d_indices, d_indptr, d_x, A.shape[0], A.shape[1], A.nnz, dep_count), quantiles=quantiles, warmup=warmpup, rep=rep)
+        ms, min_ms, max_ms = triton.testing.do_bench(lambda: sptrsv_numba_csc_sync_free(d_data, d_indices, d_indptr, d_x, A.shape[0], A.shape[1], A.nnz, dep_count), quantiles=quantiles, warmup=warmpup, rep=rep)
+    if provider == 'numba-csc-wavefront-mapping':
+        threads_per_block = 128
+        
+        d_data = cuda.to_device(A.data)
+        d_indices = cuda.to_device(A.indices)
+        d_indptr = cuda.to_device(A.indptr)
+        d_x = cuda.to_device(np.zeros(n))
+        wavefronts = compute_wavefront(A)
+        wave_start_loc, waves = compact_2d_list(wavefronts)
+        waves_gpu = cuda.to_device(waves)
+        
+        ms, min_ms, max_ms = triton.testing.do_bench(lambda: sptrsv_numba_csc_wavefront_mapping(d_data, d_indices, d_indptr, d_x, A.shape[0], A.shape[1], A.nnz, wave_start_loc, waves_gpu, threads_per_block), quantiles=quantiles, warmup=warmpup, rep=rep)
+    if provider == 'numba-csc-sync-free-mapping':
+        threads_per_block = 128
+        
+        d_data = cuda.to_device(A.data)
+        d_indices = cuda.to_device(A.indices)
+        d_indptr = cuda.to_device(A.indptr)
+        d_x = cuda.to_device(np.zeros(n))
+        dep_count = incoming_edge(A)
+        succ_offsets_csc, succ_indices_csc = build_csc_successors(A)
+        d_succ_offsets_csc = cuda.to_device(succ_offsets_csc)
+        d_succ_indices_csc = cuda.to_device(succ_indices_csc)
+        
+        ms, min_ms, max_ms = triton.testing.do_bench(lambda: sptrsv_numba_csc_sync_free_mapping(d_data, d_indices, d_indptr, d_x, A.shape[0], A.shape[1], A.nnz, dep_count, d_succ_offsets_csc, d_succ_indices_csc, threads_per_block), quantiles=quantiles, warmup=warmpup, rep=rep)
     if provider == 'numba-csr-wavefront':
         A_csr = A.tocsr()
         d_data = cuda.to_device(A_csr.data)
@@ -499,7 +702,7 @@ def benchmark(matrices, provider):
         wavefronts = compute_wavefront(A)
         wave_start_loc, waves = compact_2d_list(wavefronts)
         waves_gpu = cuda.to_device(waves)
-        ms, min_ms, max_ms = triton.testing.do_bench(lambda: sptrsc_numba_csr_wavefront(d_data, d_indices, d_indptr, d_x, A.shape[0], A.shape[1], A_csr.nnz, wave_start_loc, waves_gpu), quantiles=quantiles, warmup=warmpup, rep=rep)
+        ms, min_ms, max_ms = triton.testing.do_bench(lambda: sptrsv_numba_csr_wavefront(d_data, d_indices, d_indptr, d_x, A.shape[0], A.shape[1], A_csr.nnz, wave_start_loc, waves_gpu), quantiles=quantiles, warmup=warmpup, rep=rep)
     if provider == 'numba-csr-sync-free':
         A_csr = A.tocsr()
         d_data = cuda.to_device(A_csr.data)
@@ -508,7 +711,62 @@ def benchmark(matrices, provider):
         d_x = cuda.to_device(np.zeros(n))
         dep_count = incoming_edge_csr_rows(A_csr)
         succ_offsets, succ_indices = build_csr_successors(A_csr)
-        ms, min_ms, max_ms = triton.testing.do_bench(lambda: sptrsc_numba_csr_sync_free(d_data, d_indices, d_indptr, d_x, A.shape[0], A.shape[1], A_csr.nnz, dep_count, succ_offsets, succ_indices), quantiles=quantiles, warmup=warmpup, rep=rep)
+        ms, min_ms, max_ms = triton.testing.do_bench(lambda: sptrsv_numba_csr_sync_free(d_data, d_indices, d_indptr, d_x, A.shape[0], A.shape[1], A_csr.nnz, dep_count, succ_offsets, succ_indices), quantiles=quantiles, warmup=warmpup, rep=rep)
+    if provider in ['numba-csr-wavefront-mapping', 'numba-csr-wavefront-unrolling', 'numba-csr-wavefront-mapping-unrolling']:
+        # Determine which variant
+        if 'unrolling' in provider and 'mapping' in provider:
+            opt_variant = 'mapping-unrolling'
+        elif 'mapping' in provider:
+            opt_variant = 'mapping'
+        else:
+            opt_variant = 'unrolling'
+        
+        threads_per_block = 128
+        A_csr = A.tocsr()
+        d_data = cuda.to_device(A_csr.data)
+        d_indices = cuda.to_device(A_csr.indices)
+        d_indptr = cuda.to_device(A_csr.indptr)
+        d_x = cuda.to_device(np.zeros(n))
+        wavefronts = compute_wavefront(A)
+        wave_start_loc, waves = compact_2d_list(wavefronts)
+        waves_gpu = cuda.to_device(waves)
+        
+        # Select function
+        if opt_variant == 'mapping':
+            func = sptrsv_numba_csr_wavefront_mapping
+        elif opt_variant == 'unrolling':
+            func = sptrsv_numba_csr_wavefront_unrolling
+        else:  # 'mapping-unrolling'
+            func = sptrsv_numba_csr_wavefront_mapping_unrolling
+        
+        ms, min_ms, max_ms = triton.testing.do_bench(lambda: func(d_data, d_indices, d_indptr, d_x, A.shape[0], A.shape[1], A_csr.nnz, wave_start_loc, waves_gpu, threads_per_block), quantiles=quantiles, warmup=warmpup, rep=rep)
+    if provider in ['numba-csr-sync-free-mapping', 'numba-csr-sync-free-unrolling', 'numba-csr-sync-free-mapping-unrolling']:
+        # Determine which variant
+        if 'unrolling' in provider and 'mapping' in provider:
+            opt_variant = 'mapping-unrolling'
+        elif 'mapping' in provider:
+            opt_variant = 'mapping'
+        else:
+            opt_variant = 'unrolling'
+        
+        threads_per_block = 128
+        A_csr = A.tocsr()
+        d_data = cuda.to_device(A_csr.data)
+        d_indices = cuda.to_device(A_csr.indices)
+        d_indptr = cuda.to_device(A_csr.indptr)
+        d_x = cuda.to_device(np.zeros(n))
+        dep_count = incoming_edge_csr_rows(A_csr)
+        succ_offsets, succ_indices = build_csr_successors(A_csr)
+        
+        # Select function
+        if opt_variant == 'mapping':
+            func = sptrsv_numba_csr_sync_free_mapping
+        elif opt_variant == 'unrolling':
+            func = sptrsv_numba_csr_sync_free_unrolling
+        else:  # 'mapping-unrolling'
+            func = sptrsv_numba_csr_sync_free_mapping_unrolling
+        
+        ms, min_ms, max_ms = triton.testing.do_bench(lambda: func(d_data, d_indices, d_indptr, d_x, A.shape[0], A.shape[1], A_csr.nnz, dep_count, succ_offsets, succ_indices, threads_per_block), quantiles=quantiles, warmup=warmpup, rep=rep)
     if provider == 'cusparse':
         matrix_gpu_csc = cp_csc_matrix(A.tocsc())
         b_gpu = cp.array(b)  # Move dense vector to GPU
