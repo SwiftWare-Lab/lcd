@@ -142,9 +142,11 @@ mtx_list = [
 
 method_list = [
     "triton-csr-wavefront", "triton-csr-sync-free",
+    "triton-csr-wavefront-mapping", "triton-csr-wavefront-unrolling",
+    "triton-csr-sync-free-mapping", "triton-csr-sync-free-unrolling",
     "numba-csr-wavefront", "numba-csr-sync-free",
-    "numba-csr-wavefront-mapping", "numba-csr-wavefront-unrolling", "numba-csr-wavefront-mapping-unrolling",
-    "numba-csr-sync-free-mapping", "numba-csr-sync-free-unrolling", "numba-csr-sync-free-mapping-unrolling",
+    "numba-csr-wavefront-mapping", "numba-csr-wavefront-unrolling",
+    "numba-csr-sync-free-mapping", "numba-csr-sync-free-unrolling",
 ]
 
 def validate_ilu0_factorization(A_result, A_original, tol=1e-3):
@@ -292,6 +294,72 @@ def correctness_test():
         except Exception as e:
             print(f"triton-csr-sync-free failed: {e}")
 
+        # Test Triton wavefront optimization variants
+        for opt_variant in ['mapping', 'unrolling']:
+            method_name = f'triton-csr-wavefront-{opt_variant}'
+            try:
+                import torch
+                A_copy = A_test.copy()
+                wavefronts = compute_ilu_wavefront_csr(A_copy)
+                wave_start_loc, waves = compact_2d_list(wavefronts)
+                waves_gpu = torch.tensor(waves, dtype=torch.int32, device='cuda')
+                diag_pos = find_diagonal_positions(A_copy)
+                diag_pos_gpu = torch.tensor(diag_pos, dtype=torch.int32, device='cuda')
+                
+                data_gpu = torch.tensor(A_copy.data, dtype=torch.float64, device='cuda')
+                indices_gpu = torch.tensor(A_copy.indices, dtype=torch.int32, device='cuda')
+                indptr_gpu = torch.tensor(A_copy.indptr, dtype=torch.int32, device='cuda')
+                
+                if opt_variant == 'mapping':
+                    ilu0_csr_triton_wavefront_mapping(data_gpu, indices_gpu, indptr_gpu, n, wave_start_loc, waves_gpu, diag_pos_gpu, block_size=32)
+                else:  # 'unrolling'
+                    ilu0_csr_triton_wavefront_unrolling(data_gpu, indices_gpu, indptr_gpu, n, wave_start_loc, waves_gpu, diag_pos_gpu)
+                
+                result_data = data_gpu.cpu().numpy()
+                A_result = csr_matrix((result_data, A_copy.indices, A_copy.indptr), shape=A.shape)
+                
+                if validate_ilu0_factorization(A_result, A_test):
+                    print(f"{method_name}: correct")
+                    method_correctness[mat_name][method_name] = 1
+                else:
+                    print(f"Warning: {method_name} incorrect")
+            except Exception as e:
+                print(f"{method_name} failed: {e}")
+
+        # Test Triton sync-free optimization variants
+        for opt_variant in ['mapping', 'unrolling']:
+            method_name = f'triton-csr-sync-free-{opt_variant}'
+            try:
+                import torch
+                A_copy = A_test.copy()
+                dep_counts = compute_ilu_dependency_counts_csr(A_copy)
+                succ_offsets, succ_indices = build_successors_from_csr(A_copy)
+                diag_pos = find_diagonal_positions(A_copy)
+                
+                data_gpu = torch.tensor(A_copy.data, dtype=torch.float64, device='cuda')
+                indices_gpu = torch.tensor(A_copy.indices, dtype=torch.int32, device='cuda')
+                indptr_gpu = torch.tensor(A_copy.indptr, dtype=torch.int32, device='cuda')
+                succ_offsets_gpu = torch.tensor(succ_offsets, dtype=torch.int32, device='cuda')
+                succ_indices_gpu = torch.tensor(succ_indices, dtype=torch.int32, device='cuda')
+                diag_pos_gpu = torch.tensor(diag_pos, dtype=torch.int32, device='cuda')
+                dep_counts_gpu = torch.tensor(dep_counts.copy(), dtype=torch.int32, device='cuda')
+                
+                if opt_variant == 'mapping':
+                    ilu0_csr_triton_sync_free_mapping(data_gpu, indices_gpu, indptr_gpu, n, dep_counts_gpu, succ_offsets_gpu, succ_indices_gpu, diag_pos_gpu, block_size=32)
+                else:  # 'unrolling'
+                    ilu0_csr_triton_sync_free_unrolling(data_gpu, indices_gpu, indptr_gpu, n, dep_counts_gpu, succ_offsets_gpu, succ_indices_gpu, diag_pos_gpu)
+                
+                result_data = data_gpu.cpu().numpy()
+                A_result = csr_matrix((result_data, A_copy.indices, A_copy.indptr), shape=A.shape)
+                
+                if validate_ilu0_factorization(A_result, A_test):
+                    print(f"{method_name}: correct")
+                    method_correctness[mat_name][method_name] = 1
+                else:
+                    print(f"Warning: {method_name} incorrect")
+            except Exception as e:
+                print(f"{method_name} failed: {e}")
+
         # Test Numba CSR wavefront
         try:
             A_copy = A_test.copy()
@@ -347,7 +415,7 @@ def correctness_test():
             print(f"numba-csr-sync-free failed: {e}")
 
         # Test wavefront optimization variants
-        for opt_variant in ['mapping', 'unrolling', 'mapping-unrolling']:
+        for opt_variant in ['mapping', 'unrolling']:
             method_name = f'numba-csr-wavefront-{opt_variant}'
             try:
                 A_copy = A_test.copy()
@@ -362,10 +430,8 @@ def correctness_test():
                 # Select the appropriate function
                 if opt_variant == 'mapping':
                     func = ilu0_csr_numba_wavefront_mapping
-                elif opt_variant == 'unrolling':
+                else:  # 'unrolling'
                     func = ilu0_csr_numba_wavefront_unrolling
-                else:  # 'mapping-unrolling'
-                    func = ilu0_csr_numba_wavefront_mapping_unrolling
                 
                 # Process each wavefront
                 for wave_rows in wavefronts:
@@ -384,7 +450,7 @@ def correctness_test():
                 print(f"{method_name} failed: {e}")
 
         # Test sync-free optimization variants
-        for opt_variant in ['mapping', 'unrolling', 'mapping-unrolling']:
+        for opt_variant in ['mapping', 'unrolling']:
             method_name = f'numba-csr-sync-free-{opt_variant}'
             try:
                 A_copy = A_test.copy()
@@ -404,10 +470,8 @@ def correctness_test():
                 # Select the appropriate function
                 if opt_variant == 'mapping':
                     func = ilu0_csr_numba_sync_free_mapping
-                elif opt_variant == 'unrolling':
+                else:  # 'unrolling'
                     func = ilu0_csr_numba_sync_free_unrolling
-                else:  # 'mapping-unrolling'
-                    func = ilu0_csr_numba_sync_free_mapping_unrolling
                 
                 func(d_data, d_indices, d_indptr, d_dep_counts, d_succ_offsets, d_succ_indices, d_diag_pos, threads_per_block=128)
                 
@@ -441,15 +505,19 @@ configs.append(
         line_vals=method_list,
         line_names=[
             "Triton Wavefront", "Triton Sync-free",
+            "Triton Wavefront+Mapping", "Triton Wavefront+Unrolling",
+            "Triton Sync-free+Mapping", "Triton Sync-free+Unrolling",
             "Numba Wavefront", "Numba Sync-free",
-            "Numba Wavefront+Mapping", "Numba Wavefront+Unrolling", "Numba Wavefront+Mapping+Unrolling",
-            "Numba Sync-free+Mapping", "Numba Sync-free+Unrolling", "Numba Sync-free+Mapping+Unrolling",
+            "Numba Wavefront+Mapping", "Numba Wavefront+Unrolling",
+            "Numba Sync-free+Mapping", "Numba Sync-free+Unrolling",
         ],
         styles=[
             ("orange", "-"), ("orange", "--"),
+            ("orange", "-."), ("orange", ":"),
+            ("cyan", "-."), ("cyan", ":"),
             ("red", "-"), ("purple", "-"),
-            ("green", "-"), ("green", "--"), ("green", "-."),
-            ("blue", "-"), ("blue", "--"), ("blue", "-."),
+            ("green", "-"), ("green", "--"),
+            ("blue", "-"), ("blue", "--"),
         ],
         ylabel="GFLOP/S",
         plot_name="ilu0-performance",
@@ -522,6 +590,58 @@ def benchmark(matrices, provider):
         
         ms, min_ms, max_ms = triton.testing.do_bench(run_triton_csr_sync_free, quantiles=quantiles, warmup=warmup, rep=rep)
 
+    elif provider in ['triton-csr-wavefront-mapping', 'triton-csr-wavefront-unrolling']:
+        import torch
+        wavefronts = compute_ilu_wavefront_csr(A)
+        wave_start_loc, waves = compact_2d_list(wavefronts)
+        waves_gpu = torch.tensor(waves, dtype=torch.int32, device='cuda')
+        diag_pos = find_diagonal_positions(A)
+        diag_pos_gpu = torch.tensor(diag_pos, dtype=torch.int32, device='cuda')
+        
+        # Allocate GPU memory
+        data_gpu = torch.tensor(A.data.copy(), dtype=torch.float64, device='cuda')
+        indices_gpu = torch.tensor(A.indices, dtype=torch.int32, device='cuda')
+        indptr_gpu = torch.tensor(A.indptr, dtype=torch.int32, device='cuda')
+        original_data = data_gpu.clone()
+        
+        if provider == 'triton-csr-wavefront-mapping':
+            def run_triton_opt():
+                data_gpu.copy_(original_data)
+                ilu0_csr_triton_wavefront_mapping(data_gpu, indices_gpu, indptr_gpu, n, wave_start_loc, waves_gpu, diag_pos_gpu, block_size=32)
+        else:  # 'triton-csr-wavefront-unrolling'
+            def run_triton_opt():
+                data_gpu.copy_(original_data)
+                ilu0_csr_triton_wavefront_unrolling(data_gpu, indices_gpu, indptr_gpu, n, wave_start_loc, waves_gpu, diag_pos_gpu)
+        
+        ms, min_ms, max_ms = triton.testing.do_bench(run_triton_opt, quantiles=quantiles, warmup=warmup, rep=rep)
+
+    elif provider in ['triton-csr-sync-free-mapping', 'triton-csr-sync-free-unrolling']:
+        import torch
+        dep_counts = compute_ilu_dependency_counts_csr(A)
+        succ_offsets, succ_indices = build_successors_from_csr(A)
+        diag_pos = find_diagonal_positions(A)
+        
+        # Allocate GPU memory
+        data_gpu = torch.tensor(A.data.copy(), dtype=torch.float64, device='cuda')
+        indices_gpu = torch.tensor(A.indices, dtype=torch.int32, device='cuda')
+        indptr_gpu = torch.tensor(A.indptr, dtype=torch.int32, device='cuda')
+        succ_offsets_gpu = torch.tensor(succ_offsets, dtype=torch.int32, device='cuda')
+        succ_indices_gpu = torch.tensor(succ_indices, dtype=torch.int32, device='cuda')
+        diag_pos_gpu = torch.tensor(diag_pos, dtype=torch.int32, device='cuda')
+        dep_counts_gpu = torch.tensor(dep_counts, dtype=torch.int32, device='cuda')
+        original_data = data_gpu.clone()
+        
+        if provider == 'triton-csr-sync-free-mapping':
+            def run_triton_opt():
+                data_gpu.copy_(original_data)
+                ilu0_csr_triton_sync_free_mapping(data_gpu, indices_gpu, indptr_gpu, n, dep_counts_gpu, succ_offsets_gpu, succ_indices_gpu, diag_pos_gpu, block_size=32)
+        else:  # 'triton-csr-sync-free-unrolling'
+            def run_triton_opt():
+                data_gpu.copy_(original_data)
+                ilu0_csr_triton_sync_free_unrolling(data_gpu, indices_gpu, indptr_gpu, n, dep_counts_gpu, succ_offsets_gpu, succ_indices_gpu, diag_pos_gpu)
+        
+        ms, min_ms, max_ms = triton.testing.do_bench(run_triton_opt, quantiles=quantiles, warmup=warmup, rep=rep)
+
     elif provider == 'numba-csr-wavefront':
         wavefronts = compute_ilu_wavefront_csr(A)
         wave_start_loc, waves = compact_2d_list(wavefronts)
@@ -566,11 +686,9 @@ def benchmark(matrices, provider):
         
         ms, min_ms, max_ms = triton.testing.do_bench(run_numba_csr_sync, quantiles=quantiles, warmup=warmup, rep=rep)
 
-    elif provider in ['numba-csr-wavefront-mapping', 'numba-csr-wavefront-unrolling', 'numba-csr-wavefront-mapping-unrolling']:
+    elif provider in ['numba-csr-wavefront-mapping', 'numba-csr-wavefront-unrolling']:
         # Determine which variant
-        if 'unrolling' in provider and 'mapping' in provider:
-            opt_variant = 'mapping-unrolling'
-        elif 'mapping' in provider:
+        if 'mapping' in provider:
             opt_variant = 'mapping'
         else:
             opt_variant = 'unrolling'
@@ -593,10 +711,8 @@ def benchmark(matrices, provider):
         # Select function
         if opt_variant == 'mapping':
             func = ilu0_csr_numba_wavefront_mapping
-        elif opt_variant == 'unrolling':
+        else:  # 'unrolling'
             func = ilu0_csr_numba_wavefront_unrolling
-        else:  # 'mapping-unrolling'
-            func = ilu0_csr_numba_wavefront_mapping_unrolling
         
         def run_numba_csr_wave_opt():
             # Reset data on GPU before each run (device-to-device copy)
@@ -606,11 +722,9 @@ def benchmark(matrices, provider):
         
         ms, min_ms, max_ms = triton.testing.do_bench(run_numba_csr_wave_opt, quantiles=quantiles, warmup=warmup, rep=rep)
 
-    elif provider in ['numba-csr-sync-free-mapping', 'numba-csr-sync-free-unrolling', 'numba-csr-sync-free-mapping-unrolling']:
+    elif provider in ['numba-csr-sync-free-mapping', 'numba-csr-sync-free-unrolling']:
         # Determine which variant
-        if 'unrolling' in provider and 'mapping' in provider:
-            opt_variant = 'mapping-unrolling'
-        elif 'mapping' in provider:
+        if 'mapping' in provider:
             opt_variant = 'mapping'
         else:
             opt_variant = 'unrolling'
@@ -635,10 +749,8 @@ def benchmark(matrices, provider):
         # Select function
         if opt_variant == 'mapping':
             func = ilu0_csr_numba_sync_free_mapping
-        elif opt_variant == 'unrolling':
+        else:  # 'unrolling'
             func = ilu0_csr_numba_sync_free_unrolling
-        else:  # 'mapping-unrolling'
-            func = ilu0_csr_numba_sync_free_mapping_unrolling
         
         def run_numba_csr_sync_opt():
             # Reset data and dependency counts on GPU before each run (device-to-device copy)

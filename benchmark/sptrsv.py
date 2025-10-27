@@ -1052,12 +1052,6 @@ def sptrsv_numba_csr_sync_free_unrolling(data, indices, indptr, b, M, N, nnz, in
     return d_y
 
 
-def sptrsv_numba_csr_wavefront_mapping_unrolling(data, indices, indptr, b, M, N, nnz, wave_start, wavefronts, threads_per_block=128):
-    return sptrsv_numba_csr_wavefront_unrolling(data, indices, indptr, b, M, N, nnz, wave_start, wavefronts, threads_per_block)
-
-
-def sptrsv_numba_csr_sync_free_mapping_unrolling(data, indices, indptr, b, M, N, nnz, in_edges, succ_offsets, succ_indices, threads_per_block=128):
-    return sptrsv_numba_csr_sync_free_unrolling(data, indices, indptr, b, M, N, nnz, in_edges, succ_offsets, succ_indices, threads_per_block)
 
 
 def build_csc_successors(L):

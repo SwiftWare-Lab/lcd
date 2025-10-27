@@ -173,8 +173,8 @@ method_list = [
     "numba-sptrsv", "numba-sync-free", 
     "numba-csc-wavefront-mapping", "numba-csc-sync-free-mapping",
     "numba-csr-wavefront", "numba-csr-sync-free",
-    "numba-csr-wavefront-mapping", "numba-csr-wavefront-unrolling", "numba-csr-wavefront-mapping-unrolling",
-    "numba-csr-sync-free-mapping", "numba-csr-sync-free-unrolling", "numba-csr-sync-free-mapping-unrolling",
+    "numba-csr-wavefront-mapping", "numba-csr-wavefront-unrolling",
+    "numba-csr-sync-free-mapping", "numba-csr-sync-free-unrolling",
     "triton-spmv"
 ]
 # mtx_list = get_matrix_list("/home/mad29/projects/gpu-backend/testlist.txt", "")
@@ -444,15 +444,13 @@ def correctness_test():
             print("\nWarning: numba-csr-sync-free Solutions do not match!")
 
         # Test CSR optimization variants
-        for opt_variant in ['mapping', 'unrolling', 'mapping-unrolling']:
+        for opt_variant in ['mapping', 'unrolling']:
             method_name = f'numba-csr-wavefront-{opt_variant}'
             try:
                 if opt_variant == 'mapping':
                     func = sptrsv_numba_csr_wavefront_mapping
-                elif opt_variant == 'unrolling':
+                else:  # 'unrolling'
                     func = sptrsv_numba_csr_wavefront_unrolling
-                else:  # 'mapping-unrolling'
-                    func = sptrsv_numba_csr_wavefront_mapping_unrolling
                 
                 y_csr_opt = func(d_data_csr, d_indices_csr, d_indptr_csr, d_b_csr, n, n, A_csr_numba.nnz, wave_start_loc_csr_numba, waves_gpu_csr_numba, threads_per_block=128)
                 y_csr_opt_cpu = y_csr_opt.copy_to_host()
@@ -466,15 +464,13 @@ def correctness_test():
                 print(f"\n{method_name} failed: {e}")
 
         # Test CSR sync-free optimization variants
-        for opt_variant in ['mapping', 'unrolling', 'mapping-unrolling']:
+        for opt_variant in ['mapping', 'unrolling']:
             method_name = f'numba-csr-sync-free-{opt_variant}'
             try:
                 if opt_variant == 'mapping':
                     func = sptrsv_numba_csr_sync_free_mapping
-                elif opt_variant == 'unrolling':
+                else:  # 'unrolling'
                     func = sptrsv_numba_csr_sync_free_unrolling
-                else:  # 'mapping-unrolling'
-                    func = sptrsv_numba_csr_sync_free_mapping_unrolling
                 
                 y_csr_opt = func(d_data_csr, d_indices_csr, d_indptr_csr, d_b_csr, n, n, A_csr_numba.nnz, in_edges_csr, succ_offsets_csr, succ_indices_csr, threads_per_block=128)
                 y_csr_opt_cpu = y_csr_opt.copy_to_host()
@@ -519,8 +515,8 @@ configs.append(
             "Numba-CSC-Wavefront", "Numba-CSC-Sync-free",
             "Numba-CSC-Wavefront+Mapping", "Numba-CSC-Sync-free+Mapping",
             "Numba-CSR-Wavefront", "Numba-CSR-Sync-free",
-            "Numba-CSR-Wavefront+Mapping", "Numba-CSR-Wavefront+Unrolling", "Numba-CSR-Wavefront+Mapping+Unrolling",
-            "Numba-CSR-Sync-free+Mapping", "Numba-CSR-Sync-free+Unrolling", "Numba-CSR-Sync-free+Mapping+Unrolling",
+            "Numba-CSR-Wavefront+Mapping", "Numba-CSR-Wavefront+Unrolling",
+            "Numba-CSR-Sync-free+Mapping", "Numba-CSR-Sync-free+Unrolling",
             "[REF] Triton-SpMV"
         ],
         styles=[
@@ -530,8 +526,8 @@ configs.append(
             ("red", "-"), ("purple", "-"),
             ("red", "--"), ("purple", "--"),
             ("brown", "-"), ("pink", "-"),
-            ("brown", "--"), ("brown", "-."), ("brown", ":"),
-            ("pink", "--"), ("pink", "-."), ("pink", ":"),
+            ("brown", "--"), ("brown", "-."),
+            ("pink", "--"), ("pink", "-."),
             ("orange", "--")
         ],  # Visual styles for the lines
         ylabel="GFLOP/S",  # Label name for the y-axis
@@ -712,11 +708,9 @@ def benchmark(matrices, provider):
         dep_count = incoming_edge_csr_rows(A_csr)
         succ_offsets, succ_indices = build_csr_successors(A_csr)
         ms, min_ms, max_ms = triton.testing.do_bench(lambda: sptrsv_numba_csr_sync_free(d_data, d_indices, d_indptr, d_x, A.shape[0], A.shape[1], A_csr.nnz, dep_count, succ_offsets, succ_indices), quantiles=quantiles, warmup=warmpup, rep=rep)
-    if provider in ['numba-csr-wavefront-mapping', 'numba-csr-wavefront-unrolling', 'numba-csr-wavefront-mapping-unrolling']:
+    if provider in ['numba-csr-wavefront-mapping', 'numba-csr-wavefront-unrolling']:
         # Determine which variant
-        if 'unrolling' in provider and 'mapping' in provider:
-            opt_variant = 'mapping-unrolling'
-        elif 'mapping' in provider:
+        if 'mapping' in provider:
             opt_variant = 'mapping'
         else:
             opt_variant = 'unrolling'
@@ -734,17 +728,13 @@ def benchmark(matrices, provider):
         # Select function
         if opt_variant == 'mapping':
             func = sptrsv_numba_csr_wavefront_mapping
-        elif opt_variant == 'unrolling':
+        else:  # 'unrolling'
             func = sptrsv_numba_csr_wavefront_unrolling
-        else:  # 'mapping-unrolling'
-            func = sptrsv_numba_csr_wavefront_mapping_unrolling
         
         ms, min_ms, max_ms = triton.testing.do_bench(lambda: func(d_data, d_indices, d_indptr, d_x, A.shape[0], A.shape[1], A_csr.nnz, wave_start_loc, waves_gpu, threads_per_block), quantiles=quantiles, warmup=warmpup, rep=rep)
-    if provider in ['numba-csr-sync-free-mapping', 'numba-csr-sync-free-unrolling', 'numba-csr-sync-free-mapping-unrolling']:
+    if provider in ['numba-csr-sync-free-mapping', 'numba-csr-sync-free-unrolling']:
         # Determine which variant
-        if 'unrolling' in provider and 'mapping' in provider:
-            opt_variant = 'mapping-unrolling'
-        elif 'mapping' in provider:
+        if 'mapping' in provider:
             opt_variant = 'mapping'
         else:
             opt_variant = 'unrolling'
@@ -761,10 +751,8 @@ def benchmark(matrices, provider):
         # Select function
         if opt_variant == 'mapping':
             func = sptrsv_numba_csr_sync_free_mapping
-        elif opt_variant == 'unrolling':
+        else:  # 'unrolling'
             func = sptrsv_numba_csr_sync_free_unrolling
-        else:  # 'mapping-unrolling'
-            func = sptrsv_numba_csr_sync_free_mapping_unrolling
         
         ms, min_ms, max_ms = triton.testing.do_bench(lambda: func(d_data, d_indices, d_indptr, d_x, A.shape[0], A.shape[1], A_csr.nnz, dep_count, succ_offsets, succ_indices, threads_per_block), quantiles=quantiles, warmup=warmpup, rep=rep)
     if provider == 'cusparse':

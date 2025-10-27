@@ -215,6 +215,252 @@ def ilu0_csr_triton_sync_free(data, indices, indptr, M, dep_counts, succ_offsets
     )
 
 
+@triton.jit
+def ilu0_csr_triton_wavefront_mapping_kernel(
+    data_ptr, indices_ptr, indptr_ptr, M, wavefront, diag_pos_ptr, BLOCK_SIZE: tl.constexpr
+):
+    row_loc = tl.program_id(axis=0)
+    row = tl.load(wavefront + row_loc)
+    
+    if row < M:
+        row_start = tl.load(indptr_ptr + row)
+        row_end = tl.load(indptr_ptr + row + 1)
+        
+        for ptr in range(row_start, row_end):
+            col = tl.load(indices_ptr + ptr)
+            if col < row:
+                diag_ptr = tl.load(diag_pos_ptr + col)
+                diag_val = tl.load(data_ptr + diag_ptr)
+                col_start = tl.load(indptr_ptr + col)
+                col_end = tl.load(indptr_ptr + col + 1)
+                
+                if diag_val != 0.0:
+                    l_val = tl.load(data_ptr + ptr) / diag_val
+                    tl.store(data_ptr + ptr, l_val)
+                    
+                    # Vectorized update: process BLOCK_SIZE elements at a time
+                    for j_base in range(ptr + 1, row_end, BLOCK_SIZE):
+                        j_offsets = j_base + tl.arange(0, BLOCK_SIZE)
+                        j_mask = j_offsets < row_end
+                        
+                        j_cols = tl.load(indices_ptr + j_offsets, mask=j_mask, other=0)
+                        
+                        for cj_ptr in range(col_start, col_end):
+                            col_j = tl.load(indices_ptr + cj_ptr)
+                            match_mask = (j_cols == col_j) & j_mask
+                            if tl.sum(match_mask.to(tl.int32)) > 0:
+                                old_vals = tl.load(data_ptr + j_offsets, mask=match_mask, other=0.0)
+                                col_val = tl.load(data_ptr + cj_ptr)
+                                new_vals = old_vals - l_val * col_val
+                                tl.store(data_ptr + j_offsets, new_vals, mask=match_mask)
+
+
+def ilu0_csr_triton_wavefront_mapping(data, indices, indptr, M, wave_start, wavefronts, diag_pos, block_size=32):
+    num_waves = len(wave_start) - 1
+    for i in range(num_waves):
+        start = wave_start[i]
+        end = wave_start[i + 1]
+        grid_len = end - start
+        grid = (grid_len,)
+        ilu0_csr_triton_wavefront_mapping_kernel[grid](
+            data, indices, indptr, M, wavefronts[start:end], diag_pos, BLOCK_SIZE=block_size
+        )
+
+
+@triton.jit
+def ilu0_csr_triton_wavefront_unrolling_kernel(
+    data_ptr, indices_ptr, indptr_ptr, M, wavefront, diag_pos_ptr
+):
+    row_loc = tl.program_id(axis=0)
+    row = tl.load(wavefront + row_loc)
+    
+    if row < M:
+        row_start = tl.load(indptr_ptr + row)
+        row_end = tl.load(indptr_ptr + row + 1)
+        
+        for ptr in range(row_start, row_end):
+            col = tl.load(indices_ptr + ptr)
+            if col < row:
+                diag_ptr = tl.load(diag_pos_ptr + col)
+                diag_val = tl.load(data_ptr + diag_ptr)
+                col_start = tl.load(indptr_ptr + col)
+                col_end = tl.load(indptr_ptr + col + 1)
+                
+                if diag_val != 0.0:
+                    l_val = tl.load(data_ptr + ptr) / diag_val
+                    tl.store(data_ptr + ptr, l_val)
+                    
+                    # Unrolled loop: process 4 elements at a time
+                    j_ptr = ptr + 1
+                    while j_ptr + 3 < row_end:
+                        # Process 4 iterations
+                        for unroll_i in range(4):
+                            j = tl.load(indices_ptr + j_ptr + unroll_i)
+                            found = tl.cast(0, tl.int1)
+                            for cj_ptr in range(col_start, col_end):
+                                col_j = tl.load(indices_ptr + cj_ptr)
+                                if col_j == j and not found:
+                                    old_val = tl.load(data_ptr + j_ptr + unroll_i)
+                                    new_val = old_val - l_val * tl.load(data_ptr + cj_ptr)
+                                    tl.store(data_ptr + j_ptr + unroll_i, new_val)
+                                    found = tl.cast(1, tl.int1)
+                        j_ptr += 4
+                    
+                    # Remainder
+                    while j_ptr < row_end:
+                        j = tl.load(indices_ptr + j_ptr)
+                        found = tl.cast(0, tl.int1)
+                        for cj_ptr in range(col_start, col_end):
+                            col_j = tl.load(indices_ptr + cj_ptr)
+                            if col_j == j and not found:
+                                old_val = tl.load(data_ptr + j_ptr)
+                                new_val = old_val - l_val * tl.load(data_ptr + cj_ptr)
+                                tl.store(data_ptr + j_ptr, new_val)
+                                found = tl.cast(1, tl.int1)
+                        j_ptr += 1
+
+
+def ilu0_csr_triton_wavefront_unrolling(data, indices, indptr, M, wave_start, wavefronts, diag_pos):
+    num_waves = len(wave_start) - 1
+    for i in range(num_waves):
+        start = wave_start[i]
+        end = wave_start[i + 1]
+        grid_len = end - start
+        grid = (grid_len,)
+        ilu0_csr_triton_wavefront_unrolling_kernel[grid](
+            data, indices, indptr, M, wavefronts[start:end], diag_pos
+        )
+
+
+@triton.jit
+def ilu0_csr_triton_sync_free_mapping_kernel(
+    data_ptr, indices_ptr, indptr_ptr, M, dep_counts,
+    succ_offsets_ptr, succ_indices_ptr, diag_pos_ptr, BLOCK_SIZE: tl.constexpr
+):
+    row = tl.program_id(axis=0)
+    
+    if row < M:
+        while tl.atomic_add(dep_counts + row, 0) > 0:
+            pass
+        
+        row_start = tl.load(indptr_ptr + row)
+        row_end = tl.load(indptr_ptr + row + 1)
+        
+        for ptr in range(row_start, row_end):
+            col = tl.load(indices_ptr + ptr)
+            if col < row:
+                diag_ptr = tl.load(diag_pos_ptr + col)
+                diag_val = tl.load(data_ptr + diag_ptr)
+                col_start = tl.load(indptr_ptr + col)
+                col_end = tl.load(indptr_ptr + col + 1)
+                
+                if diag_val != 0.0:
+                    l_val = tl.load(data_ptr + ptr) / diag_val
+                    tl.store(data_ptr + ptr, l_val)
+                    
+                    # Vectorized update: process BLOCK_SIZE elements at a time
+                    for j_base in range(ptr + 1, row_end, BLOCK_SIZE):
+                        j_offsets = j_base + tl.arange(0, BLOCK_SIZE)
+                        j_mask = j_offsets < row_end
+                        
+                        j_cols = tl.load(indices_ptr + j_offsets, mask=j_mask, other=0)
+                        
+                        for cj_ptr in range(col_start, col_end):
+                            col_j = tl.load(indices_ptr + cj_ptr)
+                            match_mask = (j_cols == col_j) & j_mask
+                            if tl.sum(match_mask.to(tl.int32)) > 0:
+                                old_vals = tl.load(data_ptr + j_offsets, mask=match_mask, other=0.0)
+                                col_val = tl.load(data_ptr + cj_ptr)
+                                new_vals = old_vals - l_val * col_val
+                                tl.store(data_ptr + j_offsets, new_vals, mask=match_mask)
+        
+        s0 = tl.load(succ_offsets_ptr + row)
+        s1 = tl.load(succ_offsets_ptr + row + 1)
+        for p in range(s0, s1):
+            s = tl.load(succ_indices_ptr + p)
+            tl.atomic_add(dep_counts + s, -1)
+
+
+def ilu0_csr_triton_sync_free_mapping(data, indices, indptr, M, dep_counts, succ_offsets, succ_indices, diag_pos, block_size=32):
+    d_dep_counts = dep_counts.clone().detach()
+    grid = (M,)
+    ilu0_csr_triton_sync_free_mapping_kernel[grid](
+        data, indices, indptr, M, d_dep_counts,
+        succ_offsets, succ_indices, diag_pos, BLOCK_SIZE=block_size
+    )
+
+
+@triton.jit
+def ilu0_csr_triton_sync_free_unrolling_kernel(
+    data_ptr, indices_ptr, indptr_ptr, M, dep_counts,
+    succ_offsets_ptr, succ_indices_ptr, diag_pos_ptr
+):
+    row = tl.program_id(axis=0)
+    
+    if row < M:
+        while tl.atomic_add(dep_counts + row, 0) > 0:
+            pass
+        
+        row_start = tl.load(indptr_ptr + row)
+        row_end = tl.load(indptr_ptr + row + 1)
+        
+        for ptr in range(row_start, row_end):
+            col = tl.load(indices_ptr + ptr)
+            if col < row:
+                diag_ptr = tl.load(diag_pos_ptr + col)
+                diag_val = tl.load(data_ptr + diag_ptr)
+                col_start = tl.load(indptr_ptr + col)
+                col_end = tl.load(indptr_ptr + col + 1)
+                
+                if diag_val != 0.0:
+                    l_val = tl.load(data_ptr + ptr) / diag_val
+                    tl.store(data_ptr + ptr, l_val)
+                    
+                    # Unrolled loop: process 4 elements at a time
+                    j_ptr = ptr + 1
+                    while j_ptr + 3 < row_end:
+                        # Process 4 iterations
+                        for unroll_i in range(4):
+                            j = tl.load(indices_ptr + j_ptr + unroll_i)
+                            found = tl.cast(0, tl.int1)
+                            for cj_ptr in range(col_start, col_end):
+                                col_j = tl.load(indices_ptr + cj_ptr)
+                                if col_j == j and not found:
+                                    old_val = tl.load(data_ptr + j_ptr + unroll_i)
+                                    new_val = old_val - l_val * tl.load(data_ptr + cj_ptr)
+                                    tl.store(data_ptr + j_ptr + unroll_i, new_val)
+                                    found = tl.cast(1, tl.int1)
+                        j_ptr += 4
+                    
+                    # Remainder
+                    while j_ptr < row_end:
+                        j = tl.load(indices_ptr + j_ptr)
+                        found = tl.cast(0, tl.int1)
+                        for cj_ptr in range(col_start, col_end):
+                            col_j = tl.load(indices_ptr + cj_ptr)
+                            if col_j == j and not found:
+                                old_val = tl.load(data_ptr + j_ptr)
+                                new_val = old_val - l_val * tl.load(data_ptr + cj_ptr)
+                                tl.store(data_ptr + j_ptr, new_val)
+                                found = tl.cast(1, tl.int1)
+                        j_ptr += 1
+        
+        s0 = tl.load(succ_offsets_ptr + row)
+        s1 = tl.load(succ_offsets_ptr + row + 1)
+        for p in range(s0, s1):
+            s = tl.load(succ_indices_ptr + p)
+            tl.atomic_add(dep_counts + s, -1)
+
+
+def ilu0_csr_triton_sync_free_unrolling(data, indices, indptr, M, dep_counts, succ_offsets, succ_indices, diag_pos):
+    d_dep_counts = dep_counts.clone().detach()
+    grid = (M,)
+    ilu0_csr_triton_sync_free_unrolling_kernel[grid](
+        data, indices, indptr, M, d_dep_counts,
+        succ_offsets, succ_indices, diag_pos
+    )
+
+
 def ilu0_csr_numba_wavefront(data, indices, indptr, M, wave_start, wavefronts, diag_pos, threads_per_block=1):
     num_waves = len(wave_start) - 1
     for i in range(num_waves):
@@ -654,139 +900,3 @@ def ilu0_csr_numba_sync_free_unrolling(data, indices, indptr,
     cuda.synchronize()
 
 
-@cuda.jit
-def ilu0_csr_wavefront_all_kernel(data, indices, indptr, rows, diag_pos):
-    b = cuda.blockIdx.x
-    tid = cuda.threadIdx.x
-    if b >= rows.size:
-        return
-
-    row = rows[b]
-    row_start = indptr[row]
-    row_end   = indptr[row + 1]
-
-    sh_l = cuda.shared.array(1, dtype=float64)
-
-    k_ptr = row_start
-    while k_ptr < row_end:
-        k = indices[k_ptr]
-        if k >= row:
-            break
-
-        diag_ptr = diag_pos[k]
-        u_kk = data[diag_ptr]
-
-        if u_kk != 0.0:
-            if tid == 0:
-                l_ik = data[k_ptr] / u_kk
-                data[k_ptr] = l_ik
-                sh_l[0] = l_ik
-            cuda.syncthreads()
-            l_ik = sh_l[0]
-
-            k_row_start = indptr[k]
-            k_row_end   = indptr[k + 1]
-
-            # Unrolled loop with strided iteration
-            j_ptr = k_ptr + 1 + tid
-            while j_ptr + 3 * cuda.blockDim.x < row_end:
-                for unroll_idx in range(4):
-                    jcol = indices[j_ptr + unroll_idx * cuda.blockDim.x]
-                    pos = bin_search_col(indices, k_row_start, k_row_end, jcol)
-                    if pos != -1:
-                        data[j_ptr + unroll_idx * cuda.blockDim.x] -= l_ik * data[pos]
-                j_ptr += 4 * cuda.blockDim.x
-            
-            # Remainder
-            while j_ptr < row_end:
-                jcol = indices[j_ptr]
-                pos = bin_search_col(indices, k_row_start, k_row_end, jcol)
-                if pos != -1:
-                    data[j_ptr] -= l_ik * data[pos]
-                j_ptr += cuda.blockDim.x
-
-        cuda.syncthreads()
-        k_ptr += 1
-
-
-def ilu0_csr_numba_wavefront_mapping_unrolling(data, indices, indptr, wave_rows, diag_pos, threads_per_block=128):
-    blocks = wave_rows.size
-    ilu0_csr_wavefront_all_kernel[blocks, threads_per_block](
-        data, indices, indptr, wave_rows, diag_pos
-    )
-    cuda.synchronize()
-
-
-@cuda.jit
-def ilu0_csr_sync_free_all_kernel(data, indices, indptr,
-                                    dep_counts, succ_offsets, succ_indices,
-                                    diag_pos):
-    i = cuda.blockIdx.x
-    tid = cuda.threadIdx.x
-    if i >= dep_counts.size:
-        return
-
-    while cuda.atomic.add(dep_counts, i, 0) > 0:
-        pass
-
-    row_start = indptr[i]
-    row_end   = indptr[i + 1]
-    sh_l = cuda.shared.array(1, dtype=float64)
-
-    k_ptr = row_start
-    while k_ptr < row_end:
-        k = indices[k_ptr]
-        if k >= i:
-            break
-
-        diag_ptr = diag_pos[k]
-        u_kk = data[diag_ptr]
-
-        if u_kk != 0.0:
-            if tid == 0:
-                l_ik = data[k_ptr] / u_kk
-                data[k_ptr] = l_ik
-                sh_l[0] = l_ik
-            cuda.syncthreads()
-            l_ik = sh_l[0]
-
-            k_row_start = indptr[k]
-            k_row_end   = indptr[k + 1]
-            
-            # Unrolled loop with strided iteration
-            j_ptr = k_ptr + 1 + tid
-            while j_ptr + 3 * cuda.blockDim.x < row_end:
-                for unroll_idx in range(4):
-                    jcol = indices[j_ptr + unroll_idx * cuda.blockDim.x]
-                    pos = bin_search_col(indices, k_row_start, k_row_end, jcol)
-                    if pos != -1:
-                        data[j_ptr + unroll_idx * cuda.blockDim.x] -= l_ik * data[pos]
-                j_ptr += 4 * cuda.blockDim.x
-            
-            # Remainder
-            while j_ptr < row_end:
-                jcol = indices[j_ptr]
-                pos = bin_search_col(indices, k_row_start, k_row_end, jcol)
-                if pos != -1:
-                    data[j_ptr] -= l_ik * data[pos]
-                j_ptr += cuda.blockDim.x
-        
-        cuda.syncthreads()
-        k_ptr += 1
-
-    s0 = succ_offsets[i]
-    s1 = succ_offsets[i + 1]
-    for p in range(s0 + tid, s1, cuda.blockDim.x):
-        s = succ_indices[p]
-        cuda.atomic.add(dep_counts, s, -1)
-
-
-def ilu0_csr_numba_sync_free_mapping_unrolling(data, indices, indptr,
-                                   dep_counts, succ_offsets, succ_indices, diag_pos,
-                                   threads_per_block=128):
-    M = dep_counts.size
-    blocks = M
-    ilu0_csr_sync_free_all_kernel[blocks, threads_per_block](
-        data, indices, indptr, dep_counts, succ_offsets, succ_indices, diag_pos
-    )
-    cuda.synchronize()
