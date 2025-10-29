@@ -46,6 +46,21 @@ def incoming_edge(L):
     return incoming_edges
 
 
+def incoming_edge_csr(L):
+    incoming_edges = [[] for _ in range(L.shape[1])]
+    outgoing_edges = np.zeros(L.shape[0], dtype=np.int32)
+    for i  in range(L.shape[0]):
+        for j in range(L.indptr[i], L.indptr[i + 1]):
+            incoming_edges[L.indices[j]].append(i)
+        outgoing_edges[i] = L.indptr[i + 1] - L.indptr[i]
+    map_ptr = np.zeros(L.shape[1] + 1, dtype=np.int32)
+    map_vals = np.zeros(L.nnz, dtype=np.int32)
+    for i in range(L.shape[1]):
+        map_ptr[i + 1] = map_ptr[i] + len(incoming_edges[i])
+        map_vals[map_ptr[i]:map_ptr[i + 1]] = incoming_edges[i]
+    return map_ptr, map_vals, outgoing_edges
+
+
 def get_matrix_list(file_path, base_path):
     with open(file_path, 'r') as f:
         matrix_list = f.readlines()
