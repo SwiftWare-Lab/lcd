@@ -19,6 +19,27 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 from utils.symbolic_cholesky_csc import etree, post_order, row_col_counts, \
     detect_supernodes, convert_csc_to_supernodal, get_supernodal_dag
 from sptrsv_supernodal import *
+# from sptrsv_supernodal_cublas import (
+#     SupernodalSpTrsvCuBLAS,
+#     sptrsv_csc_supernodal_cublas
+# )
+# from sptrsv_supernodal_cudagraphs import (
+#     SupernodalSpTrsvCudaGraph,
+#     sptrsv_csc_supernodal_cudagraph
+# )
+from sptrsv_supernodal_cudagraph_syncfree import (
+    SupernodalSpTrsvCudaGraphSyncFree,
+    sptrsv_supernodal_cudagraph_syncfree
+)
+# from sptrsv_supernodal_cudagraph_syncfree_true import (
+#     TrueSyncFreeSpTrsvCudaGraph,
+#     sptrsv_supernodal_cudagraph_syncfree_true
+# )
+# from sptrsv_supernodal_syncfree import (
+#     sptrsv_supernodal_persistent,
+#     sptrsv_supernodal_block_level,
+#     sptrsv_supernodal_hybrid
+# )
 from utils.inspectors import sptrsv_csc_supernodal_analysis, \
     sptrsv_csc_supernodal_analysis_1
 
@@ -52,7 +73,8 @@ Relaxtion = 8
 mtx_list = [
     "/home/mad29/projects/testdata/matrices/1138_bus.mtx",
             ]
-method_list = ["python-sptrsv-csc-super", "numba-sptrsv-csc-super", "numba-sptrsv-csc-super-wavefront","cuda-numba-sptrsv-csc-super-syncfree", "cholmod"]
+method_list = ["python-sptrsv-csc-super", "numba-sptrsv-csc-super", "numba-sptrsv-csc-super-wavefront","cuda-numba-sptrsv-csc-super-syncfree", "cudagraphs-syncfree"]
+# NOTE: Other methods commented out to focus on sptrsv_supernodal.py and sptrsv_supernodal_cudagraph_syncfree.py implementations
 #mtx_list = get_matrix_list("/home/kazem/UFDB/spd_list.txt", "/home/kazem/UFDB/")
 #mtx_list = mtx_list[60:]
 
@@ -104,7 +126,7 @@ def correctness_test():
                                          Ls['ip'],
                                          Ls['i'],
                                          Ls['p'],
-                                         Ls['x'], b, x)
+                                         Ls['x'], b, x_sup_csc)
 
         # x_csc = L.solve(b)
 
@@ -154,8 +176,33 @@ def correctness_test():
         x_sup_cuda = d_x.copy_to_host()
         print("norm gpu: ", np.linalg.norm(x_sup_cuda - np.ones(L.shape[0]), ord=np.inf))
 
-        #print(thread_flags)
-        #print(wf_sup)
+        # x_persistent = sptrsv_supernodal_persistent(Ls, b, thread_flags.copy())
+        # print("norm sync-free persistent: ", np.linalg.norm(x_persistent - np.ones(L.shape[0]), ord=np.inf))
+
+        # x_block = sptrsv_supernodal_block_level(Ls, b, thread_flags.copy())
+        # print("norm sync-free block-level: ", np.linalg.norm(x_block - np.ones(L.shape[0]), ord=np.inf))
+
+        # x_hybrid = sptrsv_supernodal_hybrid(Ls, b, thread_flags.copy(), size_threshold=32)
+        # print("norm sync-free hybrid: ", np.linalg.norm(x_hybrid - np.ones(L.shape[0]), ord=np.inf))
+
+        # cublas_solver = SupernodalSpTrsvCuBLAS(Ls, wave_start_loc, waves)
+        # x_cublas = cublas_solver.solve(b)
+        # print("norm cuBLAS: ", np.linalg.norm(x_cublas - np.ones(L.shape[0]), ord=np.inf))
+
+        # cudagraphs_solver = SupernodalSpTrsvCudaGraph(Ls, wave_start_loc, waves)
+        # x_cudagraphs = cudagraphs_solver.solve(b)
+        # print("norm CUDA Graphs: ", np.linalg.norm(x_cudagraphs - np.ones(L.shape[0]), ord=np.inf))
+
+        cudagraphs_syncfree_solver = SupernodalSpTrsvCudaGraphSyncFree(Ls, dag_L_super)
+        x_cudagraphs_syncfree = cudagraphs_syncfree_solver.solve(b)
+        print("norm CUDA Graphs Sync-Free: ", np.linalg.norm(x_cudagraphs_syncfree - np.ones(L.shape[0]), ord=np.inf))
+
+        # try:
+        #     cudagraphs_syncfree_true_solver = TrueSyncFreeSpTrsvCudaGraph(Ls, dag_L_super)
+        #     x_cudagraphs_syncfree_true = cudagraphs_syncfree_true_solver.solve(b)
+        #     print("norm CUDA Graphs Sync-Free TRUE: ", np.linalg.norm(x_cudagraphs_syncfree_true - np.ones(L.shape[0]), ord=np.inf))
+        # except RuntimeError as e:
+        #     print(f"CUDA Graphs Sync-Free TRUE: SKIPPED - {str(e).split(chr(10))[0]}")
 
 
     return matrix_signtures, method_correctness
@@ -173,14 +220,14 @@ df.to_csv("method_correctness.csv")
 configs = []
 configs.append(
     triton.testing.Benchmark(
-        x_names=["matrices"],  # Argument names to use as an x-axis for the plot
-        x_vals=[mtx_list[i] for i in range(0, len(mtx_list))],  # Different possible values for `x_name`
-        line_arg="provider",  # Argument name whose value corresponds to a different line in the plot
-        line_vals=method_list,  # Label name for the lines
-        line_names=["Python SpTRSV CSC", "Numba SpTRSV CSC Supernodal", "Numba SpTRSV CSC Supernodal Wavefront", "CudaNumba SpTRSV CSC Supernodal SyncFree", "Cholmod Solve"],
-        styles=[("green", "-"), ("blue", "-"), ("red", "-"), ("purple", "-"), ("yellow", "-"), ("orange", "--")],  # Visual styles for the lines
-        ylabel="GFLOP/S",  # Label name for the y-axis
-        plot_name="sptrsv supernodal performance",  # Name for the plot, used also as a file name for saving the plot.
+        x_names=["matrices"],
+        x_vals=[mtx_list[i] for i in range(0, len(mtx_list))],
+        line_arg="provider",
+        line_vals=method_list,
+        line_names=["Python SpTRSV CSC", "Numba SpTRSV CSC Supernodal", "Numba SpTRSV CSC Supernodal Wavefront", "CudaNumba SpTRSV CSC Supernodal SyncFree", "CUDA Graphs Sync-Free"],
+        styles=[("green", "-"), ("blue", "-"), ("red", "-"), ("purple", "-"), ("olive", "-")],
+        ylabel="GFLOP/S",
+        plot_name="sptrsv-supernodal-performance",
         args={}
     ))
 
@@ -189,9 +236,7 @@ configs.append(
 # use triton benchmark
 @triton.testing.perf_report(configs)
 def benchmark(matrices, provider):
-#    for mtx_matrix_path in mtx_list:
-    # read matrix from file
-    matrix = scio.mmread(matrices)
+    matrix = spio.mmread(matrices)
     factor = cholesky(matrix)
     L = factor.L()
     b = L.dot(np.ones(L.shape[0]))  # np.random.rand(Ao.shape[0])
@@ -215,7 +260,6 @@ def benchmark(matrices, provider):
         x= b.copy()
         ms, min_ms, max_ms = triton.testing.do_bench(lambda: sptrsv_csc_supernodal_wavefront_numba(Ls['supernodes'], Ls['ip'], Ls['i'], Ls['p'], Ls['x'], b, x, wave_start_loc, waves), quantiles=quantiles, warmup=warmpup, rep=rep)
     if provider == 'cuda-numba-sptrsv-csc-super-syncfree':
-        # Transfer data to the GPU
         d_lx = cuda.to_device(Ls['x'])
         d_super = cuda.to_device(Ls['supernodes'])
         col_to_sup = cuda.to_device(Ls['col_to_super'])
@@ -228,8 +272,44 @@ def benchmark(matrices, provider):
         ms, min_ms, max_ms = triton.testing.do_bench(
             lambda: sptrsv_csc_supernodal_numba_cuda(d_super, col_to_sup, d_ip, d_i, d_p, d_lx, d_x,
                                          d_thread_flags, max_width), quantiles=quantiles, warmup=warmpup, rep=rep)
-    if provider == 'cholmod':
-        ms, min_ms, max_ms = triton.testing.do_bench(lambda: factor.solve_L(b, use_LDLt_decomposition=False), quantiles=quantiles, warmup=warmpup, rep=rep)
+    # if provider == 'syncfree-persistent':
+    #     ms, min_ms, max_ms = triton.testing.do_bench(
+    #         lambda: sptrsv_supernodal_persistent(Ls, b, thread_flags.copy()),
+    #         quantiles=quantiles, warmup=warmpup, rep=rep)
+    # if provider == 'syncfree-block':
+    #     ms, min_ms, max_ms = triton.testing.do_bench(
+    #         lambda: sptrsv_supernodal_block_level(Ls, b, thread_flags.copy()),
+    #         quantiles=quantiles, warmup=warmpup, rep=rep)
+    # if provider == 'syncfree-hybrid':
+    #     ms, min_ms, max_ms = triton.testing.do_bench(
+    #         lambda: sptrsv_supernodal_hybrid(Ls, b, thread_flags.copy(), 32),
+    #         quantiles=quantiles, warmup=warmpup, rep=rep)
+    # if provider == 'cublas':
+    #     cublas_solver = SupernodalSpTrsvCuBLAS(Ls, wave_start_loc, waves)
+    #     ms, min_ms, max_ms = triton.testing.do_bench(
+    #         lambda: sptrsv_csc_supernodal_cublas(cublas_solver, b),
+    #         quantiles=quantiles, warmup=warmpup, rep=rep)
+    # if provider == 'cudagraphs':
+    #     cudagraphs_solver = SupernodalSpTrsvCudaGraph(Ls, wave_start_loc, waves)
+    #     ms, min_ms, max_ms = triton.testing.do_bench(
+    #         lambda: cudagraphs_solver.solve(b),
+    #         quantiles=quantiles, warmup=warmpup, rep=rep)
+    if provider == 'cudagraphs-syncfree':
+        cudagraphs_syncfree_solver = SupernodalSpTrsvCudaGraphSyncFree(Ls, dag_L_super)
+        ms, min_ms, max_ms = triton.testing.do_bench(
+            lambda: cudagraphs_syncfree_solver.solve(b),
+            quantiles=quantiles, warmup=warmpup, rep=rep)
+    # if provider == 'cudagraphs-syncfree-true':
+    #     try:
+    #         cudagraphs_syncfree_true_solver = TrueSyncFreeSpTrsvCudaGraph(Ls, dag_L_super)
+    #         ms, min_ms, max_ms = triton.testing.do_bench(
+    #             lambda: cudagraphs_syncfree_true_solver.solve(b),
+    #             quantiles=quantiles, warmup=warmpup, rep=rep)
+    #     except RuntimeError:
+    #         # CUDA Graphs not supported, return NaN
+    #         ms, min_ms, max_ms = float('nan'), float('nan'), float('nan')
+    # if provider == 'cholmod':
+    #     ms, min_ms, max_ms = triton.testing.do_bench(lambda: factor.solve_L(b, use_LDLt_decomposition=False), quantiles=quantiles, warmup=warmpup, rep=rep)
 
     perf = lambda ms: (L.shape[0] + 2 * L.nnz) / (ms * 1e-3) / 1e9
     #print(f"seconds: {ms}")
