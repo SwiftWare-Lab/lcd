@@ -96,7 +96,8 @@ def parallel(**kwargs):
         print(source)
         old_code_obj = function.__code__
         cur_ast = ast.parse(source)
-        finalize_legality_of_fusion((loop, loop), cur_ast, function_props)
+        constraints, dependences = finalize_legality_of_fusion((loop, loop), cur_ast, function_props)
+        print('\n-----------------------------------------------\n'.join(map(str,dependences)))
         # spf_builder = SPFBuilder()
         # root_node = spf_builder.visit(cur_ast)
         # node_data = extract_node_data(root_node)

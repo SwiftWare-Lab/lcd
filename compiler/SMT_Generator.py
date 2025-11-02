@@ -8,8 +8,8 @@ def generate_smt_file(loop_nodes, dep_cons, known_funcs, func_props):
     f_content.append("(set-logic AUFNIRA)\n")
     generate_function_prop(func_props, f_content)
     generate_loop_bound_s_expressions_v2(loop_nodes, f_content)
+    # print(dep_cons)
     generate_dep_constraints(dep_cons, f_content, known_funcs)
-
     # generate_func_props(func_props, f_content)
     with open("smt_file.smt2", "w") as f:
         f.writelines(f_content)
@@ -34,11 +34,11 @@ def generate_loop_bound_s_expressions(iter_vars, bounds, f_content):
 def generate_loop_bound_s_expressions_v2(loop_nodes, f_content):
     defined_consts = set()
     # headers = sorted(iter_vars.keys())
-    for loop_node in loop_nodes:
-        iter_var = loop_node.iter_var
+    for iv, bound in loop_nodes.items():
+        iter_var = iv
         iter_var = str(iter_var).replace(".", "")
         f_content.append(f"(declare-const {iter_var} Int)\n")
-        consts, funcs, sympy_expr = loop_node.bound.get_sympy_expr(iter_var)
+        consts, funcs, sympy_expr = bound.get_sympy_expr(iter_var)
         for c in consts:
             if c not in defined_consts:
                 defined_consts.add(c)
@@ -76,7 +76,7 @@ def generate_function_prop_monotonicity(func_name, f_content):
     f_content.append(f"(assert ( forall ((x1 Int) (x2 Int)) (=> (> x2 x1) (>= ({func_name} x2) ({func_name} x1))) ))\n")
 
 def generate_function_prop_triangularity(cmprs_func, idx_func, f_content):
-    f_content.append(f"(assert ( forall ((x1 Int) (x2 Int)) (= (> x2 ({cmprs_func} x1)) (> ({idx_func} x2) x1)) ))\n")
+    f_content.append(f"(assert ( forall ((x1 Int) (x2 Int)) (=> (> x2 ({cmprs_func} x1)) (> ({idx_func} x2) x1)) ))\n")
 
 #TODO implement all the handy function properties
 

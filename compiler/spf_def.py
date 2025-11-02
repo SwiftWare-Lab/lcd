@@ -1,3 +1,5 @@
+from copy import deepcopy
+
 import sympy
 
 class DependencePremise:
@@ -5,8 +7,16 @@ class DependencePremise:
         self.left = left
         self.right = right
 
-    # def get_subscripted_premise(self):
-    #     return DependencePremise(self.left + "1", self.right + "2")
+    def subscript(self):
+        if isinstance(self.left, Access):
+            self.left = self.left.subscript_index("1")
+        else:
+            self.left = str(self.left) + "1"
+        if isinstance(self.right, Access):
+            self.right = self.right.subscript_index("2")
+        else:
+            self.right = str(self.right) + "2"
+        # return DependencePremise(left, right)
 
 
     def __eq__(self, other):
@@ -71,6 +81,21 @@ class LoopBound:
         self.start = start
         self.end = end
 
+    def subscript_iteration_vars(self, subscript):
+        if isinstance(self.start, Expression):
+            new_start = self.start.subscript(subscript)
+        elif isinstance(self.start, Access):
+            new_start = self.start.subscript_index(subscript)
+        else:
+            new_start = self.start
+        if isinstance(self.end, Expression):
+            new_end = self.end.subscript(subscript)
+        elif isinstance(self.end, Access):
+            new_end = self.end.subscript_index(subscript)
+        else:
+            new_end = self.end
+        return LoopBound(new_start, new_end)
+
     def get_sympy_expr(self, iter_var):
         f1 = []
         f2 = []
@@ -93,7 +118,7 @@ class LoopBound:
         else:
             end = sympy.Symbol(self.end)
             consts.append(end)
-        return consts, f1 + f2, sympy.And(sympy.Gt(sympy.Symbol(iter_var), start), sympy.LessThan(sympy.Symbol(iter_var), end))
+        return consts, f1 + f2, sympy.And(sympy.GreaterThan(sympy.Symbol(iter_var), start), sympy.Lt(sympy.Symbol(iter_var), end))
 
     def __repr__(self):
         return '(' + str(self.start) + ', ' + str(self.end) + ')'
@@ -137,6 +162,17 @@ class Access:
         funcs += [f for f in self.get_index_sympy_expr()[0] if f is not None]
         func_sym = sympy.Function(func)(args)
         return funcs, func_sym
+
+    def subscript_index(self, subscript):
+        if isinstance(self.index, Access):
+            return Access(self.index.var, self.index.subscript_index(subscript))
+        elif isinstance(self.index, Expression):
+            return Access(self.var, self.index.subscript(subscript))
+        elif self.index.isalpha():
+            return Access(self.var, self.index+subscript)
+        else:
+            return Access(self.var, self.index)
+
 
     def __eq__(self, other):
         if isinstance(other, Access):
@@ -188,6 +224,15 @@ class Expression:
 
     def get_sympy_expr(self):
         return sympy.parse_expr(str(self).replace(".", "").replace('[', '(').replace(']', ')'))
+
+    def subscript(self, subscript):
+        new_expr = Expression(deepcopy(self.elements))
+        for i, e in enumerate(new_expr.elements):
+            if isinstance(e, Access):
+                new_expr.elements[i] = e.subscript_index(subscript)
+            elif e.isalpha():
+                new_expr.elements[i] = e + subscript
+        return new_expr
 
 
 class DataDependence:

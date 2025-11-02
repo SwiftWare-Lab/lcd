@@ -45,8 +45,6 @@ def check_loop_bounds_safety(targeted_iters: tuple[str, str], loop_bounds: dict[
 def extract_fusion_constraint_for_dependence(dependence: DataDependence):
     from_sched = dependence.from_si
     to_sched = dependence.to_si
-    print(from_sched)
-    print(to_sched)
     conditions = sympy.false
     base_cond = sympy.true
     for i, s in enumerate(from_sched.schedule):
@@ -69,7 +67,6 @@ def extract_fusion_constraint_for_dependence(dependence: DataDependence):
 def transform_sched(target_sched: Schedule, current_sched: Schedule, i1: str, i2: str):
     new_sched = deepcopy(current_sched)
     tar_index = 0
-    print(i1, i2)
     for i, s in enumerate(target_sched.schedule):
         if s == i1:
             tar_index = i + 1
@@ -95,10 +92,11 @@ def extract_fusion_illegality_constraint(targeted_iters: tuple[str, str], depend
         new_dep = DataDependence(dep.from_si, new_sched, dep.data, dep.premises, dep.type)
         fusion_constraint_for_dependence = extract_fusion_constraint_for_dependence(new_dep)
         condition_stmt, known_funcs_new = dep.get_condition_statement_sympy()
+        #TODO: Change how this behaves
         dependence_constraint = And(condition_stmt,
                                     fusion_constraint_for_dependence)
         known_funcs.update(known_funcs_new)
-        constraints.append(dependence_constraint)
+        constraints.append(condition_stmt)
     return constraints, known_funcs
 
 
@@ -114,9 +112,9 @@ def check_legality_of_fusion(mapping: tuple[str, str],
                 mapping_nodes[lnode.iter_var] = lnode
     if check_loop_bounds_safety(mapping, loop_bounds):
         dependences = extract_dependences(node_data, mapping, mapping_nodes)
-        # new_mapping = subscript_fused_vars(mapping)
-        constraints, known_funcs = extract_fusion_illegality_constraint(mapping, dependences)
-        return constraints, dependences, known_funcs
+        new_mapping = subscript_fused_vars(mapping)
+        constraints, known_funcs = extract_fusion_illegality_constraint(new_mapping, dependences)
+        return constraints, dependences, known_funcs, new_mapping
     else:
         return sympy.true
     # if check_loop_bounds_safety(targeted_iters, loop_bounds, mappings):
@@ -159,7 +157,8 @@ def extract_raw_data_dependencies(node_data, last_write_accesses):
                 r_index = r_access.get_index()
                 w_index = w_access.get_index()
                 if r_arr == w_arr:
-                    if wi != ri or r_index != w_index or isinstance(r_index, Access):
+                    #TODO: Fix for multiple dimension arrays
+                    if r_index != w_index or isinstance(r_index[0], Access):
                         premises = [Equality(w_index[i], r_index[i]) for i in range(len(r_index))]
                         raw_dependence = DataDependence(wi, ri, r_arr, premises, 'RAW')
                         dependences.append(raw_dependence)
@@ -170,11 +169,11 @@ def refine_dependences(dependences, fused_iter_vars):
     refined_dependences = []
     for dep in dependences:
         new_dep = update_dep(dep, fused_iter_vars)
-        # subscript_dependence(new_dep)
+        subscript_dependence(new_dep)
         dep_cond = check_if_dependence_holds(new_dep)
         if dep_cond != sympy.false:
             refined_dependences.append(new_dep)
-            dep.add_premises(dep_cond)
+            new_dep.add_premises(dep_cond)
     return refined_dependences
 
 
@@ -208,7 +207,7 @@ def check_if_dependence_holds(dependence):
             if not dependence.has_premise(Equality(from_sched.schedule[i], to_sched.schedule[i])):
                 from_sym = from_sched.schedule[i].replace(".", "")
                 to_sym = to_sched.schedule[i].replace(".", "")
-                conditions.append(GreaterThanOrEqual(to_sym, from_sym))
+                conditions.append(GreaterThan(to_sym, from_sym))
     return conditions
 
 
@@ -227,29 +226,14 @@ def subscript_dependence(dependence):
     for i, s in enumerate(from_sched.schedule):
         if not s.isnumeric():
             new_from_sched.schedule[i] = s + "1"
-    for k, fi in enumerate(dependence.from_ind):
-        if fi in from_sched.schedule:
-            new_from_ind.append(fi + "1")
-        elif isinstance(fi, Access):
-            new_fi = Access(fi.var, fi.index + "1")
-            new_from_ind.append(new_fi)
-        else:
-            new_from_ind.append(fi)
     for j, s in enumerate(to_sched.schedule):
         if not s.isnumeric():
             new_to_sched.schedule[j] = s + "2"
-    for k, ti in enumerate(dependence.to_ind):
-        if ti in to_sched.schedule:
-            new_to_ind.append(ti + "2")
-        elif isinstance(ti, Access):
-            new_ti = Access(ti.var, ti.index + "1")
-            new_to_ind.append(new_ti)
-        else:
-            new_to_ind.append(ti)
+    for premise in dependence.premises:
+        premise.subscript()
     dependence.from_si = new_from_sched
     dependence.to_si = new_to_sched
-    dependence.from_ind = tuple(new_from_ind)
-    dependence.to_ind = tuple(new_to_ind)
+
 
 
 # Works based on iter var to node data map.
@@ -264,17 +248,26 @@ def extract_dependences(node_data, fused_iter_vars, mapping_nodes):
     # print(dependences)
     # fused_iter_vars = [node_data[loop_id].iter_var for loop_id in fused_loop_ids]
     refined_dependences = refine_dependences(dependences, fused_iter_vars)
-    for i, dependence in enumerate(refined_dependences):
-        print(dependence)
-        print("-----------------")
+    # for i, dependence in enumerate(refined_dependences):
+    #     print(dependence)
+    #     print("-----------------")
     return refined_dependences
 
 
-def prove_dependence(smt_str, output):
+def prove_dependence(proc_num, smt_str, output):
     s = Solver()
     s.from_string(smt_str)
-    output.append(s.check())
+    result = s.check()
+    output.put(result)
+    # print(s.model())
 
+
+def update_iv_node_data(iv_node_data):
+    new_iv_node_data = {}
+    for nid, node in iv_node_data.items():
+        new_iv_node_data[nid+"1"] = node.bound.subscript_iteration_vars("1")
+        new_iv_node_data[nid+"2"] = node.bound.subscript_iteration_vars("2")
+    return new_iv_node_data
 
 def finalize_legality_of_fusion(transformation, cur_ast, function_props):
     spf_builder = SPFBuilder()
@@ -284,25 +277,30 @@ def finalize_legality_of_fusion(transformation, cur_ast, function_props):
     for nid, node in node_data.items():
         if isinstance(node, LoopNode):
             iv_node_data[node.iter_var] = node
-    constraints, dependencies, known_funcs = check_legality_of_fusion(transformation, node_data)
-    # TODO: Check multiple dependences: sometimes one dependence is disproven and the rest are not.
-    if constraints[0] != sympy.false:
-        smt_out = generate_smt_file(iv_node_data.values(), constraints[0], known_funcs, function_props)
-        output = [CheckSatResult(Z3_L_TRUE)]
-        sat_check_proc = multiprocessing.Process(target=prove_dependence, args=[smt_out, output])
+    constraints, dependencies, known_funcs, new_mapping = check_legality_of_fusion(transformation, node_data)
+    new_constraints = []
+    new_dependencies = []
+    # TODO: Run multiple dependences in parallel processes.
+    outputs = multiprocessing.Queue()
+    for i, constraint in enumerate(constraints):
+        new_iv_node_data = update_iv_node_data(iv_node_data)
+        smt_out = generate_smt_file(new_iv_node_data, constraint, known_funcs, function_props)
+        sat_check_proc = multiprocessing.Process(target=prove_dependence, args=(i, smt_out, outputs))
         sat_check_proc.start()
         sat_check_proc.join(1)
         if sat_check_proc.is_alive():
-            print("Terminating SAT solver")
+            # print("Terminating SAT solver")
             sat_check_proc.terminate()
             sat_check_proc.join()
-
-        if output[0] == CheckSatResult(Z3_L_FALSE):
-            return True
-        else:
-            return constraints, dependencies
-    else:
-        return True
+        try:
+            res = outputs.get(timeout=1)
+        except Exception as e:
+            res = CheckSatResult(Z3_L_TRUE)
+        # print(res)
+        if res == CheckSatResult(Z3_L_TRUE):
+            new_constraints.append(constraint)
+            new_dependencies.append(dependencies[i])
+    return new_constraints, new_dependencies
 
 
 def transform_ast(transformation, cur_ast):
@@ -534,34 +532,34 @@ for i in frange(n):
     x[i] /= A[IA[i + 1] - 1]
 """
 
-if __name__ == "__main__":
-    tree = ast.parse(src_spmv_spmv)
-    spf_builder = SPFBuilder()
-    root_node = spf_builder.visit(tree)
-    node_data = extract_node_data(root_node)
-    #
-    #     print(node_data)
-    function_props = {
-        'Ap': ['monotonically_increasing'],
-        'Ai': [],
-    }
-    const, dependencies = check_legality_of_fusion(('i1', 'j1'), node_data)
-    #     mappings = extract_mappings(root_node, node_data, spf_builder.fused_loop_ids)
-    #     print(mappings)
-    #     iv_node_data = {}
-    #     for nid, node in node_data:
-    #         if isinstance(node, LoopNode):
-    #             iv_node_data[node.iter_var] = node
-    #     print(check_legality_of_fusion(("i1", "j1"), iv_node_data))
-    #     check_legality_of_fusion(spf_builder.fused_loop_ids, )
-    #     fusion_transformer = LegalFusionTransformer()
-    #     transformed_tree = fusion_transformer.visit(tree)
-    #     print(ast.unparse(transformed_tree))
-    print(dependencies)
-    iter_list = extract_dag_creation_components(('i1', 'j1'), dependencies[0], node_data)
-    print(iter_list)
-    code = generate_dag_generation_code(iter_list, node_data, {'j1': 'm'})
-    print(code)
+# if __name__ == "__main__":
+#     tree = ast.parse(src_spmv_spmv)
+#     spf_builder = SPFBuilder()
+#     root_node = spf_builder.visit(tree)
+#     node_data = extract_node_data(root_node)
+#     #
+#     #     print(node_data)
+#     function_props = {
+#         'Ap': ['monotonically_increasing'],
+#         'Ai': [],
+#     }
+#     const, dependencies = check_legality_of_fusion(('i1', 'j1'), node_data)
+#     #     mappings = extract_mappings(root_node, node_data, spf_builder.fused_loop_ids)
+#     #     print(mappings)
+#     #     iv_node_data = {}
+#     #     for nid, node in node_data:
+#     #         if isinstance(node, LoopNode):
+#     #             iv_node_data[node.iter_var] = node
+#     #     print(check_legality_of_fusion(("i1", "j1"), iv_node_data))
+#     #     check_legality_of_fusion(spf_builder.fused_loop_ids, )
+#     #     fusion_transformer = LegalFusionTransformer()
+#     #     transformed_tree = fusion_transformer.visit(tree)
+#     #     print(ast.unparse(transformed_tree))
+#     print(dependencies)
+#     iter_list = extract_dag_creation_components(('i1', 'j1'), dependencies[0], node_data)
+#     print(iter_list)
+#     code = generate_dag_generation_code(iter_list, node_data, {'j1': 'm'})
+#     print(code)
 
     # new_file_name = "dag_extraction.py"
     #

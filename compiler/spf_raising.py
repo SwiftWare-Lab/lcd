@@ -187,7 +187,9 @@ class SPFBuilder(ast.NodeVisitor):
         if isinstance(target, ast.Name):
             assign_node.write_access = Access(target.id, None)
         elif isinstance(target, ast.Subscript):
-            assign_node.write_access = self.visit(target)
+            target_obj = self.visit(target)
+            assign_node.add_read_access(target_obj)
+            assign_node.write_access = target_obj
         else:
             raise NotImplementedError(f"Unsupported assign target type: {type(target)}")
         value = self.visit(node.value)
