@@ -4,7 +4,6 @@ from numba import njit
 import sys
 import os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
-from compiler.loop_carried_compiler import MyCompiler
 
 import numpy as np
 from scipy.sparse.linalg import spsolve_triangular  # CPU sparse solver
@@ -20,6 +19,8 @@ import triton.language as tl
 
 from numba import cuda
 from numba import config
+from cupy.cuda import graph
+
 
 config.CUDA_ENABLE_PYNVJITLINK = 1
 
@@ -557,6 +558,7 @@ def sptrsv_numba_csr_wavefront(data, indices, indptr, b, M, N, nnz, wave_start, 
         sptrsv_numba_csr_wavefront_kernel[blocks_per_grid, threads_per_block](data, indices, indptr, b, d_y, M, N, nnz, wavefronts, wave_start[i])
         cuda.synchronize()
     return d_y
+
 
 
 def sptrsv_numba_csr_sync_free(data, indices, indptr, b, M, N, nnz, in_edges, succ_offsets, succ_indices):
@@ -1097,3 +1099,31 @@ def simple_sptrsv_csc_syncfree(L, b):
             if in_edges[L.indices[j]] == 1:
                 ready_cols = np.append(ready_cols, L.indices[j])
     return x
+
+
+# Implementations using repetitions to measure cuda graph effect.
+
+def sptrsv_numba_csr_wavefront_mapping_cudagraph(data, indices, indptr, b, M, N, nnz, wave_start, wavefronts, threads_per_block=128):
+    d_y = cuda.to_device(np.zeros(M, dtype=np.float64))
+    num_waves = len(wave_start) - 1
+    s1 = cp.cuda.Stream(non_blocking=True)
+    graphs = []
+    nb_stream = cuda.external_stream(s1.ptr)
+    for i in range(num_waves):
+        s1.begin_capture()
+        wave_rows = wavefronts[wave_start[i]:wave_start[i + 1]]
+        d_wave_rows = cuda.to_device(wave_rows)
+        blocks_per_grid = len(wave_rows)
+        sptrsv_numba_csr_wavefront_mapping_kernel[blocks_per_grid, threads_per_block,nb_stream](
+            data, indices, indptr, b, d_y, d_wave_rows
+        )
+        g = s1.end_capture()
+        graphs.append(g)
+
+
+
+    for _ in range(10):
+        for g in graphs:
+            g.launch(stream=s1)
+            cuda.synchronize()
+    return d_y

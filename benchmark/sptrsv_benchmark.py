@@ -26,8 +26,8 @@ print(f"Compute Capability: {device.compute_capability}")
 
 
 mtx_list = [
-"/home/mad29/projects/testdata/matrices/1138_bus.mtx",
-"/home/mad29/projects/testdata/matrices/2cubes_sphere.mtx",
+"/home/salehm32/projects/fused-gnn/fusion/data/SPD/Andrews/Andrews.mtx",
+"/home/salehm32/projects/fused-gnn/fusion/data/SPD/2cubes_sphere/2cubes_sphere.mtx",
 ]
 method_list = [
     "triton", "triton-sync-free", "triton-csc-mapping",
@@ -325,6 +325,21 @@ def correctness_test():
                     print(f"\nWarning: {method_name} Solutions do not match!")
             except Exception as e:
                 print(f"\n{method_name} failed: {e}")
+
+        method_name = f'numba-csr-wavefront-cuda-graph'
+        try:
+            func = sptrsv_numba_csr_wavefront_mapping_cudagraph
+
+            y_csr_opt = func(d_data_csr, d_indices_csr, d_indptr_csr, d_b_csr, n, n, A_csr_numba.nnz, wave_start_loc_csr_numba, waves_gpu_csr_numba, threads_per_block=128)
+            y_csr_opt_cpu = y_csr_opt.copy_to_host()
+
+            if np.allclose(x_cpu, y_csr_opt_cpu, atol=1e-5):
+                print(f"\n{method_name} Solutions match within tolerance!")
+                method_correctness[mat_name][method_name] = 1
+            else:
+                print(f"\nWarning: {method_name} Solutions do not match!")
+        except Exception as e:
+            print(f"\n{method_name} failed: {e}")
 
         # Test CSR sync-free optimization variants
         for opt_variant in ['mapping', 'unrolling']:
@@ -629,6 +644,11 @@ def benchmark(matrices, provider):
     print(f"{provider} -- {matrices} -- seconds: {ms}")
     return perf(ms), perf(min_ms), perf(max_ms)
 
+# @triton.testing.perf_report(configs)
+# def benchmark_reps():
+
+
+
 # Call the benchmark function
-benchmark.run(print_data=True, save_path=".", show_plots=True)
+# benchmark.run(print_data=True, save_path=".", show_plots=True)
 
