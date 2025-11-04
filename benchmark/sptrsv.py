@@ -866,6 +866,39 @@ def sptrsv_numba_csr_wavefront_mapping_kernel(data, indices, indptr, b, y, rows)
         diag = data[row_end - 1]
         y[row] = (b[row] - shared_sum[0]) / diag
 
+@cuda.jit
+def sptrsv_numba_csr_row_mapping_kernel(data, indices, indptr, b, y, row):
+    # block_id = cuda.blockIdx.x
+    tid = cuda.threadIdx.x
+    block_size = cuda.blockDim.x
+
+    # if block_id >= rows.size:
+    #     return
+
+    # row = rows[block_id]
+    row_start = indptr[row]
+    row_end = indptr[row + 1]
+
+    shared_sum = cuda.shared.array(128, dtype=numba.float64)
+
+    partial_sum = 0.0
+    for j in range(row_start + tid, row_end - 1, block_size):
+        partial_sum += data[j] * y[indices[j]]
+
+    shared_sum[tid] = partial_sum
+    cuda.syncthreads()
+
+    s = block_size // 2
+    while s > 0:
+        if tid < s:
+            shared_sum[tid] += shared_sum[tid + s]
+        cuda.syncthreads()
+        s //= 2
+
+    if tid == 0:
+        diag = data[row_end - 1]
+        y[row] = (b[row] - shared_sum[0]) / diag
+
 
 def sptrsv_numba_csr_wavefront_mapping(data, indices, indptr, b, M, N, nnz, wave_start, wavefronts, threads_per_block=128):
     d_y = cuda.to_device(np.zeros(M, dtype=np.float64))
@@ -1103,7 +1136,7 @@ def simple_sptrsv_csc_syncfree(L, b):
 
 # Implementations using repetitions to measure cuda graph effect.
 
-def sptrsv_numba_csr_wavefront_mapping_cudagraph(data, indices, indptr, b, M, N, nnz, wave_start, wavefronts, threads_per_block=128):
+def sptrsv_numba_csr_wavefront_mapping_cudagraph_coarsenodes(data, indices, indptr, b, M, N, nnz, wave_start, wavefronts, reps, threads_per_block=128):
     d_y = cuda.to_device(np.zeros(M, dtype=np.float64))
     num_waves = len(wave_start) - 1
     s1 = cp.cuda.Stream(non_blocking=True)
@@ -1122,8 +1155,36 @@ def sptrsv_numba_csr_wavefront_mapping_cudagraph(data, indices, indptr, b, M, N,
 
 
 
-    for _ in range(10):
+    for _ in range(reps):
         for g in graphs:
             g.launch(stream=s1)
             cuda.synchronize()
     return d_y
+
+def sptrsv_numba_csr_wavefront_mapping_cudagraph_finenodes(data, indices, indptr, b, M, N, nnz, wave_start, wavefronts, reps, threads_per_block=128):
+    d_y = cuda.to_device(np.zeros(M, dtype=np.float64))
+    num_waves = len(wave_start) - 1
+    s1 = cp.cuda.Stream(non_blocking=True)
+    graphs = []
+    nb_stream = cuda.external_stream(s1.ptr)
+    for i in range(num_waves):
+        s1.begin_capture()
+        for row in wavefronts[wave_start[i]:wave_start[i + 1]]:
+            # wave_rows = wavefronts[wave_start[i]:wave_start[i + 1]]
+            # d_wave_rows = cuda.to_device(wave_rows)
+            blocks_per_grid = 1
+            sptrsv_numba_csr_row_mapping_kernel[blocks_per_grid, threads_per_block,nb_stream](
+                data, indices, indptr, b, d_y, row
+            )
+        g = s1.end_capture()
+        graphs.append(g)
+
+
+
+    for _ in range(reps):
+        for g in graphs:
+            g.launch(stream=s1)
+            cuda.synchronize()
+    return d_y
+
+

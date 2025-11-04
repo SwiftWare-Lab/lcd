@@ -1,0 +1,7 @@
+matrices,numba-csr-wavefront,numba-csr-wavefront-cudagraph-fine,numba-csr-wavefront-cudagraph-coarse
+/home/salehm32/projects/fused-gnn/fusion/data/SPD/Andrews/Andrews.mtx,0.005231,0.000063,0.012022
+/home/salehm32/projects/fused-gnn/fusion/data/SPD/bmw7st_1/bmw7st_1.mtx,0.003029,0.000230,0.012559
+/home/salehm32/projects/fused-gnn/fusion/data/SPD/crankseg_1/crankseg_1.mtx,0.000789,0.000744,0.001451
+/home/salehm32/projects/fused-gnn/fusion/data/SPD/bmwcra_1/bmwcra_1.mtx,0.004273,0.000320,0.020448
+/home/salehm32/projects/fused-gnn/fusion/data/SPD/hood/hood.mtx,0.005232,0.000216,0.019839
+/home/salehm32/projects/fused-gnn/fusion/data/SPD/crankseg_2/crankseg_2.mtx,0.000969,0.000824,0.000565

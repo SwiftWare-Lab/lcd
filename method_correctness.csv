@@ -10,7 +10,7 @@ cusparse,1,1
 numba-sptrsv,1,1
 numba-sync-free,1,0
 numba-csc-wavefront-mapping,1,1
-numba-csc-sync-free-mapping,0,0
+numba-csc-sync-free-mapping,1,0
 numba-csr-wavefront,1,1
 numba-csr-sync-free,1,0
 numba-csr-wavefront-mapping,1,1
@@ -18,4 +18,3 @@ numba-csr-wavefront-unrolling,1,1
 numba-csr-sync-free-mapping,1,1
 numba-csr-sync-free-unrolling,1,1
 triton-spmv,0,0
-numba-csr-wavefront-cuda-graph,1,1
