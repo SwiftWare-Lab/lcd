@@ -102,11 +102,13 @@ class SupernodalSpTrsvCudaGraphSyncFree:
             x_block = x[col_b:col_e]
             
             L_diag = diag_block[:sup_width, :sup_width]
-            self._trsv_lower(L_diag, x_block)
+            cp.scipy.linalg.solve_triangular(L_diag, x_block, lower=True)
+            # self._trsv_lower(L_diag, x_block)
             
             if sup_len > sup_width and n_scatter > 0:
                 off_diag = diag_block[sup_width:, :]
-                update = self._matvec_no_blas(off_diag, x_block)
+                # update = self._matvec_no_blas(off_diag, x_block)
+                update = cp.matmul(off_diag, x_block)
                 
                 row_idx = self.row_idx_per_sn[sn_id]
                 threads_per_block = 256
@@ -159,3 +161,7 @@ def sptrsv_supernodal_cudagraph_syncfree(Ls, dag_matrix, b):
     solver = SupernodalSpTrsvCudaGraphSyncFree(Ls, dag_matrix)
     return solver.solve(b)
 
+class SptrsvCudaGraphWavefront:
+    def __init__(self, Ls, dag_matrix):
+        self.Ls = Ls
+        self.dag_matrix = dag_matrix

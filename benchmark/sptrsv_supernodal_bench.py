@@ -71,7 +71,7 @@ os.environ['NUMBA_CUDA_PTX_VERSION'] = '84'
 Relaxtion = 8
 
 mtx_list = [
-    "/home/mad29/projects/testdata/matrices/1138_bus.mtx",
+    "/home/salehm32/projects/fused-gnn/fusion/data/SPD/Andrews/Andrews.mtx",
             ]
 method_list = ["python-sptrsv-csc-super", "numba-sptrsv-csc-super", "numba-sptrsv-csc-super-wavefront","cuda-numba-sptrsv-csc-super-syncfree", "cudagraphs-syncfree"]
 # NOTE: Other methods commented out to focus on sptrsv_supernodal.py and sptrsv_supernodal_cudagraph_syncfree.py implementations
@@ -173,8 +173,29 @@ def correctness_test():
         max_width = Ls['max_width']
         print("max width: ", max_width)
         sptrsv_csc_supernodal_numba_cuda(d_super, col_to_sup, d_ip, d_i, d_p, d_lx, d_x, d_thread_flags, max_width)
-        x_sup_cuda = d_x.copy_to_host()
-        print("norm gpu: ", np.linalg.norm(x_sup_cuda - np.ones(L.shape[0]), ord=np.inf))
+        # x_sup_cuda = d_x.copy_to_host()
+        # print("norm gpu: ", np.linalg.norm(x_sup_cuda - np.ones(L.shape[0]), ord=np.inf))
+
+
+        #TODO: add execution of cuda graph implementation
+        x_sup_wf_cupy = b.copy()
+        d_supernodes = cp.asarray(Ls['supernodes'])
+        d_ip = cp.asarray(Ls['ip'])
+        print(len(Ls['x']))
+        d_lx = cp.asarray(Ls['x'])
+        d_i = cp.asarray(Ls['i'])
+        d_p = cp.asarray(Ls['p'])
+        d_b = cp.asarray(b)
+        d_x = cp.asarray(x_sup_wf_cupy)
+        d_waves_ptr = cp.asarray(wave_start_loc)
+        d_waves = cp.asarray(waves)
+        sptrsv_csc_supernodal_wavefront_numba(
+            d_supernodes, d_ip, d_i, d_p, d_x, d_b, d_lx, d_waves_ptr, d_waves
+        )
+        out = cp.asnumpy(d_x)
+        print("norm gpu cupy: ", np.linalg.norm(out - np.ones(L.shape[0]), ord=np.inf))
+
+
 
         # x_persistent = sptrsv_supernodal_persistent(Ls, b, thread_flags.copy())
         # print("norm sync-free persistent: ", np.linalg.norm(x_persistent - np.ones(L.shape[0]), ord=np.inf))
@@ -318,5 +339,5 @@ def benchmark(matrices, provider):
     return perf(ms), perf(min_ms), perf(max_ms)
 
 # Call the benchmark function
-benchmark.run(print_data=True, save_path=".", show_plots=True)
+# benchmark.run(print_data=True, save_path=".", show_plots=True)
 

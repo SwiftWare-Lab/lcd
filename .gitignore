@@ -162,7 +162,7 @@ cython_debug/
 .idea/
 # vscode
 .vscode/
-
+data/
 # datasets
 code_gen/cfmtx_matrices/
 code_gen/mtx_matrices/
