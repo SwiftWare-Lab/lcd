@@ -1155,10 +1155,11 @@ def sptrsv_numba_csr_wavefront_mapping_cudagraph_coarsenodes(data, indices, indp
 
 
 
+    gexecs = [g.instantiate() for g in graphs]
     for _ in range(reps):
-        for g in graphs:
-            g.launch(stream=s1)
-            cuda.synchronize()
+        for gexec in gexecs:
+            gexec.launch(s1)
+            s1.synchronize()
     return d_y
 
 def sptrsv_numba_csr_wavefront_mapping_cudagraph_finenodes(data, indices, indptr, b, M, N, nnz, wave_start, wavefronts, reps, threads_per_block=128):
@@ -1180,11 +1181,11 @@ def sptrsv_numba_csr_wavefront_mapping_cudagraph_finenodes(data, indices, indptr
         graphs.append(g)
 
 
-
+    gexecs = [g.instantiate() for g in graphs]
     for _ in range(reps):
-        for g in graphs:
-            g.launch(stream=s1)
-            cuda.synchronize()
+        for gexec in gexecs:
+            gexec.launch(s1)
+            s1.synchronize()
     return d_y
 
 

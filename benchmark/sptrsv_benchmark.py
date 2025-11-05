@@ -40,7 +40,7 @@ method_list = [
     "numba-csr-sync-free-mapping", "numba-csr-sync-free-unrolling",
     "triton-spmv"
 ]
-mtx_list = get_matrix_list("/home/salehm32/projects/fused-gnn/fusion/data/SPD/spd_list2.txt", "/home/salehm32/projects/fused-gnn/fusion/data/SPD/")
+mtx_list = get_matrix_list("/home/salehm32/projects/fused-gnn/fusion/data/all-ss/gpu-backend-list.txt", "/home/salehm32/projects/fused-gnn/fusion/data/all-ss/")
 #mtx_list = mtx_list[60:]
 
 def correctness_test():
