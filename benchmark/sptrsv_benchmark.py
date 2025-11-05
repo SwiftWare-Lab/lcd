@@ -17,6 +17,7 @@ from sptrsv import *
 # os.environ['CUDA_ENABLE_COMPUTE_CAPABILITY'] = '84'  # Adjust this value based on your GPU
 import warnings
 from numba.core.errors import NumbaPerformanceWarning
+import sys
 warnings.filterwarnings('ignore', category=NumbaPerformanceWarning)
 
 device = cuda.get_current_device()
@@ -40,7 +41,11 @@ method_list = [
     "numba-csr-sync-free-mapping", "numba-csr-sync-free-unrolling",
     "triton-spmv"
 ]
-mtx_list = get_matrix_list("/home/salehm32/projects/fused-gnn/fusion/data/all-ss/gpu-backend-list.txt", "/home/salehm32/projects/fused-gnn/fusion/data/all-ss/")
+
+mat_list_file = sys.argv[2]
+mat_list_folder = sys.argv[1]
+
+mtx_list = get_matrix_list(mat_list_file, mat_list_folder)
 #mtx_list = mtx_list[60:]
 
 def correctness_test():
@@ -384,8 +389,8 @@ def correctness_test():
         # print ("numba synch-free", y_numba_cpu_sync_free[:5])
     return matrix_signtures, method_correctness
 
-
-# mat_signatures, method_correctness = correctness_test()
+if len(sys.argv) > 3 and sys.argv[3] == 1:
+    mat_signatures, method_correctness = correctness_test()
 # convert to df and save as csv
 # import pandas as pd
 # df = pd.DataFrame(mat_signatures)
@@ -754,6 +759,7 @@ def benchmark_reps(matrices, provider):
     print(f"{provider} -- {matrices} -- seconds: {ms}")
     return perf(ms), perf(min_ms), perf(max_ms)
 
+benchmark.run(print_data=True, save_path=".", show_plots=False)
 # Call the benchmark function
-benchmark_reps.run(print_data=True, save_path=".", show_plots=True)
+benchmark_reps.run(print_data=True, save_path=".", show_plots=False)
 
