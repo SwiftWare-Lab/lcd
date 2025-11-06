@@ -25,12 +25,10 @@ source ./venv/bin/activate
 export TRITON_CACHE_DIR=$SCRATCH/.triton/cache
 
 #export PYTHONPATH="$SCRATCH/projects/gpu-backend"
-if [ "$TUNED" ==  1 ]; then
-  while read line; do
-    mat=$line
-    python benchmark/sptrsv_benchmark.py $mat $MAT_DIR > sptrsv_benchmark_$COUNT
-  done < ${MATLIST}
-fi
+while read line; do
+  mat=$line
+  python benchmark/sptrsv_cudagraph_benchmark.py $mat $MAT_DIR > sptrsv_cudagraph_benchmark_$COUNT
+done < $MAT_FILE
 #python benchmark/sptrsv_benchmark.py $MAT_DIR $MAT_FILE > sptrsv_benchmark_$COUNT
 
 deactivate
