@@ -25,11 +25,13 @@ print(f"Using GPU: {device.name}")
 print(f"Compute Capability: {device.compute_capability}")
 
 
-mat_list_file = sys.argv[2]
-mat_list_folder = sys.argv[1]
+# mat_list_file = sys.argv[2]
+# mat_list_folder = sys.argv[1]
 
-mtx_list = get_matrix_list(mat_list_file, mat_list_folder)
-
+# mtx_list = get_matrix_list(mat_list_file, mat_list_folder)
+mtx_path = sys.argv[1]
+mtx_folder = sys.argv[2]
+mtx = mtx_path + mtx_folder
 rep_method_list = [
     "numba-csr-wavefront","numba-csr-wavefront-cudagraph-fine",
     "numba-csr-wavefront-cudagraph-coarse"
@@ -39,8 +41,8 @@ rep_method_list = [
 new_configs = []
 new_configs.append(
     triton.testing.Benchmark(
-        x_names=["matrices"],  # Argument names to use as an x-axis for the plot
-        x_vals=[mtx_list[i] for i in range(0, len(mtx_list))],  # Different possible values for `x_name`
+        x_names=["matrix"],  # Argument names to use as an x-axis for the plot
+        x_vals=[mtx],  # Different possible values for `x_name`
         line_arg="provider",  # Argument name whose value corresponds to a different line in the plot
         line_vals=rep_method_list,  # Label name for the lines
         line_names=[
@@ -56,16 +58,16 @@ new_configs.append(
     ))
 
 @triton.testing.perf_report(new_configs)
-def benchmark_reps(matrices, provider):
+def benchmark_reps(matrix_name, provider):
     inner_reps = 50
-    matrix = scio.mmread(matrices)
+    matrix = scio.mmread(matrix_name)
     n = matrix.shape[0]
     # convert matrix to csc
     A = matrix.tocsc()
     # makke it sparse lower triangular
     A = tril(A, format="csc")
     if A.data.dtype != np.float64:
-        print(f"Matrix {matrices} is not double precision")
+        # print(f"Matrix {matrices} is not double precision")
         A.data = A.data.astype(np.float64)
 
     # add diagonals with 100
@@ -122,7 +124,8 @@ def benchmark_reps(matrices, provider):
     perf = lambda ms: (A.shape[0] + 2 * A.nnz) / (ms * 1e-3) / 1e9
     #print(f"seconds: {ms}")
     #print(f"max: {perf(max_ms)}, min: {perf(min_ms)}, median: {perf(ms)}")
-    print(f"{provider} -- {matrices} -- seconds: {ms}")
+    # print(f"{provider} -- {matrices} -- seconds: {ms}")
+    print(f"{provider},{matrix_name},{ms},{perf(ms)}")
     return perf(ms), perf(min_ms), perf(max_ms)
 
 benchmark_reps.run(print_data=True, save_path=".", show_plots=False)

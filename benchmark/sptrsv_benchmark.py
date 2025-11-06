@@ -666,5 +666,5 @@ def benchmark(matrices, provider):
 
 
 
-benchmark.run(print_data=True, save_path=".", show_plots=False)
+benchmark.run(print_data=False, save_path=".", show_plots=False)
 
