@@ -6,28 +6,26 @@
 #SBATCH --mail-user=msalehi20@gmail.com
 #SBATCH --nodes=1
 #SBATCH --gpus-per-node=1
-#SBATCH --mem=100000M
 #SBATCH --output="lpc.%j.%N.out"
-#SBATCH -t 3:59:00
+#SBATCH -t 11:59:00
 
-UFDB=$1
-EXP=$2
-BUILD=$3
-PROFILING=$4
+
 
 module load StdEnv/2023
 module load python
+module load gcc
+module load cuda
 
 MAT_FILE=$1
 MAT_DIR=$2
+COUNT=$3
 
+source ./venv/bin/activate
 
-module load python/3.11.5
+export TRITON_CACHE_DIR=$SCRATCH/.triton/cache
 
-source ~/.virtualenvs/myenv/bin/activate
+#export PYTHONPATH="$SCRATCH/projects/gpu-backend"
 
-export PYTHONPATH="$SCRATCH/projects/gpu-backend"
-
-python compiler/fusion_benchmark/spmm_softmax.py $MAT_FILE $MAT_DIR > spmm_softmax_benchmark
+python benchmark/sptrsv_benchmark.py $MAT_DIR $MAT_FILE > sptrsv_benchmark_$COUNT
 
 deactivate
