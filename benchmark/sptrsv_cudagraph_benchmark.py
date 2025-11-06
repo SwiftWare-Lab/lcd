@@ -124,3 +124,5 @@ def benchmark_reps(matrices, provider):
     #print(f"max: {perf(max_ms)}, min: {perf(min_ms)}, median: {perf(ms)}")
     print(f"{provider} -- {matrices} -- seconds: {ms}")
     return perf(ms), perf(min_ms), perf(max_ms)
+
+benchmark_reps.run(print_data=True, save_path=".", show_plots=False)
