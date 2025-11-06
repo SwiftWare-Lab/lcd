@@ -23,11 +23,11 @@ COUNT=$3
 source ./venv/bin/activate
 
 export TRITON_CACHE_DIR=$SCRATCH/.triton/cache
-
+echo 'impl,matrix,time,gflops' > sptrsv_cudagraph_benchmark_$COUNT
 #export PYTHONPATH="$SCRATCH/projects/gpu-backend"
 while read line; do
   mat=$line
-  python benchmark/sptrsv_cudagraph_benchmark.py $mat $MAT_DIR > sptrsv_cudagraph_benchmark_$COUNT
+  python benchmark/sptrsv_cudagraph_benchmark.py $mat $MAT_DIR >> sptrsv_cudagraph_benchmark_$COUNT
 done < $MAT_FILE
 #python benchmark/sptrsv_benchmark.py $MAT_DIR $MAT_FILE > sptrsv_benchmark_$COUNT
 

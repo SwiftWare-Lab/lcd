@@ -21,8 +21,8 @@ import sys
 warnings.filterwarnings('ignore', category=NumbaPerformanceWarning)
 
 device = cuda.get_current_device()
-print(f"Using GPU: {device.name}")
-print(f"Compute Capability: {device.compute_capability}")
+# print(f"Using GPU: {device.name}")
+# print(f"Compute Capability: {device.compute_capability}")
 
 
 # mat_list_file = sys.argv[2]
@@ -31,7 +31,7 @@ print(f"Compute Capability: {device.compute_capability}")
 # mtx_list = get_matrix_list(mat_list_file, mat_list_folder)
 mtx_path = sys.argv[1]
 mtx_folder = sys.argv[2]
-mtx = mtx_path + mtx_folder
+mtx = mtx_folder + "/" + mtx_path
 rep_method_list = [
     "numba-csr-wavefront","numba-csr-wavefront-cudagraph-fine",
     "numba-csr-wavefront-cudagraph-coarse"
@@ -41,7 +41,7 @@ rep_method_list = [
 new_configs = []
 new_configs.append(
     triton.testing.Benchmark(
-        x_names=["matrix"],  # Argument names to use as an x-axis for the plot
+        x_names=["matrix_name"],  # Argument names to use as an x-axis for the plot
         x_vals=[mtx],  # Different possible values for `x_name`
         line_arg="provider",  # Argument name whose value corresponds to a different line in the plot
         line_vals=rep_method_list,  # Label name for the lines
