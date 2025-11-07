@@ -39,7 +39,7 @@ method_list = [
     "numba-csr-wavefront", "numba-csr-sync-free",
     "numba-csr-wavefront-mapping", "numba-csr-wavefront-unrolling",
     "numba-csr-sync-free-mapping", "numba-csr-sync-free-unrolling",
-    "triton-spmv"
+    # "triton-spmv"
 ]
 
 mat_list_file = sys.argv[2]

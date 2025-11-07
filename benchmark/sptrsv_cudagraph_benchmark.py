@@ -33,8 +33,12 @@ mtx_path = sys.argv[1]
 mtx_folder = sys.argv[2]
 mtx = mtx_folder + "/" + mtx_path
 rep_method_list = [
-    "numba-csr-wavefront","numba-csr-wavefront-cudagraph-fine",
-    "numba-csr-wavefront-cudagraph-coarse"
+    "numba-csr-wavefront",
+    "numba-csc-wavefront",
+    "numba-csr-sync-free",
+    "numba-csc-sync-free",
+    "numba-csr-wavefront-cudagraph",
+    "numba-csc-wavefront-cudagraph"
 ]
 
 
@@ -95,7 +99,67 @@ def benchmark_reps(matrix_name, provider):
 
         ms, min_ms, max_ms = triton.testing.do_bench(lambda: run_with_reps(), quantiles=quantiles, warmup=warmpup, rep=rep)
 
-    if provider == 'numba-csr-wavefront-cudagraph-coarse':
+    if provider == 'numba-csc-wavefront':
+        # Determine which variant
+
+        threads_per_block = 128
+        A_csr = A.tocsr()
+        d_data = cuda.to_device(A_csr.data)
+        d_indices = cuda.to_device(A_csr.indices)
+        d_indptr = cuda.to_device(A_csr.indptr)
+        d_x = cuda.to_device(np.zeros(n))
+        wavefronts = compute_wavefront(A)
+        wave_start_loc, waves = compact_2d_list(wavefronts)
+        waves_gpu = cuda.to_device(waves)
+        func = sptrsv_numba_csc_wavefront_mapping
+        def run_with_reps():
+            for _ in range(inner_reps):
+                func(d_data, d_indices, d_indptr, d_x, A.shape[0], A.shape[1], A_csr.nnz, wave_start_loc, waves_gpu, threads_per_block)
+        # Select function
+
+        ms, min_ms, max_ms = triton.testing.do_bench(lambda: run_with_reps(), quantiles=quantiles, warmup=warmpup, rep=rep)
+
+    if provider == 'numba-csr-sync-free':
+        # Determine which variant
+
+        threads_per_block = 128
+        A_csr = A.tocsr()
+        d_data = cuda.to_device(A_csr.data)
+        d_indices = cuda.to_device(A_csr.indices)
+        d_indptr = cuda.to_device(A_csr.indptr)
+        d_x = cuda.to_device(np.zeros(n))
+        wavefronts = compute_wavefront(A)
+        wave_start_loc, waves = compact_2d_list(wavefronts)
+        waves_gpu = cuda.to_device(waves)
+        func = sptrsv_numba_csr_sync_free_mapping
+        def run_with_reps():
+            for _ in range(inner_reps):
+                func(d_data, d_indices, d_indptr, d_x, A.shape[0], A.shape[1], A_csr.nnz, wave_start_loc, waves_gpu, threads_per_block)
+        # Select function
+
+        ms, min_ms, max_ms = triton.testing.do_bench(lambda: run_with_reps(), quantiles=quantiles, warmup=warmpup, rep=rep)
+
+    if provider == 'numba-csc-sync-free':
+        # Determine which variant
+
+        threads_per_block = 128
+        A_csr = A.tocsr()
+        d_data = cuda.to_device(A_csr.data)
+        d_indices = cuda.to_device(A_csr.indices)
+        d_indptr = cuda.to_device(A_csr.indptr)
+        d_x = cuda.to_device(np.zeros(n))
+        wavefronts = compute_wavefront(A)
+        wave_start_loc, waves = compact_2d_list(wavefronts)
+        waves_gpu = cuda.to_device(waves)
+        func = sptrsv_numba_csc_sync_free
+        def run_with_reps():
+            for _ in range(inner_reps):
+                func(d_data, d_indices, d_indptr, d_x, A.shape[0], A.shape[1], A_csr.nnz, wave_start_loc, waves_gpu, threads_per_block)
+        # Select function
+
+        ms, min_ms, max_ms = triton.testing.do_bench(lambda: run_with_reps(), quantiles=quantiles, warmup=warmpup, rep=rep)
+
+    if provider == 'numba-csr-wavefront-cudagraph':
         threads_per_block = 128
         A_csr = A.tocsr()
         d_data = cuda.to_device(A_csr.data)
@@ -106,6 +170,19 @@ def benchmark_reps(matrix_name, provider):
         wave_start_loc, waves = compact_2d_list(wavefronts)
         waves_gpu = cuda.to_device(waves)
         func = sptrsv_numba_csr_wavefront_mapping_cudagraph_coarsenodes
+        ms, min_ms, max_ms = triton.testing.do_bench(lambda: func(d_data, d_indices, d_indptr, d_x, A.shape[0], A.shape[1], A_csr.nnz, wave_start_loc, waves_gpu, inner_reps, threads_per_block), quantiles=quantiles, warmup=warmpup, rep=rep)
+
+    if provider == 'numba-csc-wavefront-cudagraph':
+        threads_per_block = 128
+        A_csr = A.tocsr()
+        d_data = cuda.to_device(A_csr.data)
+        d_indices = cuda.to_device(A_csr.indices)
+        d_indptr = cuda.to_device(A_csr.indptr)
+        d_x = cuda.to_device(np.zeros(n))
+        wavefronts = compute_wavefront(A)
+        wave_start_loc, waves = compact_2d_list(wavefronts)
+        waves_gpu = cuda.to_device(waves)
+        func = sptrsv_numba_csc_wavefront_mapping_cudagraph_coarsenodes
         ms, min_ms, max_ms = triton.testing.do_bench(lambda: func(d_data, d_indices, d_indptr, d_x, A.shape[0], A.shape[1], A_csr.nnz, wave_start_loc, waves_gpu, inner_reps, threads_per_block), quantiles=quantiles, warmup=warmpup, rep=rep)
 
     if provider == 'numba-csr-wavefront-cudagraph-fine':

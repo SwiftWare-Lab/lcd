@@ -1161,6 +1161,28 @@ def sptrsv_numba_csr_wavefront_mapping_cudagraph_coarsenodes(data, indices, indp
             s1.synchronize()
     return d_y
 
+
+def sptrsv_numba_csc_wavefront_mapping_cudagraph_coarsenodes(data, indices, indptr, b, M, N, nnz, wave_start, wavefronts, reps, threads_per_block=128):
+    d_y = cuda.to_device(np.zeros(M, dtype=np.float64))
+    num_waves = len(wave_start) - 1
+    s1 = cp.cuda.Stream(non_blocking=True)
+    graphs = []
+    nb_stream = cuda.external_stream(s1.ptr)
+    for i in range(num_waves):
+        wave_cols = wavefronts[wave_start[i]:wave_start[i + 1]]
+        d_wave_cols = cuda.to_device(wave_cols)
+        blocks_per_grid = len(wave_cols)
+        sptrsv_numba_csc_wavefront_mapping_kernel[blocks_per_grid, threads_per_block, nb_stream](
+            data, indices, indptr, b, d_y, d_wave_cols
+        )
+        g = s1.end_capture()
+        graphs.append(g)
+    for _ in range(reps):
+        for g in graphs:
+            g.launch(s1)
+            s1.synchronize()
+    return d_y
+
 def sptrsv_numba_csr_wavefront_mapping_cudagraph_finenodes(data, indices, indptr, b, M, N, nnz, wave_start, wavefronts, reps, threads_per_block=128):
     d_y = cuda.to_device(np.zeros(M, dtype=np.float64))
     num_waves = len(wave_start) - 1
@@ -1184,5 +1206,6 @@ def sptrsv_numba_csr_wavefront_mapping_cudagraph_finenodes(data, indices, indptr
             g.launch(s1)
             s1.synchronize()
     return d_y
+
 
 
