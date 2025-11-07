@@ -1,0 +1,2 @@
+matrix_name,numba-csr-wavefront,numba-csc-wavefront,numba-csr-sync-free,numba-csc-sync-free,numba-csr-wavefront-cudagraph,numba-csc-wavefront-cudagraph
+/home/salehm32/projects/fused-gnn/fusion/data/SPD//Andrews/Andrews.mtx,0.005111,0.005143,0.008541,0.020924,0.012171,0.019879

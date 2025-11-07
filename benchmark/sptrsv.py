@@ -1169,6 +1169,7 @@ def sptrsv_numba_csc_wavefront_mapping_cudagraph_coarsenodes(data, indices, indp
     graphs = []
     nb_stream = cuda.external_stream(s1.ptr)
     for i in range(num_waves):
+        s1.begin_capture()
         wave_cols = wavefronts[wave_start[i]:wave_start[i + 1]]
         d_wave_cols = cuda.to_device(wave_cols)
         blocks_per_grid = len(wave_cols)

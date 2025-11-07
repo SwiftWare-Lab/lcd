@@ -59,6 +59,14 @@ new_configs.append(
         ],
         styles=[
             ("green", "-"), ("blue", "-"), ("green", "--"),
+            ("cyan", "-"), ("magenta", "-"), ("cyan", "--"), ("magenta", "--"),
+            ("yellow", "-"),
+            ("red", "-"), ("purple", "-"),
+            ("red", "--"), ("purple", "--"),
+            ("brown", "-"), ("pink", "-"),
+            ("brown", "--"), ("brown", "-."),
+            ("pink", "--"), ("pink", "-."),
+            ("orange", "--")
         ],  # Visual styles for the lines
         ylabel="GFLOP/S",  # Label name for the y-axis
         plot_name="sptrsv-cudagraph-performance",  # Name for the plot, used also as a file name for saving the plot.
@@ -132,13 +140,12 @@ def benchmark_reps(matrix_name, provider):
         d_indices = cuda.to_device(A_csr.indices)
         d_indptr = cuda.to_device(A_csr.indptr)
         d_x = cuda.to_device(np.zeros(n))
-        wavefronts = compute_wavefront(A)
-        wave_start_loc, waves = compact_2d_list(wavefronts)
-        waves_gpu = cuda.to_device(waves)
+        dep_count = incoming_edge_csr_rows(A_csr)
+        succ_offsets, succ_indices = build_csr_successors(A_csr)
         func = sptrsv_numba_csr_sync_free_mapping
         def run_with_reps():
             for _ in range(inner_reps):
-                func(d_data, d_indices, d_indptr, d_x, A.shape[0], A.shape[1], A_csr.nnz, wave_start_loc, waves_gpu, threads_per_block)
+                func(d_data, d_indices, d_indptr, d_x, A.shape[0], A.shape[1], A_csr.nnz, dep_count, succ_offsets, succ_indices, threads_per_block)
         # Select function
 
         ms, min_ms, max_ms = triton.testing.do_bench(lambda: run_with_reps(), quantiles=quantiles, warmup=warmpup, rep=rep)
@@ -147,18 +154,18 @@ def benchmark_reps(matrix_name, provider):
         # Determine which variant
 
         threads_per_block = 128
-        A_csr = A.tocsr()
-        d_data = cuda.to_device(A_csr.data)
-        d_indices = cuda.to_device(A_csr.indices)
-        d_indptr = cuda.to_device(A_csr.indptr)
+
+        d_data = cuda.to_device(A.data)
+        d_indices = cuda.to_device(A.indices)
+        d_indptr = cuda.to_device(A.indptr)
         d_x = cuda.to_device(np.zeros(n))
-        wavefronts = compute_wavefront(A)
-        wave_start_loc, waves = compact_2d_list(wavefronts)
-        waves_gpu = cuda.to_device(waves)
-        func = sptrsv_numba_csc_sync_free
+        dep_count = incoming_edge(A)
+        succ_offsets_csc, succ_indices_csc = build_csc_successors(A)
+        d_succ_offsets_csc = cuda.to_device(succ_offsets_csc)
+        d_succ_indices_csc = cuda.to_device(succ_indices_csc)
         def run_with_reps():
             for _ in range(inner_reps):
-                func(d_data, d_indices, d_indptr, d_x, A.shape[0], A.shape[1], A_csr.nnz, wave_start_loc, waves_gpu, threads_per_block)
+                sptrsv_numba_csc_sync_free_mapping(d_data, d_indices, d_indptr, d_x, A.shape[0], A.shape[1], A.nnz, dep_count, d_succ_offsets_csc, d_succ_indices_csc, threads_per_block)
         # Select function
 
         ms, min_ms, max_ms = triton.testing.do_bench(lambda: run_with_reps(), quantiles=quantiles, warmup=warmpup, rep=rep)
