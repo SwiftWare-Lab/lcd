@@ -50,8 +50,12 @@ new_configs.append(
         line_arg="provider",  # Argument name whose value corresponds to a different line in the plot
         line_vals=rep_method_list,  # Label name for the lines
         line_names=[
-            "numba-csr-wavefront","numba-csr-wavefront-cudagraph-fine",
-            "numba-csr-wavefront-cudagraph-coarse"
+            "numba-csr-wavefront",
+            "numba-csc-wavefront",
+            "numba-csr-sync-free",
+            "numba-csc-sync-free",
+            "numba-csr-wavefront-cudagraph",
+            "numba-csc-wavefront-cudagraph"
         ],
         styles=[
             ("green", "-"), ("blue", "-"), ("green", "--"),
