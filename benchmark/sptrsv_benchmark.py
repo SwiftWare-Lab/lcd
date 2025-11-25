@@ -26,10 +26,12 @@ from sptrsv_codegen import (
     sptrsv_numba_csr_sync_free_unrolling_64,
 )
 from sptrsv_coarsening import (
-    compute_coarsened_wavefronts, compact_2d_list,
-    sptrsv_numba_csc_coarsened, sptrsv_numba_csr_coarsened,
+    compute_coarsened_wavefronts, compact_2d_list, compact_coarsened_wavefronts,
     sptrsv_numba_csc_coarsened_mapping, sptrsv_numba_csr_coarsened_mapping,
-    sptrsv_triton_csc_coarsened, sptrsv_triton_csr_coarsened,
+    sptrsv_numba_csc_wavefront_block_coarsening, sptrsv_numba_csr_wavefront_block_coarsening,
+    sptrsv_numba_csc_wavefront_thread_coarsening, sptrsv_numba_csr_wavefront_thread_coarsening,
+    sptrsv_numba_csc_sync_free_block_coarsening, sptrsv_numba_csr_sync_free_block_coarsening,
+    sptrsv_numba_csc_sync_free_thread_coarsening, sptrsv_numba_csr_sync_free_thread_coarsening,
 )
 # Common values are '75' (for compute capability 7.5), '86' (for 8.6), etc.
 # import os
@@ -47,144 +49,144 @@ print(f"Compute Capability: {device.compute_capability}")
 
 mtx_list = [
 "/home/mad29/projects/testdata/matrices/1138_bus.mtx",
-# "/home/mad29/projects/testdata/matrices/2cubes_sphere.mtx",
-# "/home/mad29/projects/testdata/matrices/Chem97ZtZ.mtx",
-# "/home/mad29/projects/testdata/matrices/Dubcova1.mtx",
-# "/home/mad29/projects/testdata/matrices/Dubcova2.mtx",
-# "/home/mad29/projects/testdata/matrices/Dubcova3.mtx",
-# "/home/mad29/projects/testdata/matrices/Emilia_923.mtx",
-# "/home/mad29/projects/testdata/matrices/Fault_639.mtx",
-# "/home/mad29/projects/testdata/matrices/Flan_1565.mtx",
-# "/home/mad29/projects/testdata/matrices/G2_circuit.mtx",
-# "/home/mad29/projects/testdata/matrices/G3_circuit.mtx",
-# "/home/mad29/projects/testdata/matrices/Geo_1438.mtx",
-# "/home/mad29/projects/testdata/matrices/Hook_1498.mtx",
-# "/home/mad29/projects/testdata/matrices/Kuu.mtx",
-# "/home/mad29/projects/testdata/matrices/LF10000.mtx",
-# "/home/mad29/projects/testdata/matrices/Muu.mtx",
-# "/home/mad29/projects/testdata/matrices/PFlow_742.mtx",
-# "/home/mad29/projects/testdata/matrices/Pres_Poisson.mtx",
-# "/home/mad29/projects/testdata/matrices/Serena.mtx",
-# "/home/mad29/projects/testdata/matrices/StocF-1465.mtx",
-# "/home/mad29/projects/testdata/matrices/Trefethen_2000.mtx",
-# "/home/mad29/projects/testdata/matrices/Trefethen_20000.mtx",
-# "/home/mad29/projects/testdata/matrices/bcsstk08.mtx",
-# "/home/mad29/projects/testdata/matrices/bcsstk09.mtx",
-# "/home/mad29/projects/testdata/matrices/bcsstk10.mtx",
-# "/home/mad29/projects/testdata/matrices/bcsstk11.mtx",
-# "/home/mad29/projects/testdata/matrices/bcsstk12.mtx",
-# "/home/mad29/projects/testdata/matrices/bcsstk13.mtx",
-# "/home/mad29/projects/testdata/matrices/bcsstk14.mtx",
-# "/home/mad29/projects/testdata/matrices/bcsstk15.mtx",
-# "/home/mad29/projects/testdata/matrices/bcsstk16.mtx",
-# "/home/mad29/projects/testdata/matrices/bcsstk17.mtx",
-# "/home/mad29/projects/testdata/matrices/bcsstk18.mtx",
-# "/home/mad29/projects/testdata/matrices/bcsstk21.mtx",
-# "/home/mad29/projects/testdata/matrices/bcsstk23.mtx",
-# "/home/mad29/projects/testdata/matrices/bcsstk24.mtx",
-# "/home/mad29/projects/testdata/matrices/bcsstk25.mtx",
-# "/home/mad29/projects/testdata/matrices/bcsstk26.mtx",
-# "/home/mad29/projects/testdata/matrices/bcsstk27.mtx",
-# "/home/mad29/projects/testdata/matrices/bcsstk28.mtx",
-# "/home/mad29/projects/testdata/matrices/bcsstk36.mtx",
-# "/home/mad29/projects/testdata/matrices/bcsstk38.mtx",
-# "/home/mad29/projects/testdata/matrices/bcsstm08.mtx",
-# "/home/mad29/projects/testdata/matrices/bcsstm09.mtx",
-# "/home/mad29/projects/testdata/matrices/bcsstm11.mtx",
-# "/home/mad29/projects/testdata/matrices/bcsstm12.mtx",
-# "/home/mad29/projects/testdata/matrices/bcsstm21.mtx",
-# "/home/mad29/projects/testdata/matrices/bcsstm23.mtx",
-# "/home/mad29/projects/testdata/matrices/bcsstm24.mtx",
-# "/home/mad29/projects/testdata/matrices/bcsstm25.mtx",
-# "/home/mad29/projects/testdata/matrices/bcsstm26.mtx",
-# "/home/mad29/projects/testdata/matrices/bcsstm39.mtx",
-# "/home/mad29/projects/testdata/matrices/bibd_81_2.mtx",
-# "/home/mad29/projects/testdata/matrices/bmw7st_1.mtx",
-# "/home/mad29/projects/testdata/matrices/bmwcra_1.mtx",
-# "/home/mad29/projects/testdata/matrices/bodyy4.mtx",
-# "/home/mad29/projects/testdata/matrices/bodyy5.mtx",
-# "/home/mad29/projects/testdata/matrices/bodyy6.mtx",
-# "/home/mad29/projects/testdata/matrices/bone010.mtx",
-# "/home/mad29/projects/testdata/matrices/boneS01.mtx",
-# "/home/mad29/projects/testdata/matrices/cbuckle.mtx",
-# "/home/mad29/projects/testdata/matrices/cfd1.mtx",
-# "/home/mad29/projects/testdata/matrices/cfd2.mtx",
-# "/home/mad29/projects/testdata/matrices/crystm01.mtx",
-# "/home/mad29/projects/testdata/matrices/crystm02.mtx",
-# "/home/mad29/projects/testdata/matrices/crystm03.mtx",
-# "/home/mad29/projects/testdata/matrices/ct20stif.mtx",
-# "/home/mad29/projects/testdata/matrices/cvxbqp1.mtx",
-# "/home/mad29/projects/testdata/matrices/denormal.mtx",
-# "/home/mad29/projects/testdata/matrices/ecology2.mtx",
-# "/home/mad29/projects/testdata/matrices/ex10.mtx",
-# "/home/mad29/projects/testdata/matrices/ex10hs.mtx",
-# "/home/mad29/projects/testdata/matrices/ex13.mtx",
-# "/home/mad29/projects/testdata/matrices/ex15.mtx",
-# "/home/mad29/projects/testdata/matrices/ex3.mtx",
-# "/home/mad29/projects/testdata/matrices/ex33.mtx",
-# "/home/mad29/projects/testdata/matrices/ex9.mtx",
-# "/home/mad29/projects/testdata/matrices/finan512.mtx",
-# "/home/mad29/projects/testdata/matrices/fv1.mtx",
-# "/home/mad29/projects/testdata/matrices/fv2.mtx",
-# "/home/mad29/projects/testdata/matrices/fv3.mtx",
-# "/home/mad29/projects/testdata/matrices/gyro.mtx",
-# "/home/mad29/projects/testdata/matrices/inline_1.mtx",
-# "/home/mad29/projects/testdata/matrices/jnlbrng1.mtx",
-# "/home/mad29/projects/testdata/matrices/ldoor.mtx",
-# "/home/mad29/projects/testdata/matrices/msdoor.mtx",
-# "/home/mad29/projects/testdata/matrices/nasa1824.mtx",
-# "/home/mad29/projects/testdata/matrices/nasa2146.mtx",
-# "/home/mad29/projects/testdata/matrices/nasa2910.mtx",
-# "/home/mad29/projects/testdata/matrices/nasa4704.mtx",
-# "/home/mad29/projects/testdata/matrices/nasasrb.mtx",
-# "/home/mad29/projects/testdata/matrices/nd12k.mtx",
-# "/home/mad29/projects/testdata/matrices/nd24k.mtx",
-# "/home/mad29/projects/testdata/matrices/nd3k.mtx",
-# "/home/mad29/projects/testdata/matrices/nd6k.mtx",
-# "/home/mad29/projects/testdata/matrices/obstclae.mtx",
-# "/home/mad29/projects/testdata/matrices/offshore.mtx",
-# "/home/mad29/projects/testdata/matrices/oilpan.mtx",
-# "/home/mad29/projects/testdata/matrices/olafu.mtx",
-# "/home/mad29/projects/testdata/matrices/parabolic_fem.mtx",
-# "/home/mad29/projects/testdata/matrices/pdb1HYS.mtx",
-# "/home/mad29/projects/testdata/matrices/plat1919.mtx",
-# "/home/mad29/projects/testdata/matrices/plbuckle.mtx",
-# "/home/mad29/projects/testdata/matrices/pwtk.mtx",
-# "/home/mad29/projects/testdata/matrices/qa8fm.mtx",
-# "/home/mad29/projects/testdata/matrices/raefsky4.mtx",
-# "/home/mad29/projects/testdata/matrices/s1rmq4m1.mtx",
-# "/home/mad29/projects/testdata/matrices/s1rmt3m1.mtx",
-# "/home/mad29/projects/testdata/matrices/s2rmq4m1.mtx",
-# "/home/mad29/projects/testdata/matrices/s2rmt3m1.mtx",
-# "/home/mad29/projects/testdata/matrices/s3dkq4m2.mtx",
-# "/home/mad29/projects/testdata/matrices/s3dkt3m2.mtx",
-# "/home/mad29/projects/testdata/matrices/s3rmq4m1.mtx",
-# "/home/mad29/projects/testdata/matrices/s3rmt3m1.mtx",
-# "/home/mad29/projects/testdata/matrices/s3rmt3m3.mtx",
-# "/home/mad29/projects/testdata/matrices/shallow_water1.mtx",
-# "/home/mad29/projects/testdata/matrices/shallow_water2.mtx",
-# "/home/mad29/projects/testdata/matrices/ship_001.mtx",
-# "/home/mad29/projects/testdata/matrices/ship_003.mtx",
-# "/home/mad29/projects/testdata/matrices/shipsec1.mtx",
-# "/home/mad29/projects/testdata/matrices/shipsec5.mtx",
-# "/home/mad29/projects/testdata/matrices/shipsec8.mtx",
-# "/home/mad29/projects/testdata/matrices/smt.mtx",
-# "/home/mad29/projects/testdata/matrices/sts4098.mtx",
-# "/home/mad29/projects/testdata/matrices/t2dah_e.mtx",
-# "/home/mad29/projects/testdata/matrices/t2dal_e.mtx",
-# "/home/mad29/projects/testdata/matrices/t3dl_e.mtx",
-# "/home/mad29/projects/testdata/matrices/ted_B.mtx",
-# "/home/mad29/projects/testdata/matrices/thermal1.mtx",
-# "/home/mad29/projects/testdata/matrices/thermal2.mtx",
-# "/home/mad29/projects/testdata/matrices/thermomech_TC.mtx",
-# "/home/mad29/projects/testdata/matrices/thermomech_TK.mtx",
-# "/home/mad29/projects/testdata/matrices/thermomech_dM.mtx",
-# "/home/mad29/projects/testdata/matrices/tmt_sym.mtx",
-# "/home/mad29/projects/testdata/matrices/torsion1.mtx",
-# "/home/mad29/projects/testdata/matrices/vanbody.mtx",
-# "/home/mad29/projects/testdata/matrices/wathen100.mtx",
-# "/home/mad29/projects/testdata/matrices/wathen120.mtx",
-# "/home/mad29/projects/testdata/matrices/x104.mtx"
+"/home/mad29/projects/testdata/matrices/2cubes_sphere.mtx",
+"/home/mad29/projects/testdata/matrices/Chem97ZtZ.mtx",
+"/home/mad29/projects/testdata/matrices/Dubcova1.mtx",
+"/home/mad29/projects/testdata/matrices/Dubcova2.mtx",
+"/home/mad29/projects/testdata/matrices/Dubcova3.mtx",
+"/home/mad29/projects/testdata/matrices/Emilia_923.mtx",
+"/home/mad29/projects/testdata/matrices/Fault_639.mtx",
+"/home/mad29/projects/testdata/matrices/Flan_1565.mtx",
+"/home/mad29/projects/testdata/matrices/G2_circuit.mtx",
+"/home/mad29/projects/testdata/matrices/G3_circuit.mtx",
+"/home/mad29/projects/testdata/matrices/Geo_1438.mtx",
+"/home/mad29/projects/testdata/matrices/Hook_1498.mtx",
+"/home/mad29/projects/testdata/matrices/Kuu.mtx",
+"/home/mad29/projects/testdata/matrices/LF10000.mtx",
+"/home/mad29/projects/testdata/matrices/Muu.mtx",
+"/home/mad29/projects/testdata/matrices/PFlow_742.mtx",
+"/home/mad29/projects/testdata/matrices/Pres_Poisson.mtx",
+"/home/mad29/projects/testdata/matrices/Serena.mtx",
+"/home/mad29/projects/testdata/matrices/StocF-1465.mtx",
+"/home/mad29/projects/testdata/matrices/Trefethen_2000.mtx",
+"/home/mad29/projects/testdata/matrices/Trefethen_20000.mtx",
+"/home/mad29/projects/testdata/matrices/bcsstk08.mtx",
+"/home/mad29/projects/testdata/matrices/bcsstk09.mtx",
+"/home/mad29/projects/testdata/matrices/bcsstk10.mtx",
+"/home/mad29/projects/testdata/matrices/bcsstk11.mtx",
+"/home/mad29/projects/testdata/matrices/bcsstk12.mtx",
+"/home/mad29/projects/testdata/matrices/bcsstk13.mtx",
+"/home/mad29/projects/testdata/matrices/bcsstk14.mtx",
+"/home/mad29/projects/testdata/matrices/bcsstk15.mtx",
+"/home/mad29/projects/testdata/matrices/bcsstk16.mtx",
+"/home/mad29/projects/testdata/matrices/bcsstk17.mtx",
+"/home/mad29/projects/testdata/matrices/bcsstk18.mtx",
+"/home/mad29/projects/testdata/matrices/bcsstk21.mtx",
+"/home/mad29/projects/testdata/matrices/bcsstk23.mtx",
+"/home/mad29/projects/testdata/matrices/bcsstk24.mtx",
+"/home/mad29/projects/testdata/matrices/bcsstk25.mtx",
+"/home/mad29/projects/testdata/matrices/bcsstk26.mtx",
+"/home/mad29/projects/testdata/matrices/bcsstk27.mtx",
+"/home/mad29/projects/testdata/matrices/bcsstk28.mtx",
+"/home/mad29/projects/testdata/matrices/bcsstk36.mtx",
+"/home/mad29/projects/testdata/matrices/bcsstk38.mtx",
+"/home/mad29/projects/testdata/matrices/bcsstm08.mtx",
+"/home/mad29/projects/testdata/matrices/bcsstm09.mtx",
+"/home/mad29/projects/testdata/matrices/bcsstm11.mtx",
+"/home/mad29/projects/testdata/matrices/bcsstm12.mtx",
+"/home/mad29/projects/testdata/matrices/bcsstm21.mtx",
+"/home/mad29/projects/testdata/matrices/bcsstm23.mtx",
+"/home/mad29/projects/testdata/matrices/bcsstm24.mtx",
+"/home/mad29/projects/testdata/matrices/bcsstm25.mtx",
+"/home/mad29/projects/testdata/matrices/bcsstm26.mtx",
+"/home/mad29/projects/testdata/matrices/bcsstm39.mtx",
+"/home/mad29/projects/testdata/matrices/bibd_81_2.mtx",
+"/home/mad29/projects/testdata/matrices/bmw7st_1.mtx",
+"/home/mad29/projects/testdata/matrices/bmwcra_1.mtx",
+"/home/mad29/projects/testdata/matrices/bodyy4.mtx",
+"/home/mad29/projects/testdata/matrices/bodyy5.mtx",
+"/home/mad29/projects/testdata/matrices/bodyy6.mtx",
+"/home/mad29/projects/testdata/matrices/bone010.mtx",
+"/home/mad29/projects/testdata/matrices/boneS01.mtx",
+"/home/mad29/projects/testdata/matrices/cbuckle.mtx",
+"/home/mad29/projects/testdata/matrices/cfd1.mtx",
+"/home/mad29/projects/testdata/matrices/cfd2.mtx",
+"/home/mad29/projects/testdata/matrices/crystm01.mtx",
+"/home/mad29/projects/testdata/matrices/crystm02.mtx",
+"/home/mad29/projects/testdata/matrices/crystm03.mtx",
+"/home/mad29/projects/testdata/matrices/ct20stif.mtx",
+"/home/mad29/projects/testdata/matrices/cvxbqp1.mtx",
+"/home/mad29/projects/testdata/matrices/denormal.mtx",
+"/home/mad29/projects/testdata/matrices/ecology2.mtx",
+"/home/mad29/projects/testdata/matrices/ex10.mtx",
+"/home/mad29/projects/testdata/matrices/ex10hs.mtx",
+"/home/mad29/projects/testdata/matrices/ex13.mtx",
+"/home/mad29/projects/testdata/matrices/ex15.mtx",
+"/home/mad29/projects/testdata/matrices/ex3.mtx",
+"/home/mad29/projects/testdata/matrices/ex33.mtx",
+"/home/mad29/projects/testdata/matrices/ex9.mtx",
+"/home/mad29/projects/testdata/matrices/finan512.mtx",
+"/home/mad29/projects/testdata/matrices/fv1.mtx",
+"/home/mad29/projects/testdata/matrices/fv2.mtx",
+"/home/mad29/projects/testdata/matrices/fv3.mtx",
+"/home/mad29/projects/testdata/matrices/gyro.mtx",
+"/home/mad29/projects/testdata/matrices/inline_1.mtx",
+"/home/mad29/projects/testdata/matrices/jnlbrng1.mtx",
+"/home/mad29/projects/testdata/matrices/ldoor.mtx",
+"/home/mad29/projects/testdata/matrices/msdoor.mtx",
+"/home/mad29/projects/testdata/matrices/nasa1824.mtx",
+"/home/mad29/projects/testdata/matrices/nasa2146.mtx",
+"/home/mad29/projects/testdata/matrices/nasa2910.mtx",
+"/home/mad29/projects/testdata/matrices/nasa4704.mtx",
+"/home/mad29/projects/testdata/matrices/nasasrb.mtx",
+"/home/mad29/projects/testdata/matrices/nd12k.mtx",
+"/home/mad29/projects/testdata/matrices/nd24k.mtx",
+"/home/mad29/projects/testdata/matrices/nd3k.mtx",
+"/home/mad29/projects/testdata/matrices/nd6k.mtx",
+"/home/mad29/projects/testdata/matrices/obstclae.mtx",
+"/home/mad29/projects/testdata/matrices/offshore.mtx",
+"/home/mad29/projects/testdata/matrices/oilpan.mtx",
+"/home/mad29/projects/testdata/matrices/olafu.mtx",
+"/home/mad29/projects/testdata/matrices/parabolic_fem.mtx",
+"/home/mad29/projects/testdata/matrices/pdb1HYS.mtx",
+"/home/mad29/projects/testdata/matrices/plat1919.mtx",
+"/home/mad29/projects/testdata/matrices/plbuckle.mtx",
+"/home/mad29/projects/testdata/matrices/pwtk.mtx",
+"/home/mad29/projects/testdata/matrices/qa8fm.mtx",
+"/home/mad29/projects/testdata/matrices/raefsky4.mtx",
+"/home/mad29/projects/testdata/matrices/s1rmq4m1.mtx",
+"/home/mad29/projects/testdata/matrices/s1rmt3m1.mtx",
+"/home/mad29/projects/testdata/matrices/s2rmq4m1.mtx",
+"/home/mad29/projects/testdata/matrices/s2rmt3m1.mtx",
+"/home/mad29/projects/testdata/matrices/s3dkq4m2.mtx",
+"/home/mad29/projects/testdata/matrices/s3dkt3m2.mtx",
+"/home/mad29/projects/testdata/matrices/s3rmq4m1.mtx",
+"/home/mad29/projects/testdata/matrices/s3rmt3m1.mtx",
+"/home/mad29/projects/testdata/matrices/s3rmt3m3.mtx",
+"/home/mad29/projects/testdata/matrices/shallow_water1.mtx",
+"/home/mad29/projects/testdata/matrices/shallow_water2.mtx",
+"/home/mad29/projects/testdata/matrices/ship_001.mtx",
+"/home/mad29/projects/testdata/matrices/ship_003.mtx",
+"/home/mad29/projects/testdata/matrices/shipsec1.mtx",
+"/home/mad29/projects/testdata/matrices/shipsec5.mtx",
+"/home/mad29/projects/testdata/matrices/shipsec8.mtx",
+"/home/mad29/projects/testdata/matrices/smt.mtx",
+"/home/mad29/projects/testdata/matrices/sts4098.mtx",
+"/home/mad29/projects/testdata/matrices/t2dah_e.mtx",
+"/home/mad29/projects/testdata/matrices/t2dal_e.mtx",
+"/home/mad29/projects/testdata/matrices/t3dl_e.mtx",
+"/home/mad29/projects/testdata/matrices/ted_B.mtx",
+"/home/mad29/projects/testdata/matrices/thermal1.mtx",
+"/home/mad29/projects/testdata/matrices/thermal2.mtx",
+"/home/mad29/projects/testdata/matrices/thermomech_TC.mtx",
+"/home/mad29/projects/testdata/matrices/thermomech_TK.mtx",
+"/home/mad29/projects/testdata/matrices/thermomech_dM.mtx",
+"/home/mad29/projects/testdata/matrices/tmt_sym.mtx",
+"/home/mad29/projects/testdata/matrices/torsion1.mtx",
+"/home/mad29/projects/testdata/matrices/vanbody.mtx",
+"/home/mad29/projects/testdata/matrices/wathen100.mtx",
+"/home/mad29/projects/testdata/matrices/wathen120.mtx",
+"/home/mad29/projects/testdata/matrices/x104.mtx"
 ]
 unroll_factors = [4, 8, 16, 32, 64]
 thread_counts = [32, 64, 128, 256]
@@ -200,20 +202,53 @@ method_list = [
     # "triton-spmv"
 ]
 
-# Add coarsening variants
+# Add new explicit coarsening methods
+# CSC wavefront block coarsening
 for cf in coarsening_factors:
-    method_list.extend([
-        f"numba-csc-coarsened-c{cf}",
-        f"numba-csr-coarsened-c{cf}",
-    ])
+    method_list.append(f"numba-csc-wf-block-c{cf}")
 
-# Add coarsening variants with thread-level mapping
+# CSC wavefront thread coarsening (only cf=1)
+for threads in thread_counts:
+    method_list.append(f"numba-csc-wf-thread-t{threads}")
+
+# CSC sync-free block coarsening
+for bcf in [1, 2, 4]:
+    method_list.append(f"numba-csc-sf-block-b{bcf}")
+
+# CSC sync-free thread coarsening
+for threads in thread_counts:
+    method_list.append(f"numba-csc-sf-thread-t{threads}")
+
+# CSR wavefront block coarsening
 for cf in coarsening_factors:
-    for threads in thread_counts:
-        method_list.extend([
-            f"numba-csc-coarsened-mapping-c{cf}-t{threads}",
-            f"numba-csr-coarsened-mapping-c{cf}-t{threads}",
-        ])
+    method_list.append(f"numba-csr-wf-block-c{cf}")
+
+# CSR wavefront thread coarsening (only cf=1)
+for threads in thread_counts:
+    method_list.append(f"numba-csr-wf-thread-t{threads}")
+
+# CSR sync-free block coarsening
+for bcf in [1, 2, 4]:
+    method_list.append(f"numba-csr-sf-block-b{bcf}")
+
+# CSR sync-free thread coarsening
+for threads in thread_counts:
+    method_list.append(f"numba-csr-sf-thread-t{threads}")
+
+# Add combined 3-level coarsening variants
+# Format: numba-{format}-coarsened-c{wavefront_cf}-w{warps}-tc{thread_cf}
+# - c{wavefront_cf}: wavefront coarsening factor (merges dependency levels)
+# - w{warps}: warps per block (determines rows processed in parallel per block)
+# - tc{thread_cf}: thread coarsening factor (nonzeros per thread)
+thread_coarsening_factors = [1, 2, 4]
+for cf in [1, 2, 4, 8]:  # wavefront coarsening
+    for threads in thread_counts:  # determines warps per block
+        warps = threads // 32
+        for tcf in thread_coarsening_factors:  # thread coarsening
+            method_list.extend([
+                f"numba-csc-coarsened-c{cf}-w{warps}-tc{tcf}",
+                f"numba-csr-coarsened-c{cf}-w{warps}-tc{tcf}",
+            ])
 
 # Add mapping variants with different thread counts
 for threads in thread_counts:
@@ -587,14 +622,19 @@ def correctness_test():
             except Exception as e:
                 print(f"\n{method_name} failed: {e}")
 
-        # Test CSC coarsened variants with different coarsening factors
+        # Test CSC wavefront-based coarsening with block/thread coarsening
+        print("\nTesting CSC wavefront-based coarsening methods...")
+        original_wavefronts = compute_wavefront(A)
+        
         for cf in coarsening_factors:
-            method_name = f'numba-csc-coarsened-c{cf}'
+            # Test wavefront block coarsening
+            method_name = f'numba-csc-wf-block-c{cf}'
             try:
-                coarsened_wavefronts = compute_coarsened_wavefronts(A, cf)
-                coarse_wave_start, coarse_waves = compact_2d_list(coarsened_wavefronts)
-                coarse_waves_gpu = cuda.to_device(coarse_waves)
-                y_coarse = sptrsv_numba_csc_coarsened(d_data, d_indices, d_indptr, d_b, A.shape[0], A.shape[1], A.nnz, coarse_wave_start, coarse_waves_gpu, cf)
+                wave_start, waves, level_boundaries = compact_coarsened_wavefronts(original_wavefronts, cf)
+                waves_gpu = cuda.to_device(waves)
+                y_coarse = sptrsv_numba_csc_wavefront_block_coarsening(
+                    d_data, d_indices, d_indptr, d_b, A.shape[0], A.shape[1], A.nnz, 
+                    wave_start, waves_gpu, level_boundaries, block_coarsening_factor=1)
                 y_coarse_cpu = y_coarse.copy_to_host()
                 
                 if np.allclose(x_cpu, y_coarse_cpu, atol=1e-5):
@@ -605,14 +645,15 @@ def correctness_test():
             except Exception as e:
                 print(f"\n{method_name} failed: {e}")
         
-        # Test CSR coarsened variants with different coarsening factors
-        for cf in coarsening_factors:
-            method_name = f'numba-csr-coarsened-c{cf}'
+        # Test CSC wavefront thread coarsening (only for cf=1)
+        for threads in thread_counts:
+            method_name = f'numba-csc-wf-thread-t{threads}'
             try:
-                coarsened_wavefronts = compute_coarsened_wavefronts(A, cf)
-                coarse_wave_start, coarse_waves = compact_2d_list(coarsened_wavefronts)
-                coarse_waves_gpu = cuda.to_device(coarse_waves)
-                y_coarse = sptrsv_numba_csr_coarsened(d_data_csr, d_indices_csr, d_indptr_csr, d_b_csr, n, n, A_csr_numba.nnz, coarse_wave_start, coarse_waves_gpu, cf)
+                wave_start, waves, level_boundaries = compact_coarsened_wavefronts(original_wavefronts, 1)
+                waves_gpu = cuda.to_device(waves)
+                y_coarse = sptrsv_numba_csc_wavefront_thread_coarsening(
+                    d_data, d_indices, d_indptr, d_b, A.shape[0], A.shape[1], A.nnz, 
+                    wave_start, waves_gpu, thread_coarsening_factor=1, threads_per_block=threads)
                 y_coarse_cpu = y_coarse.copy_to_host()
                 
                 if np.allclose(x_cpu, y_coarse_cpu, atol=1e-5):
@@ -623,43 +664,163 @@ def correctness_test():
             except Exception as e:
                 print(f"\n{method_name} failed: {e}")
         
-        # Test CSC coarsened mapping variants
-        for cf in coarsening_factors:
-            for threads in [128]:
-                method_name = f'numba-csc-coarsened-mapping-c{cf}-t{threads}'
-                try:
-                    coarsened_wavefronts = compute_coarsened_wavefronts(A, cf)
-                    coarse_wave_start, coarse_waves = compact_2d_list(coarsened_wavefronts)
-                    coarse_waves_gpu = cuda.to_device(coarse_waves)
-                    y_coarse = sptrsv_numba_csc_coarsened_mapping(d_data, d_indices, d_indptr, d_b, A.shape[0], A.shape[1], A.nnz, coarse_wave_start, coarse_waves_gpu, cf, threads)
-                    y_coarse_cpu = y_coarse.copy_to_host()
-                    
-                    if np.allclose(x_cpu, y_coarse_cpu, atol=1e-5):
-                        print(f"\n{method_name} Solutions match within tolerance!")
-                        method_correctness[mat_name][method_name] = 1
-                    else:
-                        print(f"\nWarning: {method_name} Solutions do not match!")
-                except Exception as e:
-                    print(f"\n{method_name} failed: {e}")
+        # Test CSC sync-free block coarsening
+        print("\nTesting CSC sync-free coarsening methods...")
+        for bcf in [1, 2, 4]:
+            method_name = f'numba-csc-sf-block-b{bcf}'
+            try:
+                y_sf = sptrsv_numba_csc_sync_free_block_coarsening(
+                    d_data, d_indices, d_indptr, d_b, A.shape[0], A.shape[1], A.nnz, 
+                    in_edge, block_coarsening_factor=bcf)
+                y_sf_cpu = y_sf.copy_to_host()
+                
+                if np.allclose(x_cpu, y_sf_cpu, atol=1e-5):
+                    print(f"\n{method_name} Solutions match within tolerance!")
+                    method_correctness[mat_name][method_name] = 1
+                else:
+                    print(f"\nWarning: {method_name} Solutions do not match!")
+            except Exception as e:
+                print(f"\n{method_name} failed: {e}")
         
-        # Test CSR coarsened mapping variants
+        # Test CSC sync-free thread coarsening
+        for threads in thread_counts:
+            method_name = f'numba-csc-sf-thread-t{threads}'
+            try:
+                y_sf = sptrsv_numba_csc_sync_free_thread_coarsening(
+                    d_data, d_indices, d_indptr, d_b, A.shape[0], A.shape[1], A.nnz, 
+                    in_edge, thread_coarsening_factor=1, threads_per_block=threads)
+                y_sf_cpu = y_sf.copy_to_host()
+                
+                if np.allclose(x_cpu, y_sf_cpu, atol=1e-5):
+                    print(f"\n{method_name} Solutions match within tolerance!")
+                    method_correctness[mat_name][method_name] = 1
+                else:
+                    print(f"\nWarning: {method_name} Solutions do not match!")
+            except Exception as e:
+                print(f"\n{method_name} failed: {e}")
+        
+        # Test CSR wavefront-based coarsening with block/thread coarsening
+        print("\nTesting CSR wavefront-based coarsening methods...")
+        
         for cf in coarsening_factors:
-            for threads in [128]:
-                method_name = f'numba-csr-coarsened-mapping-c{cf}-t{threads}'
-                try:
-                    coarsened_wavefronts = compute_coarsened_wavefronts(A, cf)
-                    coarse_wave_start, coarse_waves = compact_2d_list(coarsened_wavefronts)
-                    coarse_waves_gpu = cuda.to_device(coarse_waves)
-                    y_coarse = sptrsv_numba_csr_coarsened_mapping(d_data_csr, d_indices_csr, d_indptr_csr, d_b_csr, n, n, A_csr_numba.nnz, coarse_wave_start, coarse_waves_gpu, cf, threads)
-                    y_coarse_cpu = y_coarse.copy_to_host()
-                    
-                    if np.allclose(x_cpu, y_coarse_cpu, atol=1e-5):
-                        print(f"\n{method_name} Solutions match within tolerance!")
-                        method_correctness[mat_name][method_name] = 1
-                    else:
-                        print(f"\nWarning: {method_name} Solutions do not match!")
-                except Exception as e:
-                    print(f"\n{method_name} failed: {e}")
+            # Test wavefront block coarsening
+            method_name = f'numba-csr-wf-block-c{cf}'
+            try:
+                wave_start, waves, level_boundaries = compact_coarsened_wavefronts(original_wavefronts, cf)
+                waves_gpu = cuda.to_device(waves)
+                y_coarse = sptrsv_numba_csr_wavefront_block_coarsening(
+                    d_data_csr, d_indices_csr, d_indptr_csr, d_b_csr, n, n, A_csr_numba.nnz,
+                    wave_start, waves_gpu, level_boundaries, block_coarsening_factor=1)
+                y_coarse_cpu = y_coarse.copy_to_host()
+                
+                if np.allclose(x_cpu, y_coarse_cpu, atol=1e-5):
+                    print(f"\n{method_name} Solutions match within tolerance!")
+                    method_correctness[mat_name][method_name] = 1
+                else:
+                    print(f"\nWarning: {method_name} Solutions do not match!")
+            except Exception as e:
+                print(f"\n{method_name} failed: {e}")
+        
+        # Test CSR wavefront thread coarsening (only for cf=1)
+        for threads in thread_counts:
+            method_name = f'numba-csr-wf-thread-t{threads}'
+            try:
+                wave_start, waves, level_boundaries = compact_coarsened_wavefronts(original_wavefronts, 1)
+                waves_gpu = cuda.to_device(waves)
+                y_coarse = sptrsv_numba_csr_wavefront_thread_coarsening(
+                    d_data_csr, d_indices_csr, d_indptr_csr, d_b_csr, n, n, A_csr_numba.nnz,
+                    wave_start, waves_gpu, thread_coarsening_factor=1, threads_per_block=threads)
+                y_coarse_cpu = y_coarse.copy_to_host()
+                
+                if np.allclose(x_cpu, y_coarse_cpu, atol=1e-5):
+                    print(f"\n{method_name} Solutions match within tolerance!")
+                    method_correctness[mat_name][method_name] = 1
+                else:
+                    print(f"\nWarning: {method_name} Solutions do not match!")
+            except Exception as e:
+                print(f"\n{method_name} failed: {e}")
+        
+        # Test CSR sync-free block coarsening
+        print("\nTesting CSR sync-free coarsening methods...")
+        for bcf in [1, 2, 4]:
+            method_name = f'numba-csr-sf-block-b{bcf}'
+            try:
+                y_sf = sptrsv_numba_csr_sync_free_block_coarsening(
+                    d_data_csr, d_indices_csr, d_indptr_csr, d_b_csr, n, n, A_csr_numba.nnz,
+                    in_edges_csr, succ_offsets_csr, succ_indices_csr, block_coarsening_factor=bcf)
+                y_sf_cpu = y_sf.copy_to_host()
+                
+                if np.allclose(x_cpu, y_sf_cpu, atol=1e-5):
+                    print(f"\n{method_name} Solutions match within tolerance!")
+                    method_correctness[mat_name][method_name] = 1
+                else:
+                    print(f"\nWarning: {method_name} Solutions do not match!")
+            except Exception as e:
+                print(f"\n{method_name} failed: {e}")
+        
+        # Test CSR sync-free thread coarsening
+        for threads in thread_counts:
+            method_name = f'numba-csr-sf-thread-t{threads}'
+            try:
+                y_sf = sptrsv_numba_csr_sync_free_thread_coarsening(
+                    d_data_csr, d_indices_csr, d_indptr_csr, d_b_csr, n, n, A_csr_numba.nnz,
+                    in_edges_csr, succ_offsets_csr, succ_indices_csr, 
+                    thread_coarsening_factor=1, threads_per_block=threads)
+                y_sf_cpu = y_sf.copy_to_host()
+                
+                if np.allclose(x_cpu, y_sf_cpu, atol=1e-5):
+                    print(f"\n{method_name} Solutions match within tolerance!")
+                    method_correctness[mat_name][method_name] = 1
+                else:
+                    print(f"\nWarning: {method_name} Solutions do not match!")
+            except Exception as e:
+                print(f"\n{method_name} failed: {e}")
+        
+        # Test 3-level coarsening variants
+        print("\nTesting 3-level coarsening (wavefront + warp + thread)...")
+        for cf in [1, 2, 4, 8]:
+            for threads in [128]:  # Test with one thread count for correctness
+                warps = threads // 32
+                for tcf in [1, 2, 4]:
+                    method_name = f'numba-csc-coarsened-c{cf}-w{warps}-tc{tcf}'
+                    try:
+                        wave_start, waves, level_boundaries = compact_coarsened_wavefronts(original_wavefronts, cf)
+                        waves_gpu = cuda.to_device(waves)
+                        y_coarse = sptrsv_numba_csc_coarsened_mapping(
+                            d_data, d_indices, d_indptr, d_b, A.shape[0], A.shape[1], A.nnz, 
+                            wave_start, waves_gpu, cf, threads, thread_coarsening_factor=tcf, 
+                            level_boundaries=level_boundaries)
+                        y_coarse_cpu = y_coarse.copy_to_host()
+                        
+                        if np.allclose(x_cpu, y_coarse_cpu, atol=1e-5):
+                            print(f"\n{method_name} Solutions match within tolerance!")
+                            method_correctness[mat_name][method_name] = 1
+                        else:
+                            print(f"\nWarning: {method_name} Solutions do not match!")
+                    except Exception as e:
+                        print(f"\n{method_name} failed: {e}")
+        
+        for cf in [1, 2, 4, 8]:
+            for threads in [128]:  # Test with one thread count for correctness
+                warps = threads // 32
+                for tcf in [1, 2, 4]:
+                    method_name = f'numba-csr-coarsened-c{cf}-w{warps}-tc{tcf}'
+                    try:
+                        wave_start, waves, level_boundaries = compact_coarsened_wavefronts(original_wavefronts, cf)
+                        waves_gpu = cuda.to_device(waves)
+                        y_coarse = sptrsv_numba_csr_coarsened_mapping(
+                            d_data_csr, d_indices_csr, d_indptr_csr, d_b_csr, n, n, A_csr_numba.nnz,
+                            wave_start, waves_gpu, cf, threads, thread_coarsening_factor=tcf,
+                            level_boundaries=level_boundaries)
+                        y_coarse_cpu = y_coarse.copy_to_host()
+                        
+                        if np.allclose(x_cpu, y_coarse_cpu, atol=1e-5):
+                            print(f"\n{method_name} Solutions match within tolerance!")
+                            method_correctness[mat_name][method_name] = 1
+                        else:
+                            print(f"\nWarning: {method_name} Solutions do not match!")
+                    except Exception as e:
+                        print(f"\n{method_name} failed: {e}")
 
         # print (x_cpu[:5])
         # print (x_gpu[:5])
@@ -670,14 +831,14 @@ def correctness_test():
     return matrix_signtures, method_correctness
 
 
-mat_signatures, method_correctness = correctness_test()
-# convert to df and save as csv
-import pandas as pd
-df = pd.DataFrame(mat_signatures)
-df.to_csv("matrix_signatures.csv")
+# mat_signatures, method_correctness = correctness_test()
+# # convert to df and save as csv
+# import pandas as pd
+# df = pd.DataFrame(mat_signatures)
+# df.to_csv("matrix_signatures.csv")
 
-df = pd.DataFrame(method_correctness)
-df.to_csv("method_correctness.csv")
+# df = pd.DataFrame(method_correctness)
+# df.to_csv("method_correctness.csv")
 
 configs = []
 
@@ -688,20 +849,48 @@ line_names = [
     "Numba-CSR-Wavefront", "Numba-CSR-Sync-free",
 ]
 
-# Add coarsening variant names
+# Add new explicit coarsening method names
+# CSC wavefront block coarsening
 for cf in coarsening_factors:
-    line_names.extend([
-        f"CSC-Coarse-c{cf}",
-        f"CSR-Coarse-c{cf}",
-    ])
+    line_names.append(f"CSC-WF-Block-c{cf}")
 
-# Add coarsening mapping variant names with thread counts
+# CSC wavefront thread coarsening
+for threads in thread_counts:
+    line_names.append(f"CSC-WF-Thread-t{threads}")
+
+# CSC sync-free block coarsening
+for bcf in [1, 2, 4]:
+    line_names.append(f"CSC-SF-Block-b{bcf}")
+
+# CSC sync-free thread coarsening
+for threads in thread_counts:
+    line_names.append(f"CSC-SF-Thread-t{threads}")
+
+# CSR wavefront block coarsening
 for cf in coarsening_factors:
+    line_names.append(f"CSR-WF-Block-c{cf}")
+
+# CSR wavefront thread coarsening
+for threads in thread_counts:
+    line_names.append(f"CSR-WF-Thread-t{threads}")
+
+# CSR sync-free block coarsening
+for bcf in [1, 2, 4]:
+    line_names.append(f"CSR-SF-Block-b{bcf}")
+
+# CSR sync-free thread coarsening
+for threads in thread_counts:
+    line_names.append(f"CSR-SF-Thread-t{threads}")
+
+# Add 3-level coarsening variant names
+for cf in [1, 2, 4, 8]:
     for threads in thread_counts:
-        line_names.extend([
-            f"CSC-CoarseMap-c{cf}-t{threads}",
-            f"CSR-CoarseMap-c{cf}-t{threads}",
-        ])
+        warps = threads // 32
+        for tcf in thread_coarsening_factors:
+            line_names.extend([
+                f"CSC-c{cf}-w{warps}-tc{tcf}",
+                f"CSR-c{cf}-w{warps}-tc{tcf}",
+            ])
 
 # Add mapping variant names with thread counts
 for threads in thread_counts:
@@ -1087,59 +1276,136 @@ def benchmark(matrices, provider):
         }
         unroll_func = func_map[unroll_factor]
         ms, min_ms, max_ms = triton.testing.do_bench(lambda: unroll_func(d_data, d_indices, d_indptr, d_x, A.shape[0], A.shape[1], A_csr.nnz, dep_count, succ_offsets, succ_indices, threads_per_block), quantiles=quantiles, warmup=warmpup, rep=rep)
-    # CSC Coarsened with coarsening factor sweep
-    if provider.startswith('numba-csc-coarsened-c') and '-t' not in provider:
-        coarsening_factor = int(provider.replace('numba-csc-coarsened-c', ''))
+    # CSC Wavefront Block Coarsening
+    if provider.startswith('numba-csc-wf-block-c'):
+        coarsening_factor = int(provider.replace('numba-csc-wf-block-c', ''))
         d_data = cuda.to_device(A.data)
         d_indices = cuda.to_device(A.indices)
         d_indptr = cuda.to_device(A.indptr)
         d_x = cuda.to_device(np.zeros(n))
-        coarsened_wavefronts = compute_coarsened_wavefronts(A, coarsening_factor)
-        wave_start_loc, waves = compact_2d_list(coarsened_wavefronts)
+        wavefronts = compute_wavefront(A)
+        wave_start, waves, level_boundaries = compact_coarsened_wavefronts(wavefronts, coarsening_factor)
         waves_gpu = cuda.to_device(waves)
-        ms, min_ms, max_ms = triton.testing.do_bench(lambda: sptrsv_numba_csc_coarsened(d_data, d_indices, d_indptr, d_x, A.shape[0], A.shape[1], A.nnz, wave_start_loc, waves_gpu, coarsening_factor), quantiles=quantiles, warmup=warmpup, rep=rep)
+        ms, min_ms, max_ms = triton.testing.do_bench(lambda: sptrsv_numba_csc_wavefront_block_coarsening(d_data, d_indices, d_indptr, d_x, A.shape[0], A.shape[1], A.nnz, wave_start, waves_gpu, level_boundaries, block_coarsening_factor=1), quantiles=quantiles, warmup=warmpup, rep=rep)
     
-    # CSR Coarsened with coarsening factor sweep
-    if provider.startswith('numba-csr-coarsened-c') and '-t' not in provider:
-        coarsening_factor = int(provider.replace('numba-csr-coarsened-c', ''))
+    # CSC Wavefront Thread Coarsening
+    if provider.startswith('numba-csc-wf-thread-t'):
+        threads_per_block = int(provider.replace('numba-csc-wf-thread-t', ''))
+        d_data = cuda.to_device(A.data)
+        d_indices = cuda.to_device(A.indices)
+        d_indptr = cuda.to_device(A.indptr)
+        d_x = cuda.to_device(np.zeros(n))
+        wavefronts = compute_wavefront(A)
+        wave_start, waves, level_boundaries = compact_coarsened_wavefronts(wavefronts, 1)
+        waves_gpu = cuda.to_device(waves)
+        ms, min_ms, max_ms = triton.testing.do_bench(lambda: sptrsv_numba_csc_wavefront_thread_coarsening(d_data, d_indices, d_indptr, d_x, A.shape[0], A.shape[1], A.nnz, wave_start, waves_gpu, thread_coarsening_factor=1, threads_per_block=threads_per_block), quantiles=quantiles, warmup=warmpup, rep=rep)
+    
+    # CSC Sync-Free Block Coarsening
+    if provider.startswith('numba-csc-sf-block-b'):
+        block_coarsening_factor = int(provider.replace('numba-csc-sf-block-b', ''))
+        d_data = cuda.to_device(A.data)
+        d_indices = cuda.to_device(A.indices)
+        d_indptr = cuda.to_device(A.indptr)
+        d_x = cuda.to_device(np.zeros(n))
+        dep_count = incoming_edge(A)
+        ms, min_ms, max_ms = triton.testing.do_bench(lambda: sptrsv_numba_csc_sync_free_block_coarsening(d_data, d_indices, d_indptr, d_x, A.shape[0], A.shape[1], A.nnz, dep_count, block_coarsening_factor=block_coarsening_factor), quantiles=quantiles, warmup=warmpup, rep=rep)
+    
+    # CSC Sync-Free Thread Coarsening
+    if provider.startswith('numba-csc-sf-thread-t'):
+        threads_per_block = int(provider.replace('numba-csc-sf-thread-t', ''))
+        d_data = cuda.to_device(A.data)
+        d_indices = cuda.to_device(A.indices)
+        d_indptr = cuda.to_device(A.indptr)
+        d_x = cuda.to_device(np.zeros(n))
+        dep_count = incoming_edge(A)
+        ms, min_ms, max_ms = triton.testing.do_bench(lambda: sptrsv_numba_csc_sync_free_thread_coarsening(d_data, d_indices, d_indptr, d_x, A.shape[0], A.shape[1], A.nnz, dep_count, thread_coarsening_factor=1, threads_per_block=threads_per_block), quantiles=quantiles, warmup=warmpup, rep=rep)
+    
+    # CSR Wavefront Block Coarsening
+    if provider.startswith('numba-csr-wf-block-c'):
+        coarsening_factor = int(provider.replace('numba-csr-wf-block-c', ''))
         A_csr = A.tocsr()
         d_data = cuda.to_device(A_csr.data)
         d_indices = cuda.to_device(A_csr.indices)
         d_indptr = cuda.to_device(A_csr.indptr)
         d_x = cuda.to_device(np.zeros(n))
-        coarsened_wavefronts = compute_coarsened_wavefronts(A, coarsening_factor)
-        wave_start_loc, waves = compact_2d_list(coarsened_wavefronts)
+        wavefronts = compute_wavefront(A)
+        wave_start, waves, level_boundaries = compact_coarsened_wavefronts(wavefronts, coarsening_factor)
         waves_gpu = cuda.to_device(waves)
-        ms, min_ms, max_ms = triton.testing.do_bench(lambda: sptrsv_numba_csr_coarsened(d_data, d_indices, d_indptr, d_x, A.shape[0], A.shape[1], A_csr.nnz, wave_start_loc, waves_gpu, coarsening_factor), quantiles=quantiles, warmup=warmpup, rep=rep)
+        ms, min_ms, max_ms = triton.testing.do_bench(lambda: sptrsv_numba_csr_wavefront_block_coarsening(d_data, d_indices, d_indptr, d_x, A.shape[0], A.shape[1], A_csr.nnz, wave_start, waves_gpu, level_boundaries, block_coarsening_factor=1), quantiles=quantiles, warmup=warmpup, rep=rep)
     
-    # CSC Coarsened Mapping with coarsening factor and thread count sweep
-    if provider.startswith('numba-csc-coarsened-mapping-c') and '-t' in provider:
-        parts = provider.replace('numba-csc-coarsened-mapping-c', '').split('-t')
-        coarsening_factor = int(parts[0])
-        threads_per_block = int(parts[1])
-        d_data = cuda.to_device(A.data)
-        d_indices = cuda.to_device(A.indices)
-        d_indptr = cuda.to_device(A.indptr)
-        d_x = cuda.to_device(np.zeros(n))
-        coarsened_wavefronts = compute_coarsened_wavefronts(A, coarsening_factor)
-        wave_start_loc, waves = compact_2d_list(coarsened_wavefronts)
-        waves_gpu = cuda.to_device(waves)
-        ms, min_ms, max_ms = triton.testing.do_bench(lambda: sptrsv_numba_csc_coarsened_mapping(d_data, d_indices, d_indptr, d_x, A.shape[0], A.shape[1], A.nnz, wave_start_loc, waves_gpu, coarsening_factor, threads_per_block), quantiles=quantiles, warmup=warmpup, rep=rep)
-    
-    # CSR Coarsened Mapping with coarsening factor and thread count sweep
-    if provider.startswith('numba-csr-coarsened-mapping-c') and '-t' in provider:
-        parts = provider.replace('numba-csr-coarsened-mapping-c', '').split('-t')
-        coarsening_factor = int(parts[0])
-        threads_per_block = int(parts[1])
+    # CSR Wavefront Thread Coarsening
+    if provider.startswith('numba-csr-wf-thread-t'):
+        threads_per_block = int(provider.replace('numba-csr-wf-thread-t', ''))
         A_csr = A.tocsr()
         d_data = cuda.to_device(A_csr.data)
         d_indices = cuda.to_device(A_csr.indices)
         d_indptr = cuda.to_device(A_csr.indptr)
         d_x = cuda.to_device(np.zeros(n))
-        coarsened_wavefronts = compute_coarsened_wavefronts(A, coarsening_factor)
-        wave_start_loc, waves = compact_2d_list(coarsened_wavefronts)
+        wavefronts = compute_wavefront(A)
+        wave_start, waves, level_boundaries = compact_coarsened_wavefronts(wavefronts, 1)
         waves_gpu = cuda.to_device(waves)
-        ms, min_ms, max_ms = triton.testing.do_bench(lambda: sptrsv_numba_csr_coarsened_mapping(d_data, d_indices, d_indptr, d_x, A.shape[0], A.shape[1], A_csr.nnz, wave_start_loc, waves_gpu, coarsening_factor, threads_per_block), quantiles=quantiles, warmup=warmpup, rep=rep)
+        ms, min_ms, max_ms = triton.testing.do_bench(lambda: sptrsv_numba_csr_wavefront_thread_coarsening(d_data, d_indices, d_indptr, d_x, A.shape[0], A.shape[1], A_csr.nnz, wave_start, waves_gpu, thread_coarsening_factor=1, threads_per_block=threads_per_block), quantiles=quantiles, warmup=warmpup, rep=rep)
+    
+    # CSR Sync-Free Block Coarsening
+    if provider.startswith('numba-csr-sf-block-b'):
+        block_coarsening_factor = int(provider.replace('numba-csr-sf-block-b', ''))
+        A_csr = A.tocsr()
+        d_data = cuda.to_device(A_csr.data)
+        d_indices = cuda.to_device(A_csr.indices)
+        d_indptr = cuda.to_device(A_csr.indptr)
+        d_x = cuda.to_device(np.zeros(n))
+        dep_count = incoming_edge_csr_rows(A_csr)
+        succ_offsets, succ_indices = build_csr_successors(A_csr)
+        ms, min_ms, max_ms = triton.testing.do_bench(lambda: sptrsv_numba_csr_sync_free_block_coarsening(d_data, d_indices, d_indptr, d_x, A.shape[0], A.shape[1], A_csr.nnz, dep_count, succ_offsets, succ_indices, block_coarsening_factor=block_coarsening_factor), quantiles=quantiles, warmup=warmpup, rep=rep)
+    
+    # CSR Sync-Free Thread Coarsening
+    if provider.startswith('numba-csr-sf-thread-t'):
+        threads_per_block = int(provider.replace('numba-csr-sf-thread-t', ''))
+        A_csr = A.tocsr()
+        d_data = cuda.to_device(A_csr.data)
+        d_indices = cuda.to_device(A_csr.indices)
+        d_indptr = cuda.to_device(A_csr.indptr)
+        d_x = cuda.to_device(np.zeros(n))
+        dep_count = incoming_edge_csr_rows(A_csr)
+        succ_offsets, succ_indices = build_csr_successors(A_csr)
+        ms, min_ms, max_ms = triton.testing.do_bench(lambda: sptrsv_numba_csr_sync_free_thread_coarsening(d_data, d_indices, d_indptr, d_x, A.shape[0], A.shape[1], A_csr.nnz, dep_count, succ_offsets, succ_indices, thread_coarsening_factor=1, threads_per_block=threads_per_block), quantiles=quantiles, warmup=warmpup, rep=rep)
+    
+    # CSC 3-Level Coarsening (wavefront + warp + thread)
+    if provider.startswith('numba-csc-coarsened-c') and '-w' in provider and '-tc' in provider:
+        parts = provider.replace('numba-csc-coarsened-c', '').split('-w')
+        coarsening_factor = int(parts[0])
+        parts2 = parts[1].split('-tc')
+        warps = int(parts2[0])
+        thread_coarsening_factor = int(parts2[1])
+        threads_per_block = warps * 32
+        
+        d_data = cuda.to_device(A.data)
+        d_indices = cuda.to_device(A.indices)
+        d_indptr = cuda.to_device(A.indptr)
+        d_x = cuda.to_device(np.zeros(n))
+        wavefronts = compute_wavefront(A)
+        wave_start_loc, waves, level_boundaries = compact_coarsened_wavefronts(wavefronts, coarsening_factor)
+        waves_gpu = cuda.to_device(waves)
+        ms, min_ms, max_ms = triton.testing.do_bench(lambda: sptrsv_numba_csc_coarsened_mapping(d_data, d_indices, d_indptr, d_x, A.shape[0], A.shape[1], A.nnz, wave_start_loc, waves_gpu, coarsening_factor, threads_per_block, thread_coarsening_factor=thread_coarsening_factor, level_boundaries=level_boundaries), quantiles=quantiles, warmup=warmpup, rep=rep)
+    
+    # CSR 3-Level Coarsening (wavefront + warp + thread)
+    if provider.startswith('numba-csr-coarsened-c') and '-w' in provider and '-tc' in provider:
+        parts = provider.replace('numba-csr-coarsened-c', '').split('-w')
+        coarsening_factor = int(parts[0])
+        parts2 = parts[1].split('-tc')
+        warps = int(parts2[0])
+        thread_coarsening_factor = int(parts2[1])
+        threads_per_block = warps * 32
+        
+        A_csr = A.tocsr()
+        d_data = cuda.to_device(A_csr.data)
+        d_indices = cuda.to_device(A_csr.indices)
+        d_indptr = cuda.to_device(A_csr.indptr)
+        d_x = cuda.to_device(np.zeros(n))
+        wavefronts = compute_wavefront(A)
+        wave_start_loc, waves, level_boundaries = compact_coarsened_wavefronts(wavefronts, coarsening_factor)
+        waves_gpu = cuda.to_device(waves)
+        ms, min_ms, max_ms = triton.testing.do_bench(lambda: sptrsv_numba_csr_coarsened_mapping(d_data, d_indices, d_indptr, d_x, A.shape[0], A.shape[1], A_csr.nnz, wave_start_loc, waves_gpu, coarsening_factor, threads_per_block, thread_coarsening_factor=thread_coarsening_factor, level_boundaries=level_boundaries), quantiles=quantiles, warmup=warmpup, rep=rep)
     
     if provider == 'cusparse':
         matrix_gpu_csc = cp_csc_matrix(A.tocsc())
