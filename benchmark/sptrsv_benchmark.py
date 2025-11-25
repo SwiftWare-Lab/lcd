@@ -33,6 +33,11 @@ from sptrsv_coarsening import (
     sptrsv_numba_csc_sync_free_block_coarsening, sptrsv_numba_csr_sync_free_block_coarsening,
     sptrsv_numba_csc_sync_free_thread_coarsening, sptrsv_numba_csr_sync_free_thread_coarsening,
 )
+from sptrsv_hlevel import (
+    sptrsv_h_level_analyze,
+    sptrsv_numba_csc_h_level_solve, sptrsv_numba_csr_h_level_solve,
+    sptrsv_numba_csc_h_level_graph, sptrsv_numba_csr_h_level_graph,
+)
 # Common values are '75' (for compute capability 7.5), '86' (for 8.6), etc.
 # import os
 # os.environ['NUMBAPRO_NVVM_NUM_THREADS'] = '1'
@@ -50,147 +55,148 @@ print(f"Compute Capability: {device.compute_capability}")
 mtx_list = [
 "/home/mad29/projects/testdata/matrices/1138_bus.mtx",
 "/home/mad29/projects/testdata/matrices/2cubes_sphere.mtx",
-"/home/mad29/projects/testdata/matrices/Chem97ZtZ.mtx",
-"/home/mad29/projects/testdata/matrices/Dubcova1.mtx",
-"/home/mad29/projects/testdata/matrices/Dubcova2.mtx",
-"/home/mad29/projects/testdata/matrices/Dubcova3.mtx",
-"/home/mad29/projects/testdata/matrices/Emilia_923.mtx",
-"/home/mad29/projects/testdata/matrices/Fault_639.mtx",
-"/home/mad29/projects/testdata/matrices/Flan_1565.mtx",
-"/home/mad29/projects/testdata/matrices/G2_circuit.mtx",
-"/home/mad29/projects/testdata/matrices/G3_circuit.mtx",
-"/home/mad29/projects/testdata/matrices/Geo_1438.mtx",
-"/home/mad29/projects/testdata/matrices/Hook_1498.mtx",
-"/home/mad29/projects/testdata/matrices/Kuu.mtx",
-"/home/mad29/projects/testdata/matrices/LF10000.mtx",
-"/home/mad29/projects/testdata/matrices/Muu.mtx",
-"/home/mad29/projects/testdata/matrices/PFlow_742.mtx",
-"/home/mad29/projects/testdata/matrices/Pres_Poisson.mtx",
-"/home/mad29/projects/testdata/matrices/Serena.mtx",
-"/home/mad29/projects/testdata/matrices/StocF-1465.mtx",
-"/home/mad29/projects/testdata/matrices/Trefethen_2000.mtx",
-"/home/mad29/projects/testdata/matrices/Trefethen_20000.mtx",
-"/home/mad29/projects/testdata/matrices/bcsstk08.mtx",
-"/home/mad29/projects/testdata/matrices/bcsstk09.mtx",
-"/home/mad29/projects/testdata/matrices/bcsstk10.mtx",
-"/home/mad29/projects/testdata/matrices/bcsstk11.mtx",
-"/home/mad29/projects/testdata/matrices/bcsstk12.mtx",
-"/home/mad29/projects/testdata/matrices/bcsstk13.mtx",
-"/home/mad29/projects/testdata/matrices/bcsstk14.mtx",
-"/home/mad29/projects/testdata/matrices/bcsstk15.mtx",
-"/home/mad29/projects/testdata/matrices/bcsstk16.mtx",
-"/home/mad29/projects/testdata/matrices/bcsstk17.mtx",
-"/home/mad29/projects/testdata/matrices/bcsstk18.mtx",
-"/home/mad29/projects/testdata/matrices/bcsstk21.mtx",
-"/home/mad29/projects/testdata/matrices/bcsstk23.mtx",
-"/home/mad29/projects/testdata/matrices/bcsstk24.mtx",
-"/home/mad29/projects/testdata/matrices/bcsstk25.mtx",
-"/home/mad29/projects/testdata/matrices/bcsstk26.mtx",
-"/home/mad29/projects/testdata/matrices/bcsstk27.mtx",
-"/home/mad29/projects/testdata/matrices/bcsstk28.mtx",
-"/home/mad29/projects/testdata/matrices/bcsstk36.mtx",
-"/home/mad29/projects/testdata/matrices/bcsstk38.mtx",
-"/home/mad29/projects/testdata/matrices/bcsstm08.mtx",
-"/home/mad29/projects/testdata/matrices/bcsstm09.mtx",
-"/home/mad29/projects/testdata/matrices/bcsstm11.mtx",
-"/home/mad29/projects/testdata/matrices/bcsstm12.mtx",
-"/home/mad29/projects/testdata/matrices/bcsstm21.mtx",
-"/home/mad29/projects/testdata/matrices/bcsstm23.mtx",
-"/home/mad29/projects/testdata/matrices/bcsstm24.mtx",
-"/home/mad29/projects/testdata/matrices/bcsstm25.mtx",
-"/home/mad29/projects/testdata/matrices/bcsstm26.mtx",
-"/home/mad29/projects/testdata/matrices/bcsstm39.mtx",
-"/home/mad29/projects/testdata/matrices/bibd_81_2.mtx",
-"/home/mad29/projects/testdata/matrices/bmw7st_1.mtx",
-"/home/mad29/projects/testdata/matrices/bmwcra_1.mtx",
-"/home/mad29/projects/testdata/matrices/bodyy4.mtx",
-"/home/mad29/projects/testdata/matrices/bodyy5.mtx",
-"/home/mad29/projects/testdata/matrices/bodyy6.mtx",
-"/home/mad29/projects/testdata/matrices/bone010.mtx",
-"/home/mad29/projects/testdata/matrices/boneS01.mtx",
-"/home/mad29/projects/testdata/matrices/cbuckle.mtx",
-"/home/mad29/projects/testdata/matrices/cfd1.mtx",
-"/home/mad29/projects/testdata/matrices/cfd2.mtx",
-"/home/mad29/projects/testdata/matrices/crystm01.mtx",
-"/home/mad29/projects/testdata/matrices/crystm02.mtx",
-"/home/mad29/projects/testdata/matrices/crystm03.mtx",
-"/home/mad29/projects/testdata/matrices/ct20stif.mtx",
-"/home/mad29/projects/testdata/matrices/cvxbqp1.mtx",
-"/home/mad29/projects/testdata/matrices/denormal.mtx",
-"/home/mad29/projects/testdata/matrices/ecology2.mtx",
-"/home/mad29/projects/testdata/matrices/ex10.mtx",
-"/home/mad29/projects/testdata/matrices/ex10hs.mtx",
-"/home/mad29/projects/testdata/matrices/ex13.mtx",
-"/home/mad29/projects/testdata/matrices/ex15.mtx",
-"/home/mad29/projects/testdata/matrices/ex3.mtx",
-"/home/mad29/projects/testdata/matrices/ex33.mtx",
-"/home/mad29/projects/testdata/matrices/ex9.mtx",
-"/home/mad29/projects/testdata/matrices/finan512.mtx",
-"/home/mad29/projects/testdata/matrices/fv1.mtx",
-"/home/mad29/projects/testdata/matrices/fv2.mtx",
-"/home/mad29/projects/testdata/matrices/fv3.mtx",
-"/home/mad29/projects/testdata/matrices/gyro.mtx",
-"/home/mad29/projects/testdata/matrices/inline_1.mtx",
-"/home/mad29/projects/testdata/matrices/jnlbrng1.mtx",
-"/home/mad29/projects/testdata/matrices/ldoor.mtx",
-"/home/mad29/projects/testdata/matrices/msdoor.mtx",
-"/home/mad29/projects/testdata/matrices/nasa1824.mtx",
-"/home/mad29/projects/testdata/matrices/nasa2146.mtx",
-"/home/mad29/projects/testdata/matrices/nasa2910.mtx",
-"/home/mad29/projects/testdata/matrices/nasa4704.mtx",
-"/home/mad29/projects/testdata/matrices/nasasrb.mtx",
-"/home/mad29/projects/testdata/matrices/nd12k.mtx",
-"/home/mad29/projects/testdata/matrices/nd24k.mtx",
-"/home/mad29/projects/testdata/matrices/nd3k.mtx",
-"/home/mad29/projects/testdata/matrices/nd6k.mtx",
-"/home/mad29/projects/testdata/matrices/obstclae.mtx",
-"/home/mad29/projects/testdata/matrices/offshore.mtx",
-"/home/mad29/projects/testdata/matrices/oilpan.mtx",
-"/home/mad29/projects/testdata/matrices/olafu.mtx",
-"/home/mad29/projects/testdata/matrices/parabolic_fem.mtx",
-"/home/mad29/projects/testdata/matrices/pdb1HYS.mtx",
-"/home/mad29/projects/testdata/matrices/plat1919.mtx",
-"/home/mad29/projects/testdata/matrices/plbuckle.mtx",
-"/home/mad29/projects/testdata/matrices/pwtk.mtx",
-"/home/mad29/projects/testdata/matrices/qa8fm.mtx",
-"/home/mad29/projects/testdata/matrices/raefsky4.mtx",
-"/home/mad29/projects/testdata/matrices/s1rmq4m1.mtx",
-"/home/mad29/projects/testdata/matrices/s1rmt3m1.mtx",
-"/home/mad29/projects/testdata/matrices/s2rmq4m1.mtx",
-"/home/mad29/projects/testdata/matrices/s2rmt3m1.mtx",
-"/home/mad29/projects/testdata/matrices/s3dkq4m2.mtx",
-"/home/mad29/projects/testdata/matrices/s3dkt3m2.mtx",
-"/home/mad29/projects/testdata/matrices/s3rmq4m1.mtx",
-"/home/mad29/projects/testdata/matrices/s3rmt3m1.mtx",
-"/home/mad29/projects/testdata/matrices/s3rmt3m3.mtx",
-"/home/mad29/projects/testdata/matrices/shallow_water1.mtx",
-"/home/mad29/projects/testdata/matrices/shallow_water2.mtx",
-"/home/mad29/projects/testdata/matrices/ship_001.mtx",
-"/home/mad29/projects/testdata/matrices/ship_003.mtx",
-"/home/mad29/projects/testdata/matrices/shipsec1.mtx",
-"/home/mad29/projects/testdata/matrices/shipsec5.mtx",
-"/home/mad29/projects/testdata/matrices/shipsec8.mtx",
-"/home/mad29/projects/testdata/matrices/smt.mtx",
-"/home/mad29/projects/testdata/matrices/sts4098.mtx",
-"/home/mad29/projects/testdata/matrices/t2dah_e.mtx",
-"/home/mad29/projects/testdata/matrices/t2dal_e.mtx",
-"/home/mad29/projects/testdata/matrices/t3dl_e.mtx",
-"/home/mad29/projects/testdata/matrices/ted_B.mtx",
-"/home/mad29/projects/testdata/matrices/thermal1.mtx",
-"/home/mad29/projects/testdata/matrices/thermal2.mtx",
-"/home/mad29/projects/testdata/matrices/thermomech_TC.mtx",
-"/home/mad29/projects/testdata/matrices/thermomech_TK.mtx",
-"/home/mad29/projects/testdata/matrices/thermomech_dM.mtx",
-"/home/mad29/projects/testdata/matrices/tmt_sym.mtx",
-"/home/mad29/projects/testdata/matrices/torsion1.mtx",
-"/home/mad29/projects/testdata/matrices/vanbody.mtx",
-"/home/mad29/projects/testdata/matrices/wathen100.mtx",
-"/home/mad29/projects/testdata/matrices/wathen120.mtx",
-"/home/mad29/projects/testdata/matrices/x104.mtx"
+# "/home/mad29/projects/testdata/matrices/Chem97ZtZ.mtx",
+# "/home/mad29/projects/testdata/matrices/Dubcova1.mtx",
+# "/home/mad29/projects/testdata/matrices/Dubcova2.mtx",
+# "/home/mad29/projects/testdata/matrices/Dubcova3.mtx",
+# "/home/mad29/projects/testdata/matrices/Emilia_923.mtx",
+# "/home/mad29/projects/testdata/matrices/Fault_639.mtx",
+# "/home/mad29/projects/testdata/matrices/Flan_1565.mtx",
+# "/home/mad29/projects/testdata/matrices/G2_circuit.mtx",
+# "/home/mad29/projects/testdata/matrices/G3_circuit.mtx",
+# "/home/mad29/projects/testdata/matrices/Geo_1438.mtx",
+# "/home/mad29/projects/testdata/matrices/Hook_1498.mtx",
+# "/home/mad29/projects/testdata/matrices/Kuu.mtx",
+# "/home/mad29/projects/testdata/matrices/LF10000.mtx",
+# "/home/mad29/projects/testdata/matrices/Muu.mtx",
+# "/home/mad29/projects/testdata/matrices/PFlow_742.mtx",
+# "/home/mad29/projects/testdata/matrices/Pres_Poisson.mtx",
+# "/home/mad29/projects/testdata/matrices/Serena.mtx",
+# "/home/mad29/projects/testdata/matrices/StocF-1465.mtx",
+# "/home/mad29/projects/testdata/matrices/Trefethen_2000.mtx",
+# "/home/mad29/projects/testdata/matrices/Trefethen_20000.mtx",
+# "/home/mad29/projects/testdata/matrices/bcsstk08.mtx",
+# "/home/mad29/projects/testdata/matrices/bcsstk09.mtx",
+# "/home/mad29/projects/testdata/matrices/bcsstk10.mtx",
+# "/home/mad29/projects/testdata/matrices/bcsstk11.mtx",
+# "/home/mad29/projects/testdata/matrices/bcsstk12.mtx",
+# "/home/mad29/projects/testdata/matrices/bcsstk13.mtx",
+# "/home/mad29/projects/testdata/matrices/bcsstk14.mtx",
+# "/home/mad29/projects/testdata/matrices/bcsstk15.mtx",
+# "/home/mad29/projects/testdata/matrices/bcsstk16.mtx",
+# "/home/mad29/projects/testdata/matrices/bcsstk17.mtx",
+# "/home/mad29/projects/testdata/matrices/bcsstk18.mtx",
+# "/home/mad29/projects/testdata/matrices/bcsstk21.mtx",
+# "/home/mad29/projects/testdata/matrices/bcsstk23.mtx",
+# "/home/mad29/projects/testdata/matrices/bcsstk24.mtx",
+# "/home/mad29/projects/testdata/matrices/bcsstk25.mtx",
+# "/home/mad29/projects/testdata/matrices/bcsstk26.mtx",
+# "/home/mad29/projects/testdata/matrices/bcsstk27.mtx",
+# "/home/mad29/projects/testdata/matrices/bcsstk28.mtx",
+# "/home/mad29/projects/testdata/matrices/bcsstk36.mtx",
+# "/home/mad29/projects/testdata/matrices/bcsstk38.mtx",
+# "/home/mad29/projects/testdata/matrices/bcsstm08.mtx",
+# "/home/mad29/projects/testdata/matrices/bcsstm09.mtx",
+# "/home/mad29/projects/testdata/matrices/bcsstm11.mtx",
+# "/home/mad29/projects/testdata/matrices/bcsstm12.mtx",
+# "/home/mad29/projects/testdata/matrices/bcsstm21.mtx",
+# "/home/mad29/projects/testdata/matrices/bcsstm23.mtx",
+# "/home/mad29/projects/testdata/matrices/bcsstm24.mtx",
+# "/home/mad29/projects/testdata/matrices/bcsstm25.mtx",
+# "/home/mad29/projects/testdata/matrices/bcsstm26.mtx",
+# "/home/mad29/projects/testdata/matrices/bcsstm39.mtx",
+# "/home/mad29/projects/testdata/matrices/bibd_81_2.mtx",
+# "/home/mad29/projects/testdata/matrices/bmw7st_1.mtx",
+# "/home/mad29/projects/testdata/matrices/bmwcra_1.mtx",
+# "/home/mad29/projects/testdata/matrices/bodyy4.mtx",
+# "/home/mad29/projects/testdata/matrices/bodyy5.mtx",
+# "/home/mad29/projects/testdata/matrices/bodyy6.mtx",
+# "/home/mad29/projects/testdata/matrices/bone010.mtx",
+# "/home/mad29/projects/testdata/matrices/boneS01.mtx",
+# "/home/mad29/projects/testdata/matrices/cbuckle.mtx",
+# "/home/mad29/projects/testdata/matrices/cfd1.mtx",
+# "/home/mad29/projects/testdata/matrices/cfd2.mtx",
+# "/home/mad29/projects/testdata/matrices/crystm01.mtx",
+# "/home/mad29/projects/testdata/matrices/crystm02.mtx",
+# "/home/mad29/projects/testdata/matrices/crystm03.mtx",
+# "/home/mad29/projects/testdata/matrices/ct20stif.mtx",
+# "/home/mad29/projects/testdata/matrices/cvxbqp1.mtx",
+# "/home/mad29/projects/testdata/matrices/denormal.mtx",
+# "/home/mad29/projects/testdata/matrices/ecology2.mtx",
+# "/home/mad29/projects/testdata/matrices/ex10.mtx",
+# "/home/mad29/projects/testdata/matrices/ex10hs.mtx",
+# "/home/mad29/projects/testdata/matrices/ex13.mtx",
+# "/home/mad29/projects/testdata/matrices/ex15.mtx",
+# "/home/mad29/projects/testdata/matrices/ex3.mtx",
+# "/home/mad29/projects/testdata/matrices/ex33.mtx",
+# "/home/mad29/projects/testdata/matrices/ex9.mtx",
+# "/home/mad29/projects/testdata/matrices/finan512.mtx",
+# "/home/mad29/projects/testdata/matrices/fv1.mtx",
+# "/home/mad29/projects/testdata/matrices/fv2.mtx",
+# "/home/mad29/projects/testdata/matrices/fv3.mtx",
+# "/home/mad29/projects/testdata/matrices/gyro.mtx",
+# "/home/mad29/projects/testdata/matrices/inline_1.mtx",
+# "/home/mad29/projects/testdata/matrices/jnlbrng1.mtx",
+# "/home/mad29/projects/testdata/matrices/ldoor.mtx",
+# "/home/mad29/projects/testdata/matrices/msdoor.mtx",
+# "/home/mad29/projects/testdata/matrices/nasa1824.mtx",
+# "/home/mad29/projects/testdata/matrices/nasa2146.mtx",
+# "/home/mad29/projects/testdata/matrices/nasa2910.mtx",
+# "/home/mad29/projects/testdata/matrices/nasa4704.mtx",
+# "/home/mad29/projects/testdata/matrices/nasasrb.mtx",
+# "/home/mad29/projects/testdata/matrices/nd12k.mtx",
+# "/home/mad29/projects/testdata/matrices/nd24k.mtx",
+# "/home/mad29/projects/testdata/matrices/nd3k.mtx",
+# "/home/mad29/projects/testdata/matrices/nd6k.mtx",
+# "/home/mad29/projects/testdata/matrices/obstclae.mtx",
+# "/home/mad29/projects/testdata/matrices/offshore.mtx",
+# "/home/mad29/projects/testdata/matrices/oilpan.mtx",
+# "/home/mad29/projects/testdata/matrices/olafu.mtx",
+# "/home/mad29/projects/testdata/matrices/parabolic_fem.mtx",
+# "/home/mad29/projects/testdata/matrices/pdb1HYS.mtx",
+# "/home/mad29/projects/testdata/matrices/plat1919.mtx",
+# "/home/mad29/projects/testdata/matrices/plbuckle.mtx",
+# "/home/mad29/projects/testdata/matrices/pwtk.mtx",
+# "/home/mad29/projects/testdata/matrices/qa8fm.mtx",
+# "/home/mad29/projects/testdata/matrices/raefsky4.mtx",
+# "/home/mad29/projects/testdata/matrices/s1rmq4m1.mtx",
+# "/home/mad29/projects/testdata/matrices/s1rmt3m1.mtx",
+# "/home/mad29/projects/testdata/matrices/s2rmq4m1.mtx",
+# "/home/mad29/projects/testdata/matrices/s2rmt3m1.mtx",
+# "/home/mad29/projects/testdata/matrices/s3dkq4m2.mtx",
+# "/home/mad29/projects/testdata/matrices/s3dkt3m2.mtx",
+# "/home/mad29/projects/testdata/matrices/s3rmq4m1.mtx",
+# "/home/mad29/projects/testdata/matrices/s3rmt3m1.mtx",
+# "/home/mad29/projects/testdata/matrices/s3rmt3m3.mtx",
+# "/home/mad29/projects/testdata/matrices/shallow_water1.mtx",
+# "/home/mad29/projects/testdata/matrices/shallow_water2.mtx",
+# "/home/mad29/projects/testdata/matrices/ship_001.mtx",
+# "/home/mad29/projects/testdata/matrices/ship_003.mtx",
+# "/home/mad29/projects/testdata/matrices/shipsec1.mtx",
+# "/home/mad29/projects/testdata/matrices/shipsec5.mtx",
+# "/home/mad29/projects/testdata/matrices/shipsec8.mtx",
+# "/home/mad29/projects/testdata/matrices/smt.mtx",
+# "/home/mad29/projects/testdata/matrices/sts4098.mtx",
+# "/home/mad29/projects/testdata/matrices/t2dah_e.mtx",
+# "/home/mad29/projects/testdata/matrices/t2dal_e.mtx",
+# "/home/mad29/projects/testdata/matrices/t3dl_e.mtx",
+# "/home/mad29/projects/testdata/matrices/ted_B.mtx",
+# "/home/mad29/projects/testdata/matrices/thermal1.mtx",
+# "/home/mad29/projects/testdata/matrices/thermal2.mtx",
+# "/home/mad29/projects/testdata/matrices/thermomech_TC.mtx",
+# "/home/mad29/projects/testdata/matrices/thermomech_TK.mtx",
+# "/home/mad29/projects/testdata/matrices/thermomech_dM.mtx",
+# "/home/mad29/projects/testdata/matrices/tmt_sym.mtx",
+# "/home/mad29/projects/testdata/matrices/torsion1.mtx",
+# "/home/mad29/projects/testdata/matrices/vanbody.mtx",
+# "/home/mad29/projects/testdata/matrices/wathen100.mtx",
+# "/home/mad29/projects/testdata/matrices/wathen120.mtx",
+# "/home/mad29/projects/testdata/matrices/x104.mtx"
 ]
 unroll_factors = [4, 8, 16, 32, 64]
 thread_counts = [32, 64, 128, 256]
 coarsening_factors = [2, 4, 8, 16]
+band_widths = [2, 4, 8, 16]  # H-Level band widths
 
 method_list = [
     # Temporarily excluded Triton routines
@@ -201,6 +207,13 @@ method_list = [
     "numba-csr-wavefront", "numba-csr-sync-free",
     # "triton-spmv"
 ]
+
+# Add H-Level methods
+for bw in band_widths:
+    method_list.extend([
+        f"numba-csc-h-level-bw{bw}",
+        f"numba-csr-h-level-bw{bw}",
+    ])
 
 # Add new explicit coarsening methods
 # CSC wavefront block coarsening
@@ -776,6 +789,41 @@ def correctness_test():
             except Exception as e:
                 print(f"\n{method_name} failed: {e}")
         
+        # Test H-Level methods
+        print("\nTesting H-Level methods...")
+        for bw in band_widths:
+            # Test CSC H-Level (now using CUDA graphs)
+            method_name = f'numba-csc-h-level-bw{bw}'
+            try:
+                y_h_level = sptrsv_numba_csc_h_level_graph(
+                    d_data, d_indices, d_indptr, d_b, A.shape[0], A.shape[1], A.nnz,
+                    waves, wave_start_loc, band_width=bw)
+                y_h_level_cpu = y_h_level.copy_to_host()
+                
+                if np.allclose(x_cpu, y_h_level_cpu, atol=1e-5):
+                    print(f"\n{method_name} Solutions match within tolerance!")
+                    method_correctness[mat_name][method_name] = 1
+                else:
+                    print(f"\nWarning: {method_name} Solutions do not match!")
+            except Exception as e:
+                print(f"\n{method_name} failed: {e}")
+            
+            # Test CSR H-Level (now using CUDA graphs)
+            method_name = f'numba-csr-h-level-bw{bw}'
+            try:
+                y_h_level_csr = sptrsv_numba_csr_h_level_graph(
+                    d_data_csr, d_indices_csr, d_indptr_csr, d_b_csr, n, n, A_csr_numba.nnz,
+                    waves_csr_numba, wave_start_loc_csr_numba, band_width=bw)
+                y_h_level_csr_cpu = y_h_level_csr.copy_to_host()
+                
+                if np.allclose(x_cpu, y_h_level_csr_cpu, atol=1e-5):
+                    print(f"\n{method_name} Solutions match within tolerance!")
+                    method_correctness[mat_name][method_name] = 1
+                else:
+                    print(f"\nWarning: {method_name} Solutions do not match!")
+            except Exception as e:
+                print(f"\n{method_name} failed: {e}")
+        
         # Test 3-level coarsening variants
         print("\nTesting 3-level coarsening (wavefront + warp + thread)...")
         for cf in [1, 2, 4, 8]:
@@ -882,6 +930,13 @@ for bcf in [1, 2, 4]:
 for threads in thread_counts:
     line_names.append(f"CSR-SF-Thread-t{threads}")
 
+# Add H-Level variant names (CUDA Graph + Warp-Level)
+for bw in band_widths:
+    line_names.extend([
+        f"CSC-H-Graph-Warp-bw{bw}",
+        f"CSR-H-Graph-Warp-bw{bw}",
+    ])
+
 # Add 3-level coarsening variant names
 for cf in [1, 2, 4, 8]:
     for threads in thread_counts:
@@ -946,6 +1001,15 @@ for i, threads in enumerate(thread_counts):
         ("orange", line_style),  # CSC sync-free mapping
         ("red", line_style),  # CSR wavefront mapping
         ("brown", line_style),  # CSR sync-free mapping
+    ])
+
+# Add styles for H-Level variants
+h_level_line_styles = ["-", "--", "-.", ":"]
+for i_bw, bw in enumerate(band_widths):
+    line_style = h_level_line_styles[i_bw % len(h_level_line_styles)]
+    styles.extend([
+        ("teal", line_style),  # CSC H-Level
+        ("olive", line_style),  # CSR H-Level
     ])
 
 # Add styles for unrolling variants
@@ -1369,6 +1433,37 @@ def benchmark(matrices, provider):
         dep_count = incoming_edge_csr_rows(A_csr)
         succ_offsets, succ_indices = build_csr_successors(A_csr)
         ms, min_ms, max_ms = triton.testing.do_bench(lambda: sptrsv_numba_csr_sync_free_thread_coarsening(d_data, d_indices, d_indptr, d_x, A.shape[0], A.shape[1], A_csr.nnz, dep_count, succ_offsets, succ_indices, thread_coarsening_factor=1, threads_per_block=threads_per_block), quantiles=quantiles, warmup=warmpup, rep=rep)
+    
+    # H-Level CSC (with CUDA Graphs and Warp-Level Optimization)
+    if provider.startswith('numba-csc-h-level-bw'):
+        band_width = int(provider.replace('numba-csc-h-level-bw', ''))
+        d_data = cuda.to_device(A.data)
+        d_indices = cuda.to_device(A.indices)
+        d_indptr = cuda.to_device(A.indptr)
+        d_x = cuda.to_device(np.zeros(n))
+        wavefronts = compute_wavefront(A)
+        wave_start_loc, waves = compact_2d_list(wavefronts)
+        waves_gpu = cuda.to_device(waves)
+        # Pre-compute analysis OUTSIDE the benchmark loop
+        h_level_data = sptrsv_h_level_analyze(d_indptr, d_indices, waves_gpu, wave_start_loc, band_width=band_width)
+        # Benchmark ONLY the solver
+        ms, min_ms, max_ms = triton.testing.do_bench(lambda: sptrsv_numba_csc_h_level_solve(d_data, d_indices, d_indptr, d_x, A.shape[0], A.shape[1], A.nnz, h_level_data), quantiles=quantiles, warmup=warmpup, rep=rep)
+    
+    # H-Level CSR (with CUDA Graphs and Warp-Level Optimization)
+    if provider.startswith('numba-csr-h-level-bw'):
+        band_width = int(provider.replace('numba-csr-h-level-bw', ''))
+        A_csr = A.tocsr()
+        d_data = cuda.to_device(A_csr.data)
+        d_indices = cuda.to_device(A_csr.indices)
+        d_indptr = cuda.to_device(A_csr.indptr)
+        d_x = cuda.to_device(np.zeros(n))
+        wavefronts = compute_wavefront(A)  # Note: CSR uses same wavefronts as CSC
+        wave_start_loc, waves = compact_2d_list(wavefronts)
+        waves_gpu = cuda.to_device(waves)
+        # Pre-compute analysis OUTSIDE the benchmark loop
+        h_level_data = sptrsv_h_level_analyze(d_indptr, d_indices, waves_gpu, wave_start_loc, band_width=band_width)
+        # Benchmark ONLY the solver
+        ms, min_ms, max_ms = triton.testing.do_bench(lambda: sptrsv_numba_csr_h_level_solve(d_data, d_indices, d_indptr, d_x, A.shape[0], A.shape[1], A_csr.nnz, h_level_data), quantiles=quantiles, warmup=warmpup, rep=rep)
     
     # CSC 3-Level Coarsening (wavefront + warp + thread)
     if provider.startswith('numba-csc-coarsened-c') and '-w' in provider and '-tc' in provider:
