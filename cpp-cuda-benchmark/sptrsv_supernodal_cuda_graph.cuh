@@ -26,13 +26,6 @@
         throw std::runtime_error(std::string("cuBLAS Error: ") + std::to_string(s)); \
 } while(0)
 
-// -------------------------
-// scatter kernel
-// -------------------------
-// update: vector of length n_scatter
-// row_idx: device array with n_scatter row indices
-// x: device global solution vector (size >= max(row_idx)+1)
-// n: number of entries
 __global__
 void scatter_kernel(const float* __restrict__ update,
                     const int* __restrict__ row_idx,
@@ -43,9 +36,7 @@ void scatter_kernel(const float* __restrict__ update,
     printf("%d\n", tid);
     if (tid >= n) return;
     int r = row_idx[tid];
-    // Atomic add is safer if duplicates may exist. The Python code assumes no conflicts.
     atomicAdd(x + r, update[tid]);
-//    x[r] += update[tid];
 }
 
 cudaGraph_t sptrsv_csc_supernodal_wavefront_cudagraph(
@@ -261,9 +252,6 @@ cudaGraph_t create_cuda_graph_from_super_nodes(const int* sn_begin,
                         &beta,
                         d_update,
                         1));
-
-
-                const int *host_row_idx_begin = nullptr;
 
                 int *d_row_idx = nullptr;
                 if (n_scatter > 0) {
