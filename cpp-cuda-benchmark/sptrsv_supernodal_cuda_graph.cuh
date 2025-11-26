@@ -268,9 +268,7 @@ cudaGraph_t create_cuda_graph_from_super_nodes(const int* sn_begin,
                 const int blocks = (n_scatter + threads_per_block - 1) / threads_per_block;
                 if (n_scatter > 0) {
                     scatter_kernel<<<blocks, threads_per_block, 0, s>>>(d_update, d_row_idx, d_x, n_scatter);
-
                 }
-
                 if (d_row_idx) CUDA_CHECK(cudaFreeAsync(d_row_idx, s));
                 if (d_update) CUDA_CHECK(cudaFreeAsync(d_update, s));
             }
@@ -281,7 +279,9 @@ cudaGraph_t create_cuda_graph_from_super_nodes(const int* sn_begin,
     for (int sn_id = 0; sn_id < n_super; sn_id++){
         std::vector<int>  deps_cg_ids;
         for (auto dep_sn_id: deps[sn_id]){
-            deps_cg_ids.push_back(sn_to_node_id[dep_sn_id]);
+            if (dep_sn_id != sn_id) {
+                deps_cg_ids.push_back(sn_to_node_id[dep_sn_id]);
+            }
         }
         builder.addDependencies(sn_to_node_id[sn_id], deps_cg_ids);
     }

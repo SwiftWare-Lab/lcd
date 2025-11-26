@@ -91,6 +91,7 @@ public:
         if (nodes.find(nodeId) != nodes.end()){
             auto node = nodes[nodeId];
             node.parents = dependencies;
+            std::cout << node.parents.size() << std::endl;
             for (auto pid: dependencies){
                 if (nodes.find(pid) != nodes.end()){
                     nodes[pid].children.push_back(nodeId);
