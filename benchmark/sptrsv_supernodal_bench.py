@@ -50,7 +50,7 @@ os.environ['NUMBA_CUDA_PTX_VERSION'] = '84'
 Relaxtion = 8
 
 mtx_list = [
-    "/home/mad29/projects/testdata/matrices/1138_bus.mtx",
+    "/home/salehm32/projects/fused-gnn/fusion/data/new-ss/1138_bus/1138_bus.mtx",
             ]
 method_list = ["python-sptrsv-csc-super", "numba-sptrsv-csc-super", "numba-sptrsv-csc-super-wavefront","cuda-numba-sptrsv-csc-super-syncfree", "cholmod"]
 #mtx_list = get_matrix_list("/home/kazem/UFDB/spd_list.txt", "/home/kazem/UFDB/")

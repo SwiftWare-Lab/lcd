@@ -1,3 +1,2 @@
-,name,n,nnz,nnz_per_row,nnz_per_col,max nnz per row,max nnz per col,density,wavefronts
-0,Andrews.mtx,60000,410077,6.834616666666666,6.834616666666666,34,34,0.00011391027777777777,47
-1,2cubes_sphere.mtx,101492,874378,8.615240610097347,8.615240610097347,24,29,8.488590834841512e-05,14329
+,name,n,nnz,nnz_per_row,nnz_per_col,max nnz per row,max nnz per col,density,wavefronts,lname,lnnz,lnnz_per_row,lnnz_per_col,max lnnz per row,max lnnz per col,ldensity,lwavefronts,num supernodes,max supernode width,average supernode width
+0,1138_bus.mtx,1138,2596,2.281195079086116,2.281195079086116,11,17,0.002004565095857747,21,1138_bus.mtx,3265,2.869068541300527,2.869068541300527,32,11,0.0025211498605452786,39,4,693,284.5
