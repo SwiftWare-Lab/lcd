@@ -63,6 +63,13 @@ int main(int argv, char** argc){
             nnz
     );
 
+    cudaGraphExec_t graphExec;
+    CUDA_CHECK(cudaGraphInstantiate(&graphExec, cudaGraph, NULL, NULL, 0));
+
+    std::cout << "Launching Graph..." << std::endl;
+    CUDA_CHECK(cudaGraphLaunch(graphExec, 0));
+    CUDA_CHECK(cudaDeviceSynchronize());
+
     CUDA_CHECK(cudaMemcpy(x, d_x, n * sizeof(float), cudaMemcpyDeviceToHost));
     CUDA_CHECK(cudaFree(d_x));
     CUDA_CHECK(cudaFree(d_Lx));

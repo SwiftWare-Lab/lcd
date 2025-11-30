@@ -89,9 +89,10 @@ public:
 
     void addDependencies(int nodeId, std::vector<int>& dependencies){
         if (nodes.find(nodeId) != nodes.end()){
-            auto node = nodes[nodeId];
+            // FIX: Use reference (&) to modify the actual node in the map
+            auto& node = nodes[nodeId];
             node.parents = dependencies;
-            std::cout << node.parents.size() << std::endl;
+
             for (auto pid: dependencies){
                 if (nodes.find(pid) != nodes.end()){
                     nodes[pid].children.push_back(nodeId);
@@ -145,6 +146,10 @@ public:
         
         // Track the "Head" node of each stream to prevent accidental serialization of siblings
         std::vector<int> streamHeads(streamPool.size(), -1);
+        
+        // FIX: Track the last event on EVERY stream to join them at the end
+        std::vector<cudaEvent_t> streamLastEvent(streamPool.size(), nullptr);
+        
         int streamPoolIdx = 0; 
 
         // A. Start Capture on DEDICATED stream
@@ -211,21 +216,19 @@ public:
 
             // Record Completion
             CHECK_CUDA(cudaEventRecord(nodeEvents[nodeId], myStream));
+            
+            // Record that this stream did work
+            streamLastEvent[myStreamIdx] = nodeEvents[nodeId];
         }
 
-        // D. Join: Find Leaf Nodes and make CaptureStream wait on them.
-        std::cout << "[DEBUG] Joining branches..." << std::endl;
-        bool hasLeaf = false;
-        for (auto const& pair : nodes) {
-            if (pair.second.children.empty()) {
-                std::cout << "  -> Joining Leaf Node " << pair.first << std::endl;
-                CHECK_CUDA(cudaStreamWaitEvent(captureStream, nodeEvents[pair.first], 0));
-                hasLeaf = true;
+        // FIX: Join ALL worker streams back to capture stream
+        for(size_t i=0; i<streamPool.size(); ++i) {
+            if(streamLastEvent[i] != nullptr) {
+                CHECK_CUDA(cudaStreamWaitEvent(captureStream, streamLastEvent[i], 0));
             }
         }
         
-        if (!hasLeaf && !nodes.empty()) {}
-
+        
         std::cout << "[DEBUG] Ending Capture..." << std::endl;
         cudaGraph_t graph;
         CHECK_CUDA(cudaStreamEndCapture(captureStream, &graph));

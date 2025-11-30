@@ -202,14 +202,16 @@ cudaGraph_t create_cuda_graph_from_super_nodes(const int* sn_begin,
         int sup_len = Lip[sn_id + 1] - Lip[sn_id];
         int val_beg = Lp[col_b];
 
+        // 1. FIX: Correct Loop Bound calculation
+        // It should be Lip[sn_id + 1], not Lip[sn_id] + 1
         int row_idx_start = Lip[sn_id] + sup_width;
-        int row_idx_end   = Lip[sn_id] + 1;
+        int row_idx_end   = Lip[sn_id + 1]; 
         int n_scatter     = row_idx_end - row_idx_start;
 
         const float* diag_block_ptr = d_Lx + val_beg; // column-major block with lda = sup_len
         float* x_block_ptr = d_x + col_b;             // pointer to x[col_b]
 
-        auto supernode_op = [&](cudaStream_t s) {
+        auto supernode_op = [=](cudaStream_t s) {
             cublasSetStream(cublas, s);
             if (sup_width > 0) {
                 CUBLAS_CHECK(cublasStrsv(
@@ -233,8 +235,12 @@ cudaGraph_t create_cuda_graph_from_super_nodes(const int* sn_begin,
                 float *d_update = nullptr;
                 CUDA_CHECK(cudaMallocAsync(&d_update, sizeof(float) * n_scatter, s));
 
-                const float alpha = 1.0;
-                const float beta = 0.0;
+                // 3. FIX: Math Logic
+                // We calculate: update = A * x. 
+                // We need to SUBTRACT this from the target rows.
+                // scatter_kernel does `x += update`. So we make update negative.
+                const float alpha = -1.0f; 
+                const float beta = 0.0f;
 
 
                 int m = n_scatter;
