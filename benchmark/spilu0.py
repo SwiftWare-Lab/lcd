@@ -20,6 +20,11 @@ import triton.language as tl
 from numba import config
 from numba import int32, float64
 
+import cupy as cp
+from cupyx.scipy.sparse import csr_matrix as cp_csr_matrix
+from cupyx.scipy.sparse.linalg import spilu as cp_spilu
+from cupyx.scipy.sparse import tril as cp_tril, triu as cp_triu
+
 config.CUDA_ENABLE_PYNVJITLINK = 1
 
 REAL_TYPE = np.float64
@@ -900,3 +905,12 @@ def ilu0_csr_numba_sync_free_unrolling(data, indices, indptr,
     cuda.synchronize()
 
 
+def cusparse_ilu0(A_gpu):
+    ilu_result = cp_spilu(A_gpu, fill_factor=1.0, drop_tol=0.0)
+
+    L_gpu = ilu_result.L.tocsr()
+    U_gpu = ilu_result.U.tocsr()
+    
+    result_gpu = cp_tril(L_gpu, k=-1) + cp_triu(U_gpu, k=0)
+    
+    return result_gpu

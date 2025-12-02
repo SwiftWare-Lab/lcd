@@ -6,7 +6,7 @@ import cupy as cp
 import math
 
 # -------------------------------------------------------------------------
-# 1. HELPER: Device Transfers & Sizing
+# 1. HELPER: Device Transfers
 # -------------------------------------------------------------------------
 
 def _to_device_int32(arr):

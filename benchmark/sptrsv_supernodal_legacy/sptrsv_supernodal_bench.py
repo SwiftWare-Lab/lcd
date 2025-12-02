@@ -27,19 +27,11 @@ from sptrsv_supernodal import *
 #     SupernodalSpTrsvCudaGraph,
 #     sptrsv_csc_supernodal_cudagraph
 # )
-from sptrsv_supernodal_cudagraph_syncfree import (
+from sptrsv_supernodal_cudagraphs_syncfree_v1 import (
     SupernodalSpTrsvCudaGraphSyncFree,
     sptrsv_supernodal_cudagraph_syncfree
 )
-# from sptrsv_supernodal_cudagraph_syncfree_true import (
-#     TrueSyncFreeSpTrsvCudaGraph,
-#     sptrsv_supernodal_cudagraph_syncfree_true
-# )
-# from sptrsv_supernodal_syncfree import (
-#     sptrsv_supernodal_persistent,
-#     sptrsv_supernodal_block_level,
-#     sptrsv_supernodal_hybrid
-# )
+
 from utils.inspectors import sptrsv_csc_supernodal_analysis, \
     sptrsv_csc_supernodal_analysis_1
 
@@ -49,6 +41,10 @@ import triton
 import triton.language as tl
 
 DEVICE = torch.device("cuda:0")
+
+
+import cupy
+print(cupy.show_config())
 
 
 # Set the compute capability to match your GPU
@@ -175,6 +171,23 @@ def correctness_test():
         sptrsv_csc_supernodal_numba_cuda(d_super, col_to_sup, d_ip, d_i, d_p, d_lx, d_x, d_thread_flags, max_width)
         x_sup_cuda = d_x.copy_to_host()
         print("norm gpu: ", np.linalg.norm(x_sup_cuda - np.ones(L.shape[0]), ord=np.inf))
+
+        x_sup_wf_cupy = b.copy()
+        d_supernodes = cp.asarray(Ls['supernodes'])
+        d_ip = cp.asarray(Ls['ip'])
+        print(len(Ls['x']))
+        d_lx = cp.asarray(Ls['x'])
+        d_i = cp.asarray(Ls['i'])
+        d_p = cp.asarray(Ls['p'])
+        d_b = cp.asarray(b)
+        d_x = cp.asarray(x_sup_wf_cupy)
+        d_waves_ptr = cp.asarray(wave_start_loc)
+        d_waves = cp.asarray(waves)
+        sptrsv_csc_supernodal_wavefront_cuda_graph(
+            d_supernodes, d_ip, d_i, d_p, d_lx, d_b, d_x, d_waves_ptr, d_waves, 1
+        )
+        out = cp.asnumpy(d_x)
+        print("norm gpu cupy: ", np.linalg.norm(out - np.ones(L.shape[0]), ord=np.inf))
 
         # x_persistent = sptrsv_supernodal_persistent(Ls, b, thread_flags.copy())
         # print("norm sync-free persistent: ", np.linalg.norm(x_persistent - np.ones(L.shape[0]), ord=np.inf))
