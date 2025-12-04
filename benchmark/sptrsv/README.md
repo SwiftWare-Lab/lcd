@@ -20,7 +20,6 @@ sptrsv/
 ### `sptrsv_baseline.py`
 - **Baselines**: cuSPARSE, CSC/CSR wavefront, CSC/CSR sync-free
 - **Triton kernels**: CSC/CSR wavefront and sync-free variants
-- **Helper functions**: `incoming_edge()`, `build_csc_successors()`, `build_csr_successors()`
 
 ### `sptrsv_unrolled.py`
 - **Mapping (u1)**: Thread-parallel variants with unroll factor 1
@@ -31,7 +30,6 @@ sptrsv/
 - **Wavefront coarsening**: Block (wc) and thread (tc) coarsening
 - **Sync-free coarsening**: Block (bc) and thread (tc) coarsening
 - **Combined 3-level**: Wavefront + warp + thread coarsening
-- **Helper**: `compute_coarsened_wavefronts()`, `compact_coarsened_wavefronts()`
 
 ### `sptrsv_hlevel.py`
 - **H-Level scheduling**: Hierarchical level-set method with warp optimization
@@ -41,21 +39,6 @@ sptrsv/
 ### `sptrsv_legacy.py`
 - Unused/experimental implementations (Triton kernels, older variants)
 - Kept for reference only
-
-## Running Benchmarks
-
-### Main Benchmark (Real Matrices)
-```bash
-cd /home/mad29/projects/gpu-backend/benchmark/sptrsv
-python sptrsv_benchmark.py
-```
-
-### Linear Dependency Benchmark (Synthetic Banded Matrices)
-Tests single-block vs sync-free for highly banded synthetic matrices with linear dependence chains:
-```bash
-cd /home/mad29/projects/gpu-backend/benchmark/sptrsv
-python lindep_benchmark.py
-```
 
 ## Naming Convention
 

@@ -127,14 +127,16 @@ def sptrsv_numba_csc_wavefront_coarsening_single_level_kernel(
     y_col = y[col]
     
     # Thread coarsening: each thread in warp processes multiple nonzeros
-    base_j = col_start + 1 + lane_id * thread_coarsening_factor
-    for local_j in range(thread_coarsening_factor):
-        j = base_j + local_j
-        if j >= col_end:
-            break
-        row_idx = indices[j]
-        val = data[j]
-        cuda.atomic.add(y, row_idx, val * y_col)
+    # Use strided loop to handle columns with more than 32*thread_coarsening_factor elements
+    stride = 32 * thread_coarsening_factor
+    for chunk_start in range(col_start + 1 + lane_id * thread_coarsening_factor, col_end, stride):
+        for local_j in range(thread_coarsening_factor):
+            j = chunk_start + local_j
+            if j >= col_end:
+                break
+            row_idx = indices[j]
+            val = data[j]
+            cuda.atomic.add(y, row_idx, val * y_col)
 
 
 # Note: Thread coarsening kernel removed - use combined kernel with block_coarsening_factor=1
@@ -167,13 +169,15 @@ def sptrsv_numba_csr_wavefront_coarsening_single_level_kernel(
     row_end = indptr[row + 1]
     
     # Thread coarsening: each thread in warp processes multiple elements
+    # Use strided loop to handle rows with more than 32*thread_coarsening_factor elements
     partial_sum = 0.0
-    base_j = row_start + lane_id * thread_coarsening_factor
-    for local_j in range(thread_coarsening_factor):
-        j = base_j + local_j
-        if j >= row_end - 1:
-            break
-        partial_sum += data[j] * y[indices[j]]
+    stride = 32 * thread_coarsening_factor
+    for chunk_start in range(row_start + lane_id * thread_coarsening_factor, row_end - 1, stride):
+        for local_j in range(thread_coarsening_factor):
+            j = chunk_start + local_j
+            if j >= row_end - 1:
+                break
+            partial_sum += data[j] * y[indices[j]]
     
     # Warp-level reduction using shuffle
     for offset in [16, 8, 4, 2, 1]:
@@ -300,7 +304,7 @@ def sptrsv_numba_csr_wavefront_block_coarsening(
                 np.int32(offset + level_start), np.int32(level_size),
                 np.int32(warps_per_block), np.int32(thread_coarsening_factor)
             )
-        cuda.synchronize()
+            cuda.synchronize()  # Sync after each level to enforce dependencies
     
     return d_y
 
@@ -390,14 +394,16 @@ def sptrsv_numba_csc_sync_free_thread_coarsening_kernel(
     cuda.syncthreads()
     
     y_col = y[col]
-    base_j = col_start + 1 + tid * thread_coarsening_factor
-    for local_j in range(thread_coarsening_factor):
-        j = base_j + local_j
-        if j >= col_end:
-            break
-        row_idx = indices[j]
-        val = data[j]
-        cuda.atomic.add(y, row_idx, val * y_col)
+    # Use strided loop to handle columns with more elements than block_size*thread_coarsening_factor
+    stride = block_size * thread_coarsening_factor
+    for chunk_start in range(col_start + 1 + tid * thread_coarsening_factor, col_end, stride):
+        for local_j in range(thread_coarsening_factor):
+            j = chunk_start + local_j
+            if j >= col_end:
+                break
+            row_idx = indices[j]
+            val = data[j]
+            cuda.atomic.add(y, row_idx, val * y_col)
 
     cuda.syncthreads()
     if tid == 0:
@@ -459,14 +465,17 @@ def sptrsv_numba_csr_sync_free_thread_coarsening_kernel(
     row_start = indptr[row]
     row_end = indptr[row + 1]
     
-    shared_sum = cuda.shared.array(128, dtype=numba.float64)
+    # Use dynamic shared memory allocation based on actual block size
+    shared_sum = cuda.shared.array(shape=0, dtype=numba.float64)
     partial_sum = 0.0
-    base_j = row_start + tid * thread_coarsening_factor
-    for local_j in range(thread_coarsening_factor):
-        j = base_j + local_j
-        if j >= row_end - 1:
-            break
-        partial_sum += data[j] * y[indices[j]]
+    # Use strided loop to handle rows with more elements than block_size*thread_coarsening_factor
+    stride = block_size * thread_coarsening_factor
+    for chunk_start in range(row_start + tid * thread_coarsening_factor, row_end - 1, stride):
+        for local_j in range(thread_coarsening_factor):
+            j = chunk_start + local_j
+            if j >= row_end - 1:
+                break
+            partial_sum += data[j] * y[indices[j]]
     
     shared_sum[tid] = partial_sum
     cuda.syncthreads()
