@@ -1,6 +1,9 @@
 import sys
 import os
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+# Add project root to path for compiler module
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../../..'))
+# Add benchmark directory to path for bench_utils
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../..'))
 
 import numpy as np
 from numba import cuda
@@ -318,8 +321,10 @@ def ilu0_csr_sync_free_unrolling_kernel_4(data, indices, indptr,
     if i >= dep_counts.size:
         return
 
-    while cuda.atomic.add(dep_counts, i, 0) > 0:
-        pass
+    if tid == 0:
+        while cuda.atomic.add(dep_counts, i, 0) > 0:
+            pass
+    cuda.syncthreads()
 
     row_start = indptr[i]
     row_end   = indptr[i + 1]
@@ -379,6 +384,7 @@ def ilu0_csr_sync_free_unrolling_kernel_4(data, indices, indptr,
         cuda.syncthreads()
         k_ptr += 1
 
+    cuda.threadfence()
     s0 = succ_offsets[i]
     s1 = succ_offsets[i + 1]
     for p in range(s0 + tid, s1, cuda.blockDim.x):
@@ -395,8 +401,10 @@ def ilu0_csr_sync_free_unrolling_kernel_8(data, indices, indptr,
     if i >= dep_counts.size:
         return
 
-    while cuda.atomic.add(dep_counts, i, 0) > 0:
-        pass
+    if tid == 0:
+        while cuda.atomic.add(dep_counts, i, 0) > 0:
+            pass
+    cuda.syncthreads()
 
     row_start = indptr[i]
     row_end   = indptr[i + 1]
@@ -441,6 +449,7 @@ def ilu0_csr_sync_free_unrolling_kernel_8(data, indices, indptr,
         cuda.syncthreads()
         k_ptr += 1
 
+    cuda.threadfence()
     s0 = succ_offsets[i]
     s1 = succ_offsets[i + 1]
     for p in range(s0 + tid, s1, cuda.blockDim.x):
@@ -457,8 +466,10 @@ def ilu0_csr_sync_free_unrolling_kernel_16(data, indices, indptr,
     if i >= dep_counts.size:
         return
 
-    while cuda.atomic.add(dep_counts, i, 0) > 0:
-        pass
+    if tid == 0:
+        while cuda.atomic.add(dep_counts, i, 0) > 0:
+            pass
+    cuda.syncthreads()
 
     row_start = indptr[i]
     row_end   = indptr[i + 1]
@@ -503,6 +514,7 @@ def ilu0_csr_sync_free_unrolling_kernel_16(data, indices, indptr,
         cuda.syncthreads()
         k_ptr += 1
 
+    cuda.threadfence()
     s0 = succ_offsets[i]
     s1 = succ_offsets[i + 1]
     for p in range(s0 + tid, s1, cuda.blockDim.x):
@@ -519,8 +531,10 @@ def ilu0_csr_sync_free_unrolling_kernel_32(data, indices, indptr,
     if i >= dep_counts.size:
         return
 
-    while cuda.atomic.add(dep_counts, i, 0) > 0:
-        pass
+    if tid == 0:
+        while cuda.atomic.add(dep_counts, i, 0) > 0:
+            pass
+    cuda.syncthreads()
 
     row_start = indptr[i]
     row_end   = indptr[i + 1]
@@ -565,6 +579,7 @@ def ilu0_csr_sync_free_unrolling_kernel_32(data, indices, indptr,
         cuda.syncthreads()
         k_ptr += 1
 
+    cuda.threadfence()
     s0 = succ_offsets[i]
     s1 = succ_offsets[i + 1]
     for p in range(s0 + tid, s1, cuda.blockDim.x):
@@ -581,8 +596,10 @@ def ilu0_csr_sync_free_unrolling_kernel_64(data, indices, indptr,
     if i >= dep_counts.size:
         return
 
-    while cuda.atomic.add(dep_counts, i, 0) > 0:
-        pass
+    if tid == 0:
+        while cuda.atomic.add(dep_counts, i, 0) > 0:
+            pass
+    cuda.syncthreads()
 
     row_start = indptr[i]
     row_end   = indptr[i + 1]
@@ -627,6 +644,7 @@ def ilu0_csr_sync_free_unrolling_kernel_64(data, indices, indptr,
         cuda.syncthreads()
         k_ptr += 1
 
+    cuda.threadfence()
     s0 = succ_offsets[i]
     s1 = succ_offsets[i + 1]
     for p in range(s0 + tid, s1, cuda.blockDim.x):
@@ -732,6 +750,125 @@ def ilu0_csr_numba_sync_free_unrolling_64(data, indices, indptr,
     M = dep_counts.size
     blocks = M
     ilu0_csr_sync_free_unrolling_kernel_64[blocks, threads_per_block](
+        data, indices, indptr, dep_counts, succ_offsets, succ_indices, diag_pos
+    )
+    cuda.synchronize()
+
+
+# ============================================================================
+# Mapping Kernels (Unroll Factor 1)
+# ============================================================================
+
+@cuda.jit
+def ilu0_csr_wavefront_mapping_kernel(data, indices, indptr, rows, diag_pos):
+    b = cuda.blockIdx.x
+    tid = cuda.threadIdx.x
+    if b >= rows.size:
+        return
+
+    row = rows[b]
+    row_start = indptr[row]
+    row_end   = indptr[row + 1]
+
+    sh_l = cuda.shared.array(1, dtype=float64)
+
+    k_ptr = row_start
+    while k_ptr < row_end:
+        k = indices[k_ptr]
+        if k >= row:
+            break
+
+        diag_ptr = diag_pos[k]
+        u_kk = data[diag_ptr]
+
+        if u_kk != 0.0:
+            if tid == 0:
+                l_ik = data[k_ptr] / u_kk
+                data[k_ptr] = l_ik
+                sh_l[0] = l_ik
+            cuda.syncthreads()
+            l_ik = sh_l[0]
+
+            k_row_start = indptr[k]
+            k_row_end   = indptr[k + 1]
+
+            for j_ptr in range(k_ptr + 1 + tid, row_end, cuda.blockDim.x):
+                jcol = indices[j_ptr]
+                pos = bin_search_col(indices, k_row_start, k_row_end, jcol)
+                if pos != -1:
+                    data[j_ptr] -= l_ik * data[pos]
+
+        cuda.syncthreads()
+        k_ptr += 1
+
+
+def ilu0_csr_numba_wavefront_mapping(data, indices, indptr, wave_rows, diag_pos, threads_per_block=128):
+    blocks = wave_rows.size
+    ilu0_csr_wavefront_mapping_kernel[blocks, threads_per_block](
+        data, indices, indptr, wave_rows, diag_pos
+    )
+    cuda.synchronize()
+
+
+@cuda.jit
+def ilu0_csr_sync_free_mapping_kernel(data, indices, indptr,
+                                    dep_counts, succ_offsets, succ_indices,
+                                    diag_pos):
+    i = cuda.blockIdx.x
+    tid = cuda.threadIdx.x
+    if i >= dep_counts.size:
+        return
+
+    if tid == 0:
+        while cuda.atomic.add(dep_counts, i, 0) > 0:
+            pass
+    cuda.syncthreads()
+
+    row_start = indptr[i]
+    row_end   = indptr[i + 1]
+    sh_l = cuda.shared.array(1, dtype=float64)
+
+    k_ptr = row_start
+    while k_ptr < row_end:
+        k = indices[k_ptr]
+        if k >= i:
+            break
+
+        diag_ptr = diag_pos[k]
+        u_kk = data[diag_ptr]
+
+        if u_kk != 0.0:
+            if tid == 0:
+                l_ik = data[k_ptr] / u_kk
+                data[k_ptr] = l_ik
+                sh_l[0] = l_ik
+            cuda.syncthreads()
+            l_ik = sh_l[0]
+
+            k_row_start = indptr[k]
+            k_row_end   = indptr[k + 1]
+            for j_ptr in range(k_ptr + 1 + tid, row_end, cuda.blockDim.x):
+                jcol = indices[j_ptr]
+                pos = bin_search_col(indices, k_row_start, k_row_end, jcol)
+                if pos != -1:
+                    data[j_ptr] -= l_ik * data[pos]
+        cuda.syncthreads()
+        k_ptr += 1
+
+    cuda.threadfence()
+    s0 = succ_offsets[i]
+    s1 = succ_offsets[i + 1]
+    for p in range(s0 + tid, s1, cuda.blockDim.x):
+        s = succ_indices[p]
+        cuda.atomic.add(dep_counts, s, -1)
+
+
+def ilu0_csr_numba_sync_free_mapping(data, indices, indptr,
+                                   dep_counts, succ_offsets, succ_indices, diag_pos,
+                                   threads_per_block=128):
+    M = dep_counts.size
+    blocks = M
+    ilu0_csr_sync_free_mapping_kernel[blocks, threads_per_block](
         data, indices, indptr, dep_counts, succ_offsets, succ_indices, diag_pos
     )
     cuda.synchronize()

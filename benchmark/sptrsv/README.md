@@ -6,7 +6,7 @@
 sptrsv/
 ├── sptrsv_benchmark.py          # Main benchmark script (real-world matrices)
 ├── lindep_benchmark.py          # Synthetic banded matrices with linear dependencies
-└── sptrsv_kernels/              # Kernel implementations
+└── kernels/                     # Kernel implementations
     ├── sptrsv_baseline.py       # Baseline kernels (Triton, Numba CSC/CSR)
     ├── sptrsv_unrolled.py       # Unrolled & mapping variants (u1, u4-u64)
     ├── sptrsv_coarsened.py      # Coarsening kernels (thread, block, combined)

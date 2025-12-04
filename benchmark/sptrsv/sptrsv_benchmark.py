@@ -14,8 +14,8 @@ import triton.language as tl
 
 DEVICE = torch.device("cuda:0")
 
-from sptrsv_kernels.sptrsv_baseline import *
-from sptrsv_kernels.sptrsv_unrolled import (
+from kernels.sptrsv_baseline import *
+from kernels.sptrsv_unrolled import (
     sptrsv_numba_csc_wavefront_unrolling_4, sptrsv_numba_csc_wavefront_unrolling_8,
     sptrsv_numba_csc_wavefront_unrolling_16, sptrsv_numba_csc_wavefront_unrolling_32,
     sptrsv_numba_csc_wavefront_unrolling_64,
@@ -31,7 +31,7 @@ from sptrsv_kernels.sptrsv_unrolled import (
     sptrsv_numba_csc_wavefront_mapping, sptrsv_numba_csc_sync_free_mapping,
     sptrsv_numba_csr_wavefront_mapping, sptrsv_numba_csr_sync_free_mapping,
 )
-from sptrsv_kernels.sptrsv_coarsened import (
+from kernels.sptrsv_coarsened import (
     compute_coarsened_wavefronts, compact_2d_list, compact_coarsened_wavefronts,
     sptrsv_numba_csc_coarsened_mapping, sptrsv_numba_csr_coarsened_mapping,
     sptrsv_numba_csc_wavefront_block_coarsening, sptrsv_numba_csr_wavefront_block_coarsening,
@@ -39,7 +39,7 @@ from sptrsv_kernels.sptrsv_coarsened import (
     sptrsv_numba_csc_sync_free_block_coarsening, sptrsv_numba_csr_sync_free_block_coarsening,
     sptrsv_numba_csc_sync_free_thread_coarsening, sptrsv_numba_csr_sync_free_thread_coarsening,
 )
-from sptrsv_kernels.sptrsv_hlevel import (
+from kernels.sptrsv_hlevel import (
     sptrsv_h_level_analyze,
     sptrsv_numba_csc_h_level_solve, sptrsv_numba_csr_h_level_solve,
     sptrsv_numba_csc_h_level_graph, sptrsv_numba_csr_h_level_graph,

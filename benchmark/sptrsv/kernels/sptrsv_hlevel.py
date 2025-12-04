@@ -328,22 +328,16 @@ def sptrsv_numba_csc_h_level_solve(data, indices, indptr, b, M, N, nnz, analysis
     return d_y
 
 # -------------------------------------------------------------------------
-# 5. Compatibility Wrapper (Auto-detects reuse)
+# 5. Compatibility Wrapper
 # -------------------------------------------------------------------------
 
-# Global cache to reuse analysis if pointers don't change (Naive memoization)
-# For strict benchmarking, use `sptrsv_h_level_analyze` explicitly in your harness.
 _ANALYSIS_CACHE = {}
 
 def sptrsv_numba_csc_h_level_graph(data, indices, indptr, b, M, N, nnz, 
                                    wavefronts, wave_start, band_width=64):
     """
-    Compatibility wrapper. 
-    WARNING: For proper benchmarking, please pre-compute the analysis structure!
-    This wrapper includes the preprocessing overhead if not cached.
+    Compatibility wrapper.
     """
-    # Create a unique key for the matrix structure
-    # Using pointers is risky if memory is reused, but sufficient for simple benchmarks
     key = (indptr.device_ctypes_pointer.value, band_width)
     
     if key not in _ANALYSIS_CACHE:
@@ -363,9 +357,6 @@ def sptrsv_numba_csr_h_level_graph(data, indices, indptr, b, M, N, nnz,
     """
     key = (indptr.device_ctypes_pointer.value, band_width)
     if key not in _ANALYSIS_CACHE:
-        # CSR and CSC use same structure analysis (dependency graph is symmetric for triangular)
-        # However, build_h_level_structure logic expects CSR-like adjacency.
-        # Ensure you pass correct arrays.
         _ANALYSIS_CACHE[key] = sptrsv_h_level_analyze(
             indptr, indices, wavefronts, wave_start, band_width
         )
