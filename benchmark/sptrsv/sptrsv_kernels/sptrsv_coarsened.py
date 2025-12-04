@@ -5,7 +5,8 @@ import numba
 import sys
 import os
 import warnings
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+# Add benchmark directory to path for bench_utils
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../..'))
 
 from numba import cuda
 from numba import config
@@ -299,7 +300,7 @@ def sptrsv_numba_csr_wavefront_block_coarsening(
                 np.int32(offset + level_start), np.int32(level_size),
                 np.int32(warps_per_block), np.int32(thread_coarsening_factor)
             )
-            cuda.synchronize()
+        cuda.synchronize()
     
     return d_y
 
@@ -337,8 +338,11 @@ def sptrsv_numba_csc_sync_free_block_coarsening_kernel(
         if col >= M:
             break
         
+        # Wait until all dependencies are satisfied (dep_count == 1)
         while cuda.atomic.add(dep_counts, col, 0) != 1:
             pass
+
+        cuda.threadfence()
         
         col_start = indptr[col]
         col_end = indptr[col + 1]
@@ -369,8 +373,14 @@ def sptrsv_numba_csc_sync_free_thread_coarsening_kernel(
         return
     
     col = block_id
-    while cuda.atomic.add(dep_counts, col, 0) != 1:
-        pass
+    
+    # Thread 0 checks dependency
+    if tid == 0:
+        while cuda.atomic.add(dep_counts, col, 0) != 1:
+            pass
+    cuda.syncthreads()
+
+    cuda.threadfence()
     
     col_start = indptr[col]
     col_end = indptr[col + 1]
@@ -388,7 +398,7 @@ def sptrsv_numba_csc_sync_free_thread_coarsening_kernel(
         row_idx = indices[j]
         val = data[j]
         cuda.atomic.add(y, row_idx, val * y_col)
-    
+
     cuda.syncthreads()
     if tid == 0:
         cuda.threadfence()
@@ -440,7 +450,7 @@ def sptrsv_numba_csr_sync_free_thread_coarsening_kernel(
     
     if block_id >= M:
         return
-    
+
     row = block_id
     while cuda.atomic.add(dep_counts, row, 0) > 0:
         pass
@@ -460,7 +470,7 @@ def sptrsv_numba_csr_sync_free_thread_coarsening_kernel(
     
     shared_sum[tid] = partial_sum
     cuda.syncthreads()
-    
+
     # Reduction
     s = block_size // 2
     while s > 0:
