@@ -9,7 +9,15 @@ from numba.core.errors import NumbaPerformanceWarning
 # Filter warnings
 warnings.filterwarnings('ignore', category=NumbaPerformanceWarning)
 
-import sptrsv
+from sptrsv_kernels.sptrsv_baseline import *
+from sptrsv_kernels.sptrsv_unrolled import (
+    sptrsv_numba_csc_sync_free_mapping,
+    sptrsv_numba_csr_sync_free_mapping,
+)
+from sptrsv_kernels.sptrsv_legacy import (
+    sptrsv_numba_csc_sync_free_unrolling,
+    sptrsv_numba_csr_sync_free_unrolling,
+)
 
 # --- BASELINE 1: CSR Single Block (Gather - Generic) ---
 @cuda.jit
@@ -233,10 +241,10 @@ def run_benchmark():
 
         # 3. Sync Free Variants
         variants = [
-            ("SyncFree CSR Map", sptrsv.sptrsv_numba_csr_sync_free_mapping, "CSR"),
-            ("SyncFree CSR Unroll", sptrsv.sptrsv_numba_csr_sync_free_unrolling, "CSR"),
-            ("SyncFree CSC Map", sptrsv.sptrsv_numba_csc_sync_free_mapping, "CSC"),
-            ("SyncFree CSC Unroll", sptrsv.sptrsv_numba_csc_sync_free_unrolling, "CSC"),
+            ("SyncFree CSR Map", sptrsv_numba_csr_sync_free_mapping, "CSR"),
+            ("SyncFree CSR Unroll", sptrsv_numba_csr_sync_free_unrolling, "CSR"),
+            ("SyncFree CSC Map", sptrsv_numba_csc_sync_free_mapping, "CSC"),
+            ("SyncFree CSC Unroll", sptrsv_numba_csc_sync_free_unrolling, "CSC"),
         ]
 
         for name, func, fmt in variants:
