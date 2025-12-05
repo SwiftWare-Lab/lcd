@@ -45,8 +45,6 @@ def build_h_level_structure(indptr, indices, wavefronts, wave_start, band_width=
     """
     Groups levels into bands, then uses Union-Find to break bands into 
     independent execution chains.
-    
-    band_width=64 (increased from 16) to maximize parallelism and reduce graph node overhead.
     """
     num_standard_waves = len(wave_start) - 1
     n_rows = len(indptr) - 1
@@ -453,7 +451,7 @@ def sptrsv_csr_syncfree_warp_kernel(data, indices, indptr, b, y,
 
 def sptrsv_numba_csr_syncfree_h_level_solve(data, indices, indptr, b, M, N, nnz, analysis_data):
     """
-    Host wrapper for the sync-free H-level solver (Banded Execution).
+    Host wrapper for the sync-free H-level solver.
     """
     d_h_nodes, d_task_ptr, h_level_ptr = analysis_data
     
@@ -579,7 +577,7 @@ def sptrsv_csc_syncfree_warp_kernel(data, indices, indptr, b, y,
 def sptrsv_numba_csc_syncfree_h_level_solve(data, indices, indptr, b, M, N, nnz, 
                                             analysis_data, in_edge_counts):
     """
-    Host wrapper for CSC Sync-Free (Banded Execution).
+    Host wrapper for CSC Sync-Free.
     """
     d_h_nodes, d_task_ptr, h_level_ptr = analysis_data
     
@@ -656,250 +654,130 @@ def sptrsv_numba_csc_syncfree_h_level_graph(data, indices, indptr, b, M, N, nnz,
         _ANALYSIS_CACHE[key], in_edge_counts
     )
 
-# # -------------------------------------------------------------------------
-# # 6. VARIANT C: Sync-Free H-Level (Chain) - Coarsened DAG (CSR)
-# # -------------------------------------------------------------------------
 
-# @cuda.jit
-# def sptrsv_csr_syncfree_warp_kernel(data, indices, indptr, b, y, 
-#                                 h_task_nodes, task_ptr, 
-#                                 done, task_counter, num_tasks):
-#     warp_id = cuda.threadIdx.x // 32
-#     lane_id = cuda.threadIdx.x % 32
-    
-#     while True:
-#         # 1. Dynamic Task Fetching
-#         task_id = -1
-#         if lane_id == 0:
-#             task_id = cuda.atomic.add(task_counter, 0, 1)
-#         task_id = cuda.shfl_sync(0xFFFFFFFF, task_id, 0)
-        
-#         if task_id >= num_tasks:
-#             return
 
-#         # 2. Execute Chain
-#         start_node_ptr = task_ptr[task_id]
-#         end_node_ptr = task_ptr[task_id + 1]
-        
-#         for i in range(start_node_ptr, end_node_ptr):
-#             row = h_task_nodes[i]
-            
-#             row_start = indptr[row]
-#             row_end = indptr[row + 1]
-#             diag_idx = row_end - 1
-            
-#             val = 0.0
-            
-#             # Warp-stride accumulation
-#             for j in range(row_start + lane_id, diag_idx, 32):
-#                 col = indices[j]
-                
-#                 # Busy-wait for dependency
-#                 # We assume 'done' is set to 1 when row is complete.
-#                 while cuda.atomic.add(done, col, 0) == 0:
-#                     pass 
-                
-#                 # FIX 1: System-wide fence acts as a stronger compiler barrier 
-#                 # and ensures global visibility of y[col] across different blocks.
-#                 cuda.threadfence()
+def get_hardware_grid_cap(threads_per_block):
+    # Calculates the maximum number of blocks the GPU can execute simultaneously.
+    device = cuda.get_current_device()
+    num_sms = device.MULTIPROCESSOR_COUNT
+    
+    # TODO (Da): Can be tuned.
+    blocks_per_sm = 8
+    
+    return num_sms * blocks_per_sm
 
-#                 data_val = data[j]
-#                 val += data_val * y[col]
-            
-#             # FIX 2: RE-CONVERGENCE BARRIER
-#             # We must wait for ALL threads to finish the blocking 'while' loop above
-#             # before any thread starts the reduction. Otherwise, 'shfl_down_sync' 
-#             # will read garbage from threads that are still spinning.
-#             cuda.syncwarp(0xFFFFFFFF)
+# -------------------------------------------------------------------------
+# 8. VARIANT E: Persistent Sync-Free H-Level (CSR)
+# -------------------------------------------------------------------------
 
-#             # Reduction
-#             mask = 0xFFFFFFFF
-#             val += cuda.shfl_down_sync(mask, val, 16)
-#             val += cuda.shfl_down_sync(mask, val, 8)
-#             val += cuda.shfl_down_sync(mask, val, 4)
-#             val += cuda.shfl_down_sync(mask, val, 2)
-#             val += cuda.shfl_down_sync(mask, val, 1)
-            
-#             if lane_id == 0:
-#                 diag_val = data[diag_idx]
-#                 y[row] = (b[row] - val) / diag_val
-                
-#                 # Mark as done
-#                 # Ensure write to y[row] is globally visible before setting flag
-#                 cuda.threadfence() 
-#                 cuda.atomic.exch(done, row, 1) 
-            
-#             # Implicit barrier for chain logic
-#             cuda.syncwarp(mask)
+def sptrsv_numba_csr_syncfree_persistent_solve(data, indices, indptr, b, M, N, nnz, analysis_data):
+    d_h_nodes, d_task_ptr, h_level_ptr = analysis_data
+    
+    # 1. Memory Setup
+    if cuda.is_cuda_array(b):
+        d_y = cuda.device_array_like(b)
+        # Initialize y to 0.0
+        init_blocks = (M + 127) // 128
+        set_zero_kernel[init_blocks, 128](d_y)
+    else:
+        d_y = cuda.to_device(np.zeros(M, dtype=np.float64))
 
-# def sptrsv_numba_csr_syncfree_h_level_solve(data, indices, indptr, b, M, N, nnz, analysis_data):
-#     """
-#     Host wrapper for the sync-free H-level solver.
-#     """
-#     d_h_nodes, d_task_ptr, h_level_ptr = analysis_data
+    d_done = cuda.to_device(np.zeros(M, dtype=np.int32))
+    d_task_counter = cuda.to_device(np.zeros(1, dtype=np.int32))
     
-#     d_y = cuda.to_device(np.zeros(M, dtype=np.float64))
-#     d_done = cuda.to_device(np.zeros(M, dtype=np.int32))
-#     d_task_counter = cuda.to_device(np.zeros(1, dtype=np.int32))
+    # 2. Grid Calculation
+    threads_per_block = 128
+    warps_per_block = threads_per_block // 32
     
-#     num_tasks = len(d_task_ptr) - 1
+    # Total tasks in the entire matrix
+    num_total_tasks = len(d_task_ptr) - 1
     
-#     # Configuration
-#     threads_per_block = 128
-#     warps_per_block = threads_per_block // 32
-#     # Use enough blocks to saturate the GPU
-#     num_blocks = 256 
+    # Calculate needed blocks vs hardware capacity
+    needed_blocks = (num_total_tasks + warps_per_block - 1) // warps_per_block
+    hardware_cap = get_hardware_grid_cap(threads_per_block)
     
-#     sptrsv_csr_syncfree_warp_kernel[num_blocks, threads_per_block](
-#         data, indices, indptr, b, d_y,
-#         d_h_nodes, d_task_ptr,
-#         d_done, d_task_counter, num_tasks
-#     )
-    
-#     return d_y
+    # CLAMP: Never launch more than the hardware can hold resident
+    grid_size = min(needed_blocks, hardware_cap)
+    grid_size = max(grid_size, 1)
 
-# def sptrsv_numba_csr_syncfree_h_level_graph(data, indices, indptr, b, M, N, nnz, 
-#                                         wavefronts, wave_start, band_width=64):
-#     """
-#     Compatibility wrapper for Sync-Free CSR H-Level.
-#     """
-#     key = (indptr.device_ctypes_pointer.value, band_width)
-#     if key not in _ANALYSIS_CACHE:
-#         _ANALYSIS_CACHE[key] = sptrsv_h_level_analyze(
-#             indptr, indices, wavefronts, wave_start, band_width
-#         )
-        
-#     return sptrsv_numba_csr_syncfree_h_level_solve(
-#         data, indices, indptr, b, M, N, nnz, _ANALYSIS_CACHE[key]
-#     )
+    # 3. Launch Persistent Kernel
+    # We pass 'num_total_tasks' as the limit, and '0' as the offset
+    sptrsv_csr_syncfree_warp_kernel[grid_size, threads_per_block](
+        data, indices, indptr, b, d_y,
+        d_h_nodes, d_task_ptr,
+        d_done, d_task_counter, 
+        num_total_tasks, 0
+    )
+    
+    return d_y
 
-# # -------------------------------------------------------------------------
-# # 7. VARIANT D: Sync-Free H-Level (Chain) - Coarsened DAG (CSC)
-# # -------------------------------------------------------------------------
+def sptrsv_numba_csr_syncfree_persistent_graph(data, indices, indptr, b, M, N, nnz, 
+                                               wavefronts, wave_start, band_width=64):
+    key = (indptr.device_ctypes_pointer.value, band_width)
+    if key not in _ANALYSIS_CACHE:
+        _ANALYSIS_CACHE[key] = sptrsv_h_level_analyze(
+            indptr, indices, wavefronts, wave_start, band_width
+        )
+    return sptrsv_numba_csr_syncfree_persistent_solve(
+        data, indices, indptr, b, M, N, nnz, _ANALYSIS_CACHE[key]
+    )
 
-# @cuda.jit
-# def sptrsv_csc_syncfree_warp_kernel(data, indices, indptr, b, y, 
-#                                     h_task_nodes, task_ptr, 
-#                                     in_degree, task_counter, num_tasks):
-#     """
-#     CSC Sync-Free Solver (Push Model).
-#     1. Warp fetches a chain.
-#     2. For each node in chain:
-#        - Wait for in_degree to hit 0.
-#        - Compute final value.
-#        - Scatter updates to neighbors (Atomic Add).
-#        - Decrement neighbor in_degrees (Atomic Sub).
-#     """
-#     warp_id = cuda.threadIdx.x // 32
-#     lane_id = cuda.threadIdx.x % 32
-    
-#     while True:
-#         # 1. Fetch Chain (Dynamic Schedule)
-#         task_id = -1
-#         if lane_id == 0:
-#             task_id = cuda.atomic.add(task_counter, 0, 1)
-#         task_id = cuda.shfl_sync(0xFFFFFFFF, task_id, 0)
-        
-#         if task_id >= num_tasks:
-#             return
+# -------------------------------------------------------------------------
+# 9. VARIANT F: Persistent Sync-Free H-Level (CSC)
+# -------------------------------------------------------------------------
 
-#         # 2. Process Chain
-#         start_node_ptr = task_ptr[task_id]
-#         end_node_ptr = task_ptr[task_id + 1]
-        
-#         for i in range(start_node_ptr, end_node_ptr):
-#             col = h_task_nodes[i]
-            
-#             # CSC: Column 'col' contains rows 'row_idx' that depend on 'col'
-#             # Assuming Lower Triangular and sorted indices: 
-#             # The Diagonal is the FIRST element in the column.
-#             col_start = indptr[col]
-#             col_end = indptr[col + 1]
-            
-#             # --- WAIT PHASE ---
-#             # Spin until all dependencies for this node have pushed their updates
-#             if lane_id == 0:
-#                 # Use atomic add(0) to force global load
-#                 while cuda.atomic.add(in_degree, col, 0) > 0:
-#                     pass
-                
-#                 # MEMORY BARRIER: Ensure we see the updates to 'y[col]' 
-#                 # pushed by other blocks before we compute.
-#                 cuda.threadfence()
+def sptrsv_numba_csc_syncfree_persistent_solve(data, indices, indptr, b, M, N, nnz, 
+                                               analysis_data, in_edge_counts):
+    d_h_nodes, d_task_ptr, h_level_ptr = analysis_data
+    
+    # 1. Memory Setup
+    if cuda.is_cuda_array(b):
+        d_y = cuda.device_array_like(b)
+        d_y.copy_to_device(b)
+    else:
+        d_y = cuda.to_device(b.copy())
+    
+    # 2. Dependency Counts (Subtract 1 for diagonal)
+    if cuda.is_cuda_array(in_edge_counts):
+        counts_host = in_edge_counts.copy_to_host().astype(np.int32)
+        d_in_degree = cuda.to_device(counts_host - 1)
+    else:
+        counts_host = np.asarray(in_edge_counts, dtype=np.int32)
+        d_in_degree = cuda.to_device(counts_host - 1)
+    
+    d_task_counter = cuda.to_device(np.zeros(1, dtype=np.int32))
+    
+    # 3. Grid Calculation
+    threads_per_block = 128
+    warps_per_block = threads_per_block // 32
+    
+    num_total_tasks = len(d_task_ptr) - 1
+    
+    needed_blocks = (num_total_tasks + warps_per_block - 1) // warps_per_block
+    hardware_cap = get_hardware_grid_cap(threads_per_block)
+    
+    # CLAMP: Prevent deadlock
+    grid_size = min(needed_blocks, hardware_cap)
+    grid_size = max(grid_size, 1)
 
-#                 # Compute final value for this node
-#                 # y[col] currently holds (b[col] - sum(L_ik * x_k)) from updates
-#                 diag_val = data[col_start]
-#                 y[col] = y[col] / diag_val
-            
-#             # Sync to ensure y[col] is ready for broadcast
-#             cuda.syncwarp(0xFFFFFFFF)
-            
-#             # Broadcast result to warp
-#             my_val = cuda.shfl_sync(0xFFFFFFFF, y[col], 0)
-            
-#             # --- PUSH PHASE ---
-#             # Scatter updates to children (skipping the diagonal at col_start)
-#             for j in range(col_start + 1 + lane_id, col_end, 32):
-#                 target_row = indices[j]
-#                 val = data[j]
-                
-#                 # Atomic Update: y[target] -= val * my_val
-#                 # Note: 'y' was initialized to 'b', so we subtract
-#                 cuda.atomic.add(y, target_row, -val * my_val)
-                
-#                 # VISIBILITY BARRIER:
-#                 # Ensure the update to y is visible before we signal "ready"
-#                 cuda.threadfence()
-                
-#                 # Signal Progress: Decrement target's dependency count
-#                 cuda.atomic.add(in_degree, target_row, -1)
-                
-#             # Sync warp before moving to next node in chain
-#             cuda.syncwarp(0xFFFFFFFF)
+    # 4. Launch Persistent Kernel
+    sptrsv_csc_syncfree_warp_kernel[grid_size, threads_per_block](
+        data, indices, indptr, b, d_y,
+        d_h_nodes, d_task_ptr,
+        d_in_degree, d_task_counter, 
+        num_total_tasks, 0
+    )
+    
+    return d_y
 
-# def sptrsv_numba_csc_syncfree_h_level_solve(data, indices, indptr, b, M, N, nnz, 
-#                                             analysis_data, in_edge_counts):
-#     """
-#     Host wrapper for CSC Sync-Free.
-#     Requires in_edge_counts (array of integers) from analysis.
-#     """
-#     d_h_nodes, d_task_ptr, h_level_ptr = analysis_data
-    
-#     # 1. Setup Memory
-#     # For Push method, y starts as a copy of b
-#     d_y = cuda.to_device(b.copy()) # Important: Copy b, don't use zero
-    
-#     # 2. Dependency Counters
-#     # We must copy in_edge_counts because the kernel destroys it (decrements to 0)
-#     # in_edge_counts should be a numpy array or device array
-#     d_in_degree = cuda.to_device(in_edge_counts.copy()) 
-    
-#     d_task_counter = cuda.to_device(np.zeros(1, dtype=np.int32))
-#     num_tasks = len(d_task_ptr) - 1
-    
-#     # 3. Configuration
-#     threads_per_block = 128
-#     # Heuristic: enough blocks to fill SMs
-#     num_blocks = 256 
-    
-#     sptrsv_csc_syncfree_warp_kernel[num_blocks, threads_per_block](
-#         data, indices, indptr, b, d_y,
-#         d_h_nodes, d_task_ptr,
-#         d_in_degree, d_task_counter, num_tasks
-#     )
-    
-#     return d_y
-
-# def sptrsv_numba_csc_syncfree_h_level_graph(data, indices, indptr, b, M, N, nnz, 
-#                                             wavefronts, wave_start, in_edge_counts, band_width=64):
-#     key = (indptr.device_ctypes_pointer.value, band_width)
-#     if key not in _ANALYSIS_CACHE:
-#         _ANALYSIS_CACHE[key] = sptrsv_h_level_analyze(
-#             indptr, indices, wavefronts, wave_start, band_width
-#         )
-        
-#     return sptrsv_numba_csc_syncfree_h_level_solve(
-#         data, indices, indptr, b, M, N, nnz, 
-#         _ANALYSIS_CACHE[key], in_edge_counts
-#     )
+def sptrsv_numba_csc_syncfree_persistent_graph(data, indices, indptr, b, M, N, nnz, 
+                                               wavefronts, wave_start, in_edge_counts, band_width=64):
+    key = (indptr.device_ctypes_pointer.value, band_width)
+    if key not in _ANALYSIS_CACHE:
+        _ANALYSIS_CACHE[key] = sptrsv_h_level_analyze(
+            indptr, indices, wavefronts, wave_start, band_width
+        )
+    return sptrsv_numba_csc_syncfree_persistent_solve(
+        data, indices, indptr, b, M, N, nnz, 
+        _ANALYSIS_CACHE[key], in_edge_counts
+    )

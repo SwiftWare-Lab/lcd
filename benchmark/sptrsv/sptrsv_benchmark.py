@@ -45,6 +45,8 @@ from kernels.sptrsv_hlevel import (
     sptrsv_numba_csc_h_level_graph, sptrsv_numba_csr_h_level_graph,
     sptrsv_numba_csr_syncfree_h_level_graph, sptrsv_numba_csr_syncfree_h_level_solve,
     sptrsv_numba_csc_syncfree_h_level_graph, sptrsv_numba_csc_syncfree_h_level_solve,
+    sptrsv_numba_csr_syncfree_persistent_graph, sptrsv_numba_csr_syncfree_persistent_solve,
+    sptrsv_numba_csc_syncfree_persistent_graph, sptrsv_numba_csc_syncfree_persistent_solve,
 )
 
 import warnings
@@ -58,9 +60,9 @@ print(f"Compute Capability: {device.compute_capability}")
 
 
 mtx_list = [
-# "/home/mad29/projects/testdata/matrices/1138_bus.mtx",
-# "/home/mad29/projects/testdata/matrices/2cubes_sphere.mtx",
-# "/home/mad29/projects/testdata/matrices/Chem97ZtZ.mtx",
+"/home/mad29/projects/testdata/matrices/1138_bus.mtx",
+"/home/mad29/projects/testdata/matrices/2cubes_sphere.mtx",
+"/home/mad29/projects/testdata/matrices/Chem97ZtZ.mtx",
 "/home/mad29/projects/testdata/matrices/Dubcova1.mtx",
 "/home/mad29/projects/testdata/matrices/Dubcova2.mtx",
 "/home/mad29/projects/testdata/matrices/Dubcova3.mtx",
@@ -78,10 +80,10 @@ mtx_list = [
 # "/home/mad29/projects/testdata/matrices/Pres_Poisson.mtx",
 # "/home/mad29/projects/testdata/matrices/Serena.mtx",
 # "/home/mad29/projects/testdata/matrices/StocF-1465.mtx",
-# "/home/mad29/projects/testdata/matrices/Trefethen_2000.mtx",
-# "/home/mad29/projects/testdata/matrices/Trefethen_20000.mtx",
-# "/home/mad29/projects/testdata/matrices/bcsstk08.mtx",
-# "/home/mad29/projects/testdata/matrices/bcsstk09.mtx",
+"/home/mad29/projects/testdata/matrices/Trefethen_2000.mtx",
+"/home/mad29/projects/testdata/matrices/Trefethen_20000.mtx",
+"/home/mad29/projects/testdata/matrices/bcsstk08.mtx",
+"/home/mad29/projects/testdata/matrices/bcsstk09.mtx",
 # "/home/mad29/projects/testdata/matrices/bcsstk10.mtx",
 # "/home/mad29/projects/testdata/matrices/bcsstk11.mtx",
 # "/home/mad29/projects/testdata/matrices/bcsstk12.mtx",
@@ -121,11 +123,11 @@ mtx_list = [
 # "/home/mad29/projects/testdata/matrices/cbuckle.mtx",
 # "/home/mad29/projects/testdata/matrices/cfd1.mtx",
 # "/home/mad29/projects/testdata/matrices/cfd2.mtx",
-# "/home/mad29/projects/testdata/matrices/crystm01.mtx",
-# "/home/mad29/projects/testdata/matrices/crystm02.mtx",
-# "/home/mad29/projects/testdata/matrices/crystm03.mtx",
-# "/home/mad29/projects/testdata/matrices/ct20stif.mtx",
-# "/home/mad29/projects/testdata/matrices/cvxbqp1.mtx",
+"/home/mad29/projects/testdata/matrices/crystm01.mtx",
+"/home/mad29/projects/testdata/matrices/crystm02.mtx",
+"/home/mad29/projects/testdata/matrices/crystm03.mtx",
+"/home/mad29/projects/testdata/matrices/ct20stif.mtx",
+"/home/mad29/projects/testdata/matrices/cvxbqp1.mtx",
 # "/home/mad29/projects/testdata/matrices/denormal.mtx",
 # "/home/mad29/projects/testdata/matrices/ecology2.mtx",
 # "/home/mad29/projects/testdata/matrices/ex10.mtx",
@@ -152,12 +154,12 @@ mtx_list = [
 # "/home/mad29/projects/testdata/matrices/nd12k.mtx",
 # "/home/mad29/projects/testdata/matrices/nd24k.mtx",
 # "/home/mad29/projects/testdata/matrices/nd3k.mtx",
-# "/home/mad29/projects/testdata/matrices/nd6k.mtx",
-# "/home/mad29/projects/testdata/matrices/obstclae.mtx",
-# "/home/mad29/projects/testdata/matrices/offshore.mtx",
-# "/home/mad29/projects/testdata/matrices/oilpan.mtx",
-# "/home/mad29/projects/testdata/matrices/olafu.mtx",
-# "/home/mad29/projects/testdata/matrices/parabolic_fem.mtx",
+"/home/mad29/projects/testdata/matrices/nd6k.mtx",
+"/home/mad29/projects/testdata/matrices/obstclae.mtx",
+"/home/mad29/projects/testdata/matrices/offshore.mtx",
+"/home/mad29/projects/testdata/matrices/oilpan.mtx",
+"/home/mad29/projects/testdata/matrices/olafu.mtx",
+"/home/mad29/projects/testdata/matrices/parabolic_fem.mtx",
 # "/home/mad29/projects/testdata/matrices/pdb1HYS.mtx",
 # "/home/mad29/projects/testdata/matrices/plat1919.mtx",
 # "/home/mad29/projects/testdata/matrices/plbuckle.mtx",
@@ -208,7 +210,7 @@ block_coarsening_factors = [2, 4, 8, 16]
 sync_free_block_factors = [1, 2, 4]
 thread_coarsening_factors = [1, 2, 4]
 wavefront_coarsening_factors = [1, 2, 4, 8]
-band_widths = [2, 4, 8, 16]
+band_widths = [1, 2, 4, 8, 16]
 
 # ============================================================================
 # Method List Construction
@@ -227,50 +229,50 @@ method_list.extend([
     "csr-sf-base",
 ])
 
-# ----------------------------------------------------------------------------
-# TEST CANDIDATES - WAVEFRONT - UNROLLED
-# ----------------------------------------------------------------------------
-# Unroll factor 1 (mapping variants)
-for threads in thread_counts:
-    method_list.extend([
-        f"csc-wf-u1-t{threads}",
-        f"csr-wf-u1-t{threads}",
-    ])
+# # ----------------------------------------------------------------------------
+# # TEST CANDIDATES - WAVEFRONT - UNROLLED
+# # ----------------------------------------------------------------------------
+# # Unroll factor 1 (mapping variants)
+# for threads in thread_counts:
+#     method_list.extend([
+#         f"csc-wf-u1-t{threads}",
+#         f"csr-wf-u1-t{threads}",
+#     ])
 
-# Explicit unrolling with factors 4-64
-for factor in unroll_factors:
-    for threads in thread_counts:
-        method_list.extend([
-            f"csc-wf-u{factor}-t{threads}",
-            f"csr-wf-u{factor}-t{threads}",
-        ])
+# # Explicit unrolling with factors 4-64
+# for factor in unroll_factors:
+#     for threads in thread_counts:
+#         method_list.extend([
+#             f"csc-wf-u{factor}-t{threads}",
+#             f"csr-wf-u{factor}-t{threads}",
+#         ])
 
-# ----------------------------------------------------------------------------
-# TEST CANDIDATES - WAVEFRONT - COARSENED
-# ----------------------------------------------------------------------------
-# Block coarsening (merge dependency levels)
-for cf in block_coarsening_factors:
-    method_list.extend([
-        f"csc-wf-coarse-block-wc{cf}",
-        f"csr-wf-coarse-block-wc{cf}",
-    ])
+# # ----------------------------------------------------------------------------
+# # TEST CANDIDATES - WAVEFRONT - COARSENED
+# # ----------------------------------------------------------------------------
+# # Block coarsening (merge dependency levels)
+# for cf in block_coarsening_factors:
+#     method_list.extend([
+#         f"csc-wf-coarse-block-wc{cf}",
+#         f"csr-wf-coarse-block-wc{cf}",
+#     ])
 
-# Thread coarsening
-for threads in thread_counts:
-    method_list.extend([
-        f"csc-wf-coarse-thread-tc{threads}",
-        f"csr-wf-coarse-thread-tc{threads}",
-    ])
+# # Thread coarsening
+# for threads in thread_counts:
+#     method_list.extend([
+#         f"csc-wf-coarse-thread-tc{threads}",
+#         f"csr-wf-coarse-thread-tc{threads}",
+#     ])
 
-# Combined 3-level coarsening (wavefront + warp + thread)
-for cf in wavefront_coarsening_factors:
-    for threads in thread_counts:
-        warps = threads // 32
-        for tcf in thread_coarsening_factors:
-            method_list.extend([
-                f"csc-wf-coarse-comb-wc{cf}-w{warps}-tc{tcf}",
-                f"csr-wf-coarse-comb-wc{cf}-w{warps}-tc{tcf}",
-            ])
+# # Combined 3-level coarsening (wavefront + warp + thread)
+# for cf in wavefront_coarsening_factors:
+#     for threads in thread_counts:
+#         warps = threads // 32
+#         for tcf in thread_coarsening_factors:
+#             method_list.extend([
+#                 f"csc-wf-coarse-comb-wc{cf}-w{warps}-tc{tcf}",
+#                 f"csr-wf-coarse-comb-wc{cf}-w{warps}-tc{tcf}",
+#             ])
 
 # ----------------------------------------------------------------------------
 # TEST CANDIDATES - SYNC-FREE - UNROLLED
@@ -316,6 +318,8 @@ for bw in band_widths:
         f"csr-h-bw{bw}",
         f"csr-h-sf-bw{bw}",
         f"csc-h-sf-bw{bw}",
+        f"csr-h-sf-persist-bw{bw}",
+        f"csc-h-sf-persist-bw{bw}",
         ])
 
 def correctness_test():
@@ -895,6 +899,23 @@ def correctness_test():
             except Exception as e:
                 print(f"\n{method_name} failed: {e}")
 
+            # Test CSC Sync-Free H-Level (Persistent Push)
+            method_name = f'csc-h-sf-persist-bw{bw}'
+            try:
+                dep_counts_csc = incoming_edge(A)
+                y_h_level_sf_csc_persist = sptrsv_numba_csc_syncfree_persistent_graph(
+                    d_data, d_indices, d_indptr, d_b, A.shape[0], A.shape[1], A.nnz,
+                    waves, wave_start_loc, dep_counts_csc, band_width=bw)
+                y_h_level_sf_csc_persist_cpu = y_h_level_sf_csc_persist.copy_to_host()
+                
+                if np.allclose(x_cpu, y_h_level_sf_csc_persist_cpu, atol=1e-5):
+                    print(f"\n{method_name} Solutions match within tolerance!")
+                    method_correctness[mat_name][method_name] = 1
+                else:
+                    print(f"\nWarning: {method_name} Solutions do not match!")
+            except Exception as e:
+                print(f"\n{method_name} failed: {e}")
+
             # Test CSR H-Level (now using CUDA graphs)
             method_name = f'csr-h-bw{bw}'
             try:
@@ -920,6 +941,22 @@ def correctness_test():
                 y_h_level_sf_cpu = y_h_level_sf.copy_to_host()
                 
                 if np.allclose(x_cpu, y_h_level_sf_cpu, atol=1e-5):
+                    print(f"\n{method_name} Solutions match within tolerance!")
+                    method_correctness[mat_name][method_name] = 1
+                else:
+                    print(f"\nWarning: {method_name} Solutions do not match!")
+            except Exception as e:
+                print(f"\n{method_name} failed: {e}")
+
+            # Test CSR Sync-Free H-Level (Persistent)
+            method_name = f'csr-h-sf-persist-bw{bw}'
+            try:
+                y_h_level_sf_persist = sptrsv_numba_csr_syncfree_persistent_graph(
+                    d_data_csr, d_indices_csr, d_indptr_csr, d_b_csr, n, n, A_csr_numba.nnz,
+                    waves_csr_numba, wave_start_loc_csr_numba, band_width=bw)
+                y_h_level_sf_persist_cpu = y_h_level_sf_persist.copy_to_host()
+                
+                if np.allclose(x_cpu, y_h_level_sf_persist_cpu, atol=1e-5):
                     print(f"\n{method_name} Solutions match within tolerance!")
                     method_correctness[mat_name][method_name] = 1
                 else:
@@ -982,14 +1019,14 @@ def correctness_test():
     return matrix_signtures, method_correctness
 
 
-mat_signatures, method_correctness = correctness_test()
-# convert to df and save as csv
-import pandas as pd
-df = pd.DataFrame(mat_signatures)
-df.to_csv("matrix_signatures.csv")
+# mat_signatures, method_correctness = correctness_test()
+# # convert to df and save as csv
+# import pandas as pd
+# df = pd.DataFrame(mat_signatures)
+# # df.to_csv("matrix_signatures.csv")
 
-df = pd.DataFrame(method_correctness)
-df.to_csv("method_correctness.csv")
+# df = pd.DataFrame(method_correctness)
+# # df.to_csv("method_correctness.csv")
 
 configs = []
 
@@ -1357,6 +1394,19 @@ def benchmark(matrices, provider):
         dep_counts = incoming_edge(A)
         h_level_data = sptrsv_h_level_analyze(d_indptr, d_indices, waves_gpu, wave_start_loc, band_width=band_width)
         ms, min_ms, max_ms = triton.testing.do_bench(lambda: sptrsv_numba_csc_syncfree_h_level_solve(d_data, d_indices, d_indptr, d_x, A.shape[0], A.shape[1], A.nnz, h_level_data, dep_counts), quantiles=quantiles, warmup=warmpup, rep=rep)
+
+    if provider.startswith('csc-h-sf-persist-bw'):
+        band_width = int(provider.replace('csc-h-sf-persist-bw', ''))
+        d_data = cuda.to_device(A.data)
+        d_indices = cuda.to_device(A.indices)
+        d_indptr = cuda.to_device(A.indptr)
+        d_x = cuda.to_device(b.copy())  # persistent solver expects b copy
+        wavefronts = compute_wavefront(A)
+        wave_start_loc, waves = compact_2d_list(wavefronts)
+        waves_gpu = cuda.to_device(waves)
+        dep_counts = incoming_edge(A)
+        h_level_data = sptrsv_h_level_analyze(d_indptr, d_indices, waves_gpu, wave_start_loc, band_width=band_width)
+        ms, min_ms, max_ms = triton.testing.do_bench(lambda: sptrsv_numba_csc_syncfree_persistent_solve(d_data, d_indices, d_indptr, d_x, A.shape[0], A.shape[1], A.nnz, h_level_data, dep_counts), quantiles=quantiles, warmup=warmpup, rep=rep)
     
     if provider.startswith('csr-h-bw'):
         band_width = int(provider.replace('csr-h-bw', ''))
@@ -1387,6 +1437,20 @@ def benchmark(matrices, provider):
         waves_gpu = cuda.to_device(waves)
         h_level_data = sptrsv_h_level_analyze(d_indptr, d_indices, waves_gpu, wave_start_loc, band_width=band_width)
         ms, min_ms, max_ms = triton.testing.do_bench(lambda: sptrsv_numba_csr_syncfree_h_level_solve(d_data, d_indices, d_indptr, d_x, A.shape[0], A.shape[1], A_csr.nnz, h_level_data), quantiles=quantiles, warmup=warmpup, rep=rep)
+
+    if provider.startswith('csr-h-sf-persist-bw'):
+        band_width = int(provider.replace('csr-h-sf-persist-bw', ''))
+        A_csr = A.tocsr()
+        A_csr.sort_indices()
+        d_data = cuda.to_device(A_csr.data)
+        d_indices = cuda.to_device(A_csr.indices)
+        d_indptr = cuda.to_device(A_csr.indptr)
+        d_x = cuda.to_device(np.zeros(n))
+        wavefronts = compute_wavefront(A)
+        wave_start_loc, waves = compact_2d_list(wavefronts)
+        waves_gpu = cuda.to_device(waves)
+        h_level_data = sptrsv_h_level_analyze(d_indptr, d_indices, waves_gpu, wave_start_loc, band_width=band_width)
+        ms, min_ms, max_ms = triton.testing.do_bench(lambda: sptrsv_numba_csr_syncfree_persistent_solve(d_data, d_indices, d_indptr, d_x, A.shape[0], A.shape[1], A_csr.nnz, h_level_data), quantiles=quantiles, warmup=warmpup, rep=rep)
 
     # CSC 3-Level Coarsening (wavefront + warp + thread)
     if provider.startswith('numba-csc-coarsened-c') and '-w' in provider and '-tc' in provider:
