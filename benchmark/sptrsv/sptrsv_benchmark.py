@@ -43,6 +43,8 @@ from kernels.sptrsv_hlevel import (
     sptrsv_h_level_analyze,
     sptrsv_numba_csc_h_level_solve, sptrsv_numba_csr_h_level_solve,
     sptrsv_numba_csc_h_level_graph, sptrsv_numba_csr_h_level_graph,
+    sptrsv_numba_csr_syncfree_h_level_graph, sptrsv_numba_csr_syncfree_h_level_solve,
+    sptrsv_numba_csc_syncfree_h_level_graph, sptrsv_numba_csc_syncfree_h_level_solve,
 )
 
 import warnings
@@ -56,12 +58,12 @@ print(f"Compute Capability: {device.compute_capability}")
 
 
 mtx_list = [
-"/home/mad29/projects/testdata/matrices/1138_bus.mtx",
-"/home/mad29/projects/testdata/matrices/2cubes_sphere.mtx",
+# "/home/mad29/projects/testdata/matrices/1138_bus.mtx",
+# "/home/mad29/projects/testdata/matrices/2cubes_sphere.mtx",
 # "/home/mad29/projects/testdata/matrices/Chem97ZtZ.mtx",
-# "/home/mad29/projects/testdata/matrices/Dubcova1.mtx",
-# "/home/mad29/projects/testdata/matrices/Dubcova2.mtx",
-# "/home/mad29/projects/testdata/matrices/Dubcova3.mtx",
+"/home/mad29/projects/testdata/matrices/Dubcova1.mtx",
+"/home/mad29/projects/testdata/matrices/Dubcova2.mtx",
+"/home/mad29/projects/testdata/matrices/Dubcova3.mtx",
 # "/home/mad29/projects/testdata/matrices/Emilia_923.mtx",
 # "/home/mad29/projects/testdata/matrices/Fault_639.mtx",
 # "/home/mad29/projects/testdata/matrices/Flan_1565.mtx",
@@ -312,6 +314,8 @@ for bw in band_widths:
     method_list.extend([
         f"csc-h-bw{bw}",
         f"csr-h-bw{bw}",
+        f"csr-h-sf-bw{bw}",
+        f"csc-h-sf-bw{bw}",
         ])
 
 def correctness_test():
@@ -331,6 +335,7 @@ def correctness_test():
         A = tril(A, format="csc")
         # add diagonals with 100
         A.setdiag(A.diagonal())
+        A.sort_indices() # Ensure sorted indices
         mat_name = mtx_matrix_path.split("/")[-1]
         matrix_signtures.append(get_matrix_signature(A, mat_name))
         b = A.dot(np.ones(n))  # Dense vector b
@@ -380,6 +385,7 @@ def correctness_test():
         #                                                torch.tensor(map_vals, dtype=torch.int32, device=DEVICE))
 
         A_csr = A.tocsr()
+        A_csr.sort_indices() # Ensure sorted indices for CSR as well
         val_f32_csr     = torch.tensor(A_csr.data,    dtype=REAL_TYPE, device=DEVICE)
         indices_i32_csr = torch.tensor(A_csr.indices, dtype=torch.int32, device=DEVICE)
         indptr_i32_csr  = torch.tensor(A_csr.indptr,  dtype=torch.int32, device=DEVICE)
@@ -432,6 +438,7 @@ def correctness_test():
 
         # Test triton-csr-wavefront
         A_csr = A.tocsr()
+        A_csr.sort_indices()
         val_f32_csr = torch.tensor(A_csr.data, dtype=REAL_TYPE, device=DEVICE)
         indices_i32_csr = torch.tensor(A_csr.indices, dtype=torch.int32, device=DEVICE)
         indptr_i32_csr = torch.tensor(A_csr.indptr, dtype=torch.int32, device=DEVICE)
@@ -595,6 +602,7 @@ def correctness_test():
 
         # Test numba-csr-wavefront
         A_csr_numba = A.tocsr()
+        A_csr_numba.sort_indices()
         d_data_csr = cuda.to_device(A_csr_numba.data)
         d_indices_csr = cuda.to_device(A_csr_numba.indices)
         d_indptr_csr = cuda.to_device(A_csr_numba.indptr)
@@ -870,6 +878,23 @@ def correctness_test():
             except Exception as e:
                 print(f"\n{method_name} failed: {e}")
             
+            # Test CSC Sync-Free H-Level (push)
+            method_name = f'csc-h-sf-bw{bw}'
+            try:
+                dep_counts_csc = incoming_edge(A)  # dependencies per column
+                y_h_level_sf_csc = sptrsv_numba_csc_syncfree_h_level_graph(
+                    d_data, d_indices, d_indptr, d_b, A.shape[0], A.shape[1], A.nnz,
+                    waves, wave_start_loc, dep_counts_csc, band_width=bw)
+                y_h_level_sf_csc_cpu = y_h_level_sf_csc.copy_to_host()
+                
+                if np.allclose(x_cpu, y_h_level_sf_csc_cpu, atol=1e-5):
+                    print(f"\n{method_name} Solutions match within tolerance!")
+                    method_correctness[mat_name][method_name] = 1
+                else:
+                    print(f"\nWarning: {method_name} Solutions do not match!")
+            except Exception as e:
+                print(f"\n{method_name} failed: {e}")
+
             # Test CSR H-Level (now using CUDA graphs)
             method_name = f'csr-h-bw{bw}'
             try:
@@ -879,6 +904,22 @@ def correctness_test():
                 y_h_level_csr_cpu = y_h_level_csr.copy_to_host()
                 
                 if np.allclose(x_cpu, y_h_level_csr_cpu, atol=1e-5):
+                    print(f"\n{method_name} Solutions match within tolerance!")
+                    method_correctness[mat_name][method_name] = 1
+                else:
+                    print(f"\nWarning: {method_name} Solutions do not match!")
+            except Exception as e:
+                print(f"\n{method_name} failed: {e}")
+
+            # Test CSR Sync-Free H-Level
+            method_name = f'csr-h-sf-bw{bw}'
+            try:
+                y_h_level_sf = sptrsv_numba_csr_syncfree_h_level_graph(
+                    d_data_csr, d_indices_csr, d_indptr_csr, d_b_csr, n, n, A_csr_numba.nnz,
+                    waves_csr_numba, wave_start_loc_csr_numba, band_width=bw)
+                y_h_level_sf_cpu = y_h_level_sf.copy_to_host()
+                
+                if np.allclose(x_cpu, y_h_level_sf_cpu, atol=1e-5):
                     print(f"\n{method_name} Solutions match within tolerance!")
                     method_correctness[mat_name][method_name] = 1
                 else:
@@ -981,6 +1022,7 @@ def benchmark(matrices, provider):
 
     # add diagonals with 100
     A.setdiag(A.diagonal())
+    A.sort_indices() # Ensure sorted indices
     b = np.ones(n)  # Dense vector b
     quantiles = [0.5, 0.2, 0.8]
     rep, warmpup = 100, 25
@@ -1015,6 +1057,7 @@ def benchmark(matrices, provider):
     
     if provider == 'csr-wf-base':
         A_csr = A.tocsr()
+        A_csr.sort_indices()
         d_data = cuda.to_device(A_csr.data)
         d_indices = cuda.to_device(A_csr.indices)
         d_indptr = cuda.to_device(A_csr.indptr)
@@ -1026,6 +1069,7 @@ def benchmark(matrices, provider):
     
     if provider == 'csr-sf-base':
         A_csr = A.tocsr()
+        A_csr.sort_indices()
         d_data = cuda.to_device(A_csr.data)
         d_indices = cuda.to_device(A_csr.indices)
         d_indptr = cuda.to_device(A_csr.indptr)
@@ -1069,6 +1113,7 @@ def benchmark(matrices, provider):
         unroll_factor = int(parts[0])
         threads_per_block = int(parts[1])
         A_csr = A.tocsr()
+        A_csr.sort_indices()
         d_data = cuda.to_device(A_csr.data)
         d_indices = cuda.to_device(A_csr.indices)
         d_indptr = cuda.to_device(A_csr.indptr)
@@ -1109,6 +1154,7 @@ def benchmark(matrices, provider):
     if provider.startswith('csr-wf-coarse-block-wc'):
         coarsening_factor = int(provider.replace('csr-wf-coarse-block-wc', ''))
         A_csr = A.tocsr()
+        A_csr.sort_indices()
         d_data = cuda.to_device(A_csr.data)
         d_indices = cuda.to_device(A_csr.indices)
         d_indptr = cuda.to_device(A_csr.indptr)
@@ -1132,6 +1178,7 @@ def benchmark(matrices, provider):
     if provider.startswith('csr-wf-coarse-thread-tc'):
         threads_per_block = int(provider.replace('csr-wf-coarse-thread-tc', ''))
         A_csr = A.tocsr()
+        A_csr.sort_indices()
         d_data = cuda.to_device(A_csr.data)
         d_indices = cuda.to_device(A_csr.indices)
         d_indptr = cuda.to_device(A_csr.indptr)
@@ -1167,6 +1214,7 @@ def benchmark(matrices, provider):
         threads_per_block = warps * 32
         
         A_csr = A.tocsr()
+        A_csr.sort_indices()
         d_data = cuda.to_device(A_csr.data)
         d_indices = cuda.to_device(A_csr.indices)
         d_indptr = cuda.to_device(A_csr.indptr)
@@ -1212,6 +1260,7 @@ def benchmark(matrices, provider):
         unroll_factor = int(parts[0])
         threads_per_block = int(parts[1])
         A_csr = A.tocsr()
+        A_csr.sort_indices()
         d_data = cuda.to_device(A_csr.data)
         d_indices = cuda.to_device(A_csr.indices)
         d_indptr = cuda.to_device(A_csr.indptr)
@@ -1249,6 +1298,7 @@ def benchmark(matrices, provider):
     if provider.startswith('csr-sf-coarse-block-bc'):
         block_coarsening_factor = int(provider.replace('csr-sf-coarse-block-bc', ''))
         A_csr = A.tocsr()
+        A_csr.sort_indices()
         d_data = cuda.to_device(A_csr.data)
         d_indices = cuda.to_device(A_csr.indices)
         d_indptr = cuda.to_device(A_csr.indptr)
@@ -1269,6 +1319,7 @@ def benchmark(matrices, provider):
     if provider.startswith('csr-sf-coarse-thread-tc'):
         threads_per_block = int(provider.replace('csr-sf-coarse-thread-tc', ''))
         A_csr = A.tocsr()
+        A_csr.sort_indices()
         d_data = cuda.to_device(A_csr.data)
         d_indices = cuda.to_device(A_csr.indices)
         d_indptr = cuda.to_device(A_csr.indptr)
@@ -1289,395 +1340,28 @@ def benchmark(matrices, provider):
         wavefronts = compute_wavefront(A)
         wave_start_loc, waves = compact_2d_list(wavefronts)
         waves_gpu = cuda.to_device(waves)
-        h_level_data = sptrsv_h_level_analyze(d_indptr, d_indices, waves_gpu, wave_start_loc, band_width=band_width)
-        ms, min_ms, max_ms = triton.testing.do_bench(lambda: sptrsv_numba_csc_h_level_solve(d_data, d_indices, d_indptr, d_x, A.shape[0], A.shape[1], A.nnz, h_level_data), quantiles=quantiles, warmup=warmpup, rep=rep)
-    
-    if provider.startswith('csr-h-bw'):
-        band_width = int(provider.replace('csr-h-bw', ''))
-        A_csr = A.tocsr()
-        d_data = cuda.to_device(A_csr.data)
-        d_indices = cuda.to_device(A_csr.indices)
-        d_indptr = cuda.to_device(A_csr.indptr)
-        d_x = cuda.to_device(np.zeros(n))
-        wavefronts = compute_wavefront(A)
-        wave_start_loc, waves = compact_2d_list(wavefronts)
-        waves_gpu = cuda.to_device(waves)
-        h_level_data = sptrsv_h_level_analyze(d_indptr, d_indices, waves_gpu, wave_start_loc, band_width=band_width)
-        ms, min_ms, max_ms = triton.testing.do_bench(lambda: sptrsv_numba_csr_h_level_solve(d_data, d_indices, d_indptr, d_x, A.shape[0], A.shape[1], A_csr.nnz, h_level_data), quantiles=quantiles, warmup=warmpup, rep=rep)
-    
-    # Keep old providers for backwards compatibility (if needed for testing)
-    if provider == 'triton':
-        A_csr = A.tocsr()
-        val_f32 = torch.tensor(A_csr.data, dtype=REAL_TYPE, device=DEVICE)
-        b_f32 = torch.tensor(b, dtype=REAL_TYPE, device=DEVICE)
-        indices_i32 = torch.tensor(A_csr.indices, dtype=torch.int32, device=DEVICE)
-        indptr_i32 = torch.tensor(A_csr.indptr, dtype=torch.int32, device=DEVICE)
-        wavefronts = compute_wavefront(A)
-        wave_start_loc, waves = compact_2d_list(wavefronts)
-        wave_start_loc = [int(x) for x in wave_start_loc]
-        waves_gpu = torch.tensor(waves, dtype=torch.int32, device=DEVICE)
-        ms, min_ms, max_ms = triton.testing.do_bench(lambda: sptrsv_triton_csr(val_f32, indices_i32, indptr_i32, b_f32, A.shape[0], A.shape[1], A_csr.nnz, wave_start_loc, waves_gpu), quantiles=quantiles, warmup=warmpup, rep=rep)
-    if provider == 'triton-csr-sync-free':
-        A_csr = A.tocsr()
-        val_f32 = torch.tensor(A_csr.data, dtype=REAL_TYPE, device=DEVICE)
-        b_f32 = torch.tensor(b, dtype=REAL_TYPE, device=DEVICE)
-        indices_i32 = torch.tensor(A_csr.indices, dtype=torch.int32, device=DEVICE)
-        indptr_i32 = torch.tensor(A_csr.indptr, dtype=torch.int32, device=DEVICE)
-        map_ptr, map_vals, outgoing_edges = incoming_edge_csr(A_csr)
-        dep_count_csr = torch.tensor(outgoing_edges, dtype=torch.int32, device=DEVICE)
-        map_ptr_gpu = torch.tensor(map_ptr, dtype=torch.int32, device=DEVICE)
-        map_vals_gpu = torch.tensor(map_vals, dtype=torch.int32, device=DEVICE)
-        ms, min_ms, max_ms = triton.testing.do_bench(lambda: sptrsv_sync_free_triton_csr(val_f32, indices_i32, indptr_i32, b_f32, A.shape[0], A.shape[1], A_csr.nnz, dep_count_csr, map_ptr_gpu, map_vals_gpu), quantiles=quantiles, warmup=warmpup, rep=rep)
-    if provider == 'triton-csr-mapping':
-        A_csr = A.tocsr()
-        val_f32 = torch.tensor(A_csr.data, dtype=REAL_TYPE, device=DEVICE)
-        b_f32 = torch.tensor(b, dtype=REAL_TYPE, device=DEVICE)
-        indices_i32 = torch.tensor(A_csr.indices, dtype=torch.int32, device=DEVICE)
-        indptr_i32 = torch.tensor(A_csr.indptr, dtype=torch.int32, device=DEVICE)
-        wavefronts = compute_wavefront(A)
-        wave_start_loc, waves = compact_2d_list(wavefronts)
-        wave_start_loc = [int(x) for x in wave_start_loc]
-        waves_gpu = torch.tensor(waves, dtype=torch.int32, device=DEVICE)
-        ms, min_ms, max_ms = triton.testing.do_bench(lambda: sptrsv_triton_csr_mapping(val_f32, indices_i32, indptr_i32, b_f32, A.shape[0], A.shape[1], A_csr.nnz, wave_start_loc, waves_gpu), quantiles=quantiles, warmup=warmpup, rep=rep)
-    if provider == 'triton-csr-sync-free-mapping':
-        A_csr = A.tocsr()
-        val_f32 = torch.tensor(A_csr.data, dtype=REAL_TYPE, device=DEVICE)
-        b_f32 = torch.tensor(b, dtype=REAL_TYPE, device=DEVICE)
-        indices_i32 = torch.tensor(A_csr.indices, dtype=torch.int32, device=DEVICE)
-        indptr_i32 = torch.tensor(A_csr.indptr, dtype=torch.int32, device=DEVICE)
-        map_ptr, map_vals, outgoing_edges = incoming_edge_csr(A_csr)
-        dep_count_csr = torch.tensor(outgoing_edges, dtype=torch.int32, device=DEVICE)
-        map_ptr_gpu = torch.tensor(map_ptr, dtype=torch.int32, device=DEVICE)
-        map_vals_gpu = torch.tensor(map_vals, dtype=torch.int32, device=DEVICE)
-        ms, min_ms, max_ms = triton.testing.do_bench(lambda: sptrsv_triton_csr_sync_free_mapping(val_f32, indices_i32, indptr_i32, b_f32, A.shape[0], A.shape[1], A_csr.nnz, dep_count_csr, map_ptr_gpu, map_vals_gpu), quantiles=quantiles, warmup=warmpup, rep=rep)
-    if provider == 'triton-csc-mapping':
-        val_f32 = torch.tensor(A.data, dtype=REAL_TYPE, device=DEVICE)
-        b_f32 = torch.tensor(b, dtype=REAL_TYPE, device=DEVICE)
-        indices_i32 = torch.tensor(A.indices, dtype=torch.int32, device=DEVICE)
-        indptr_i32 = torch.tensor(A.indptr, dtype=torch.int32, device=DEVICE)
-        wavefronts = compute_wavefront(A)
-        wave_start_loc, waves = compact_2d_list(wavefronts)
-        # Convert to Python list with int values to avoid numpy.int32 issues
-        wave_start_loc = [int(x) for x in wave_start_loc]
-        waves_gpu = torch.tensor(waves, dtype=torch.int32, device=DEVICE)
-        ms, min_ms, max_ms = triton.testing.do_bench(lambda: sptrsv_triton_csc_mapping(val_f32, indices_i32, indptr_i32, b_f32, A.shape[0], A.shape[1], A.nnz, wave_start_loc, waves_gpu), quantiles=quantiles, warmup=warmpup, rep=rep)
-    if provider == 'triton-sync-free':
-        val_f32 = torch.tensor(A.data, dtype=REAL_TYPE, device=DEVICE)
-        b_f32 = torch.tensor(b, dtype=REAL_TYPE, device=DEVICE)
-        indices_i32 = torch.tensor(A.indices, dtype=torch.int32, device=DEVICE)
-        indptr_i32 = torch.tensor(A.indptr, dtype=torch.int32, device=DEVICE)
-        dep_count = incoming_edge(A)
-        dep_count_gpu = torch.tensor(dep_count, dtype=torch.int32, device=DEVICE)
-        max_col_size = max(A.getnnz(axis=0))
-        if max_col_size < 63:
-            BLOCKSIZE = 64
-        elif max_col_size < 255:
-            BLOCKSIZE = 256
-        elif max_col_size < 511:
-            BLOCKSIZE = 512
-        else:
-            BLOCKSIZE = 1024
-            assert max_col_size < 1023
-        ms, min_ms, max_ms = triton.testing.do_bench(lambda: sptrsv_sync_free_triton(val_f32, indices_i32, indptr_i32, b_f32, A.shape[0], A.shape[1], A.nnz, dep_count_gpu, BLOCKSIZE), quantiles=quantiles, warmup=warmpup, rep=rep)
-    if provider == 'triton-spmv':
-        val_f32 = torch.tensor(A.data, dtype=REAL_TYPE, device=DEVICE)
-        b_f32 = torch.tensor(np.zeros(n), dtype=REAL_TYPE, device=DEVICE)
-        indices_i32 = torch.tensor(A.indices, dtype=torch.int32, device=DEVICE)
-        indptr_i32 = torch.tensor(A.indptr, dtype=torch.int32, device=DEVICE)
-        ms, min_ms, max_ms = triton.testing.do_bench(lambda: spmv_triton(val_f32, indices_i32, indptr_i32, b_f32, A.shape[0], A.shape[1], A.nnz), quantiles=quantiles, warmup=warmpup, rep=rep)
-    if provider == 'numba-csc-wavefront':
-        # Transfer data to the GPU
-        d_data = cuda.to_device(A.data)
-        d_indices = cuda.to_device(A.indices)
-        d_indptr = cuda.to_device(A.indptr)
-        d_x = cuda.to_device(np.zeros(n))
-        wavefronts = compute_wavefront(A)
-        wave_start_loc, waves = compact_2d_list(wavefronts)
-        waves_gpu = cuda.to_device(waves)
-        ms, min_ms, max_ms = triton.testing.do_bench(lambda: sptrsv_numba_csc(d_data, d_indices, d_indptr, d_x, A.shape[0], A.shape[1], A.nnz, wave_start_loc, waves_gpu), quantiles=quantiles, warmup=warmpup, rep=rep)
-    if provider == 'numba-csc-sync-free':
-        # Transfer data to the GPU
-        d_data = cuda.to_device(A.data)
-        d_indices = cuda.to_device(A.indices)
-        d_indptr = cuda.to_device(A.indptr)
-        d_x = cuda.to_device(np.zeros(n))
-        dep_count = incoming_edge(A)
-        #dep_count_gpu = cuda.to_device(dep_count)
-        ms, min_ms, max_ms = triton.testing.do_bench(lambda: sptrsv_numba_csc_sync_free(d_data, d_indices, d_indptr, d_x, A.shape[0], A.shape[1], A.nnz, dep_count), quantiles=quantiles, warmup=warmpup, rep=rep)
-    # CSC Wavefront Mapping with thread count sweep
-    if provider.startswith('numba-csc-wavefront-mapping-t'):
-        threads_per_block = int(provider.split('t')[-1])
-        d_data = cuda.to_device(A.data)
-        d_indices = cuda.to_device(A.indices)
-        d_indptr = cuda.to_device(A.indptr)
-        d_x = cuda.to_device(np.zeros(n))
-        wavefronts = compute_wavefront(A)
-        wave_start_loc, waves = compact_2d_list(wavefronts)
-        waves_gpu = cuda.to_device(waves)
-        ms, min_ms, max_ms = triton.testing.do_bench(lambda: sptrsv_numba_csc_wavefront_mapping(d_data, d_indices, d_indptr, d_x, A.shape[0], A.shape[1], A.nnz, wave_start_loc, waves_gpu, threads_per_block), quantiles=quantiles, warmup=warmpup, rep=rep)
-    
-    # CSC Sync-Free Mapping with thread count sweep
-    if provider.startswith('numba-csc-sync-free-mapping-t'):
-        threads_per_block = int(provider.split('t')[-1])
-        d_data = cuda.to_device(A.data)
-        d_indices = cuda.to_device(A.indices)
-        d_indptr = cuda.to_device(A.indptr)
-        d_x = cuda.to_device(np.zeros(n))
-        dep_count = incoming_edge(A)
-        succ_offsets_csc, succ_indices_csc = build_csc_successors(A)
-        d_succ_offsets_csc = cuda.to_device(succ_offsets_csc)
-        d_succ_indices_csc = cuda.to_device(succ_indices_csc)
-        ms, min_ms, max_ms = triton.testing.do_bench(lambda: sptrsv_numba_csc_sync_free_mapping(d_data, d_indices, d_indptr, d_x, A.shape[0], A.shape[1], A.nnz, dep_count, d_succ_offsets_csc, d_succ_indices_csc, threads_per_block), quantiles=quantiles, warmup=warmpup, rep=rep)
-    
-    # CSC Wavefront Unrolling with factor and thread count sweep
-    if provider.startswith('numba-csc-wavefront-unrolling-') and '-t' in provider:
-        parts = provider.replace('numba-csc-wavefront-unrolling-', '').split('-t')
-        unroll_factor = int(parts[0])
-        threads_per_block = int(parts[1])
-        d_data = cuda.to_device(A.data)
-        d_indices = cuda.to_device(A.indices)
-        d_indptr = cuda.to_device(A.indptr)
-        d_x = cuda.to_device(np.zeros(n))
-        wavefronts = compute_wavefront(A)
-        wave_start_loc, waves = compact_2d_list(wavefronts)
-        waves_gpu = cuda.to_device(waves)
-        # Select the appropriate specialized function
-        func_map = {
-            4: sptrsv_numba_csc_wavefront_unrolling_4,
-            8: sptrsv_numba_csc_wavefront_unrolling_8,
-            16: sptrsv_numba_csc_wavefront_unrolling_16,
-            32: sptrsv_numba_csc_wavefront_unrolling_32,
-            64: sptrsv_numba_csc_wavefront_unrolling_64,
-        }
-        unroll_func = func_map[unroll_factor]
-        ms, min_ms, max_ms = triton.testing.do_bench(lambda: unroll_func(d_data, d_indices, d_indptr, d_x, A.shape[0], A.shape[1], A.nnz, wave_start_loc, waves_gpu, threads_per_block), quantiles=quantiles, warmup=warmpup, rep=rep)
-    
-    # CSC Sync-Free Unrolling with factor and thread count sweep
-    if provider.startswith('numba-csc-sync-free-unrolling-') and '-t' in provider:
-        parts = provider.replace('numba-csc-sync-free-unrolling-', '').split('-t')
-        unroll_factor = int(parts[0])
-        threads_per_block = int(parts[1])
-        d_data = cuda.to_device(A.data)
-        d_indices = cuda.to_device(A.indices)
-        d_indptr = cuda.to_device(A.indptr)
-        d_x = cuda.to_device(np.zeros(n))
-        dep_count = incoming_edge(A)
-        succ_offsets_csc, succ_indices_csc = build_csc_successors(A)
-        d_succ_offsets_csc = cuda.to_device(succ_offsets_csc)
-        d_succ_indices_csc = cuda.to_device(succ_indices_csc)
-        # Select the appropriate specialized function
-        func_map = {
-            4: sptrsv_numba_csc_sync_free_unrolling_4,
-            8: sptrsv_numba_csc_sync_free_unrolling_8,
-            16: sptrsv_numba_csc_sync_free_unrolling_16,
-            32: sptrsv_numba_csc_sync_free_unrolling_32,
-            64: sptrsv_numba_csc_sync_free_unrolling_64,
-        }
-        unroll_func = func_map[unroll_factor]
-        ms, min_ms, max_ms = triton.testing.do_bench(lambda: unroll_func(d_data, d_indices, d_indptr, d_x, A.shape[0], A.shape[1], A.nnz, dep_count, d_succ_offsets_csc, d_succ_indices_csc, threads_per_block), quantiles=quantiles, warmup=warmpup, rep=rep)
-    if provider == 'numba-csr-wavefront':
-        A_csr = A.tocsr()
-        d_data = cuda.to_device(A_csr.data)
-        d_indices = cuda.to_device(A_csr.indices)
-        d_indptr = cuda.to_device(A_csr.indptr)
-        d_x = cuda.to_device(np.zeros(n))
-        wavefronts = compute_wavefront(A)
-        wave_start_loc, waves = compact_2d_list(wavefronts)
-        waves_gpu = cuda.to_device(waves)
-        ms, min_ms, max_ms = triton.testing.do_bench(lambda: sptrsv_numba_csr_wavefront(d_data, d_indices, d_indptr, d_x, A.shape[0], A.shape[1], A_csr.nnz, wave_start_loc, waves_gpu), quantiles=quantiles, warmup=warmpup, rep=rep)
-    if provider == 'numba-csr-sync-free':
-        A_csr = A.tocsr()
-        d_data = cuda.to_device(A_csr.data)
-        d_indices = cuda.to_device(A_csr.indices)
-        d_indptr = cuda.to_device(A_csr.indptr)
-        d_x = cuda.to_device(np.zeros(n))
-        dep_count = incoming_edge_csr_rows(A_csr)
-        succ_offsets, succ_indices = build_csr_successors(A_csr)
-        ms, min_ms, max_ms = triton.testing.do_bench(lambda: sptrsv_numba_csr_sync_free(d_data, d_indices, d_indptr, d_x, A.shape[0], A.shape[1], A_csr.nnz, dep_count, succ_offsets, succ_indices), quantiles=quantiles, warmup=warmpup, rep=rep)
-    # CSR Wavefront Mapping with thread count sweep
-    if provider.startswith('numba-csr-wavefront-mapping-t'):
-        threads_per_block = int(provider.split('t')[-1])
-        A_csr = A.tocsr()
-        d_data = cuda.to_device(A_csr.data)
-        d_indices = cuda.to_device(A_csr.indices)
-        d_indptr = cuda.to_device(A_csr.indptr)
-        d_x = cuda.to_device(np.zeros(n))
-        wavefronts = compute_wavefront(A)
-        wave_start_loc, waves = compact_2d_list(wavefronts)
-        waves_gpu = cuda.to_device(waves)
-        ms, min_ms, max_ms = triton.testing.do_bench(lambda: sptrsv_numba_csr_wavefront_mapping(d_data, d_indices, d_indptr, d_x, A.shape[0], A.shape[1], A_csr.nnz, wave_start_loc, waves_gpu, threads_per_block), quantiles=quantiles, warmup=warmpup, rep=rep)
-    
-    # CSR Wavefront Unrolling with factor and thread count sweep
-    if provider.startswith('numba-csr-wavefront-unrolling-') and '-t' in provider:
-        parts = provider.replace('numba-csr-wavefront-unrolling-', '').split('-t')
-        unroll_factor = int(parts[0])
-        threads_per_block = int(parts[1])
-        A_csr = A.tocsr()
-        d_data = cuda.to_device(A_csr.data)
-        d_indices = cuda.to_device(A_csr.indices)
-        d_indptr = cuda.to_device(A_csr.indptr)
-        d_x = cuda.to_device(np.zeros(n))
-        wavefronts = compute_wavefront(A)
-        wave_start_loc, waves = compact_2d_list(wavefronts)
-        waves_gpu = cuda.to_device(waves)
-        # Select the appropriate specialized function
-        func_map = {
-            4: sptrsv_numba_csr_wavefront_unrolling_4,
-            8: sptrsv_numba_csr_wavefront_unrolling_8,
-            16: sptrsv_numba_csr_wavefront_unrolling_16,
-            32: sptrsv_numba_csr_wavefront_unrolling_32,
-            64: sptrsv_numba_csr_wavefront_unrolling_64,
-        }
-        unroll_func = func_map[unroll_factor]
-        ms, min_ms, max_ms = triton.testing.do_bench(lambda: unroll_func(d_data, d_indices, d_indptr, d_x, A.shape[0], A.shape[1], A_csr.nnz, wave_start_loc, waves_gpu, threads_per_block), quantiles=quantiles, warmup=warmpup, rep=rep)
-    
-    # CSR Sync-Free Mapping with thread count sweep
-    if provider.startswith('numba-csr-sync-free-mapping-t'):
-        threads_per_block = int(provider.split('t')[-1])
-        A_csr = A.tocsr()
-        d_data = cuda.to_device(A_csr.data)
-        d_indices = cuda.to_device(A_csr.indices)
-        d_indptr = cuda.to_device(A_csr.indptr)
-        d_x = cuda.to_device(np.zeros(n))
-        dep_count = incoming_edge_csr_rows(A_csr)
-        succ_offsets, succ_indices = build_csr_successors(A_csr)
-        ms, min_ms, max_ms = triton.testing.do_bench(lambda: sptrsv_numba_csr_sync_free_mapping(d_data, d_indices, d_indptr, d_x, A.shape[0], A.shape[1], A_csr.nnz, dep_count, succ_offsets, succ_indices, threads_per_block), quantiles=quantiles, warmup=warmpup, rep=rep)
-    
-    # CSR Sync-Free Unrolling with factor and thread count sweep
-    if provider.startswith('numba-csr-sync-free-unrolling-') and '-t' in provider:
-        parts = provider.replace('numba-csr-sync-free-unrolling-', '').split('-t')
-        unroll_factor = int(parts[0])
-        threads_per_block = int(parts[1])
-        A_csr = A.tocsr()
-        d_data = cuda.to_device(A_csr.data)
-        d_indices = cuda.to_device(A_csr.indices)
-        d_indptr = cuda.to_device(A_csr.indptr)
-        d_x = cuda.to_device(np.zeros(n))
-        dep_count = incoming_edge_csr_rows(A_csr)
-        succ_offsets, succ_indices = build_csr_successors(A_csr)
-        # Select the appropriate specialized function
-        func_map = {
-            4: sptrsv_numba_csr_sync_free_unrolling_4,
-            8: sptrsv_numba_csr_sync_free_unrolling_8,
-            16: sptrsv_numba_csr_sync_free_unrolling_16,
-            32: sptrsv_numba_csr_sync_free_unrolling_32,
-            64: sptrsv_numba_csr_sync_free_unrolling_64,
-        }
-        unroll_func = func_map[unroll_factor]
-        ms, min_ms, max_ms = triton.testing.do_bench(lambda: unroll_func(d_data, d_indices, d_indptr, d_x, A.shape[0], A.shape[1], A_csr.nnz, dep_count, succ_offsets, succ_indices, threads_per_block), quantiles=quantiles, warmup=warmpup, rep=rep)
-    # CSC Wavefront Block Coarsening
-    if provider.startswith('numba-csc-wf-block-c'):
-        coarsening_factor = int(provider.replace('numba-csc-wf-block-c', ''))
-        d_data = cuda.to_device(A.data)
-        d_indices = cuda.to_device(A.indices)
-        d_indptr = cuda.to_device(A.indptr)
-        d_x = cuda.to_device(np.zeros(n))
-        wavefronts = compute_wavefront(A)
-        wave_start, waves, level_boundaries = compact_coarsened_wavefronts(wavefronts, coarsening_factor)
-        waves_gpu = cuda.to_device(waves)
-        ms, min_ms, max_ms = triton.testing.do_bench(lambda: sptrsv_numba_csc_wavefront_block_coarsening(d_data, d_indices, d_indptr, d_x, A.shape[0], A.shape[1], A.nnz, wave_start, waves_gpu, level_boundaries, block_coarsening_factor=1), quantiles=quantiles, warmup=warmpup, rep=rep)
-    
-    # CSC Wavefront Thread Coarsening
-    if provider.startswith('numba-csc-wf-thread-t'):
-        threads_per_block = int(provider.replace('numba-csc-wf-thread-t', ''))
-        d_data = cuda.to_device(A.data)
-        d_indices = cuda.to_device(A.indices)
-        d_indptr = cuda.to_device(A.indptr)
-        d_x = cuda.to_device(np.zeros(n))
-        wavefronts = compute_wavefront(A)
-        wave_start, waves, level_boundaries = compact_coarsened_wavefronts(wavefronts, 1)
-        waves_gpu = cuda.to_device(waves)
-        ms, min_ms, max_ms = triton.testing.do_bench(lambda: sptrsv_numba_csc_wavefront_thread_coarsening(d_data, d_indices, d_indptr, d_x, A.shape[0], A.shape[1], A.nnz, wave_start, waves_gpu, thread_coarsening_factor=1, threads_per_block=threads_per_block), quantiles=quantiles, warmup=warmpup, rep=rep)
-    
-    # CSC Sync-Free Block Coarsening
-    if provider.startswith('numba-csc-sf-block-b'):
-        block_coarsening_factor = int(provider.replace('numba-csc-sf-block-b', ''))
-        d_data = cuda.to_device(A.data)
-        d_indices = cuda.to_device(A.indices)
-        d_indptr = cuda.to_device(A.indptr)
-        d_x = cuda.to_device(np.zeros(n))
-        dep_count = incoming_edge(A)
-        ms, min_ms, max_ms = triton.testing.do_bench(lambda: sptrsv_numba_csc_sync_free_block_coarsening(d_data, d_indices, d_indptr, d_x, A.shape[0], A.shape[1], A.nnz, dep_count, block_coarsening_factor=block_coarsening_factor), quantiles=quantiles, warmup=warmpup, rep=rep)
-    
-    # CSC Sync-Free Thread Coarsening
-    if provider.startswith('numba-csc-sf-thread-t'):
-        threads_per_block = int(provider.replace('numba-csc-sf-thread-t', ''))
-        d_data = cuda.to_device(A.data)
-        d_indices = cuda.to_device(A.indices)
-        d_indptr = cuda.to_device(A.indptr)
-        d_x = cuda.to_device(np.zeros(n))
-        dep_count = incoming_edge(A)
-        ms, min_ms, max_ms = triton.testing.do_bench(lambda: sptrsv_numba_csc_sync_free_thread_coarsening(d_data, d_indices, d_indptr, d_x, A.shape[0], A.shape[1], A.nnz, dep_count, thread_coarsening_factor=1, threads_per_block=threads_per_block), quantiles=quantiles, warmup=warmpup, rep=rep)
-    
-    # CSR Wavefront Block Coarsening
-    if provider.startswith('numba-csr-wf-block-c'):
-        coarsening_factor = int(provider.replace('numba-csr-wf-block-c', ''))
-        A_csr = A.tocsr()
-        d_data = cuda.to_device(A_csr.data)
-        d_indices = cuda.to_device(A_csr.indices)
-        d_indptr = cuda.to_device(A_csr.indptr)
-        d_x = cuda.to_device(np.zeros(n))
-        wavefronts = compute_wavefront(A)
-        wave_start, waves, level_boundaries = compact_coarsened_wavefronts(wavefronts, coarsening_factor)
-        waves_gpu = cuda.to_device(waves)
-        ms, min_ms, max_ms = triton.testing.do_bench(lambda: sptrsv_numba_csr_wavefront_block_coarsening(d_data, d_indices, d_indptr, d_x, A.shape[0], A.shape[1], A_csr.nnz, wave_start, waves_gpu, level_boundaries, block_coarsening_factor=1), quantiles=quantiles, warmup=warmpup, rep=rep)
-    
-    # CSR Wavefront Thread Coarsening
-    if provider.startswith('numba-csr-wf-thread-t'):
-        threads_per_block = int(provider.replace('numba-csr-wf-thread-t', ''))
-        A_csr = A.tocsr()
-        d_data = cuda.to_device(A_csr.data)
-        d_indices = cuda.to_device(A_csr.indices)
-        d_indptr = cuda.to_device(A_csr.indptr)
-        d_x = cuda.to_device(np.zeros(n))
-        wavefronts = compute_wavefront(A)
-        wave_start, waves, level_boundaries = compact_coarsened_wavefronts(wavefronts, 1)
-        waves_gpu = cuda.to_device(waves)
-        ms, min_ms, max_ms = triton.testing.do_bench(lambda: sptrsv_numba_csr_wavefront_thread_coarsening(d_data, d_indices, d_indptr, d_x, A.shape[0], A.shape[1], A_csr.nnz, wave_start, waves_gpu, thread_coarsening_factor=1, threads_per_block=threads_per_block), quantiles=quantiles, warmup=warmpup, rep=rep)
-    
-    # CSR Sync-Free Block Coarsening
-    if provider.startswith('numba-csr-sf-block-b'):
-        block_coarsening_factor = int(provider.replace('numba-csr-sf-block-b', ''))
-        A_csr = A.tocsr()
-        d_data = cuda.to_device(A_csr.data)
-        d_indices = cuda.to_device(A_csr.indices)
-        d_indptr = cuda.to_device(A_csr.indptr)
-        d_x = cuda.to_device(np.zeros(n))
-        dep_count = incoming_edge_csr_rows(A_csr)
-        succ_offsets, succ_indices = build_csr_successors(A_csr)
-        ms, min_ms, max_ms = triton.testing.do_bench(lambda: sptrsv_numba_csr_sync_free_block_coarsening(d_data, d_indices, d_indptr, d_x, A.shape[0], A.shape[1], A_csr.nnz, dep_count, succ_offsets, succ_indices, block_coarsening_factor=block_coarsening_factor), quantiles=quantiles, warmup=warmpup, rep=rep)
-    
-    # CSR Sync-Free Thread Coarsening
-    if provider.startswith('numba-csr-sf-thread-t'):
-        threads_per_block = int(provider.replace('numba-csr-sf-thread-t', ''))
-        A_csr = A.tocsr()
-        d_data = cuda.to_device(A_csr.data)
-        d_indices = cuda.to_device(A_csr.indices)
-        d_indptr = cuda.to_device(A_csr.indptr)
-        d_x = cuda.to_device(np.zeros(n))
-        dep_count = incoming_edge_csr_rows(A_csr)
-        succ_offsets, succ_indices = build_csr_successors(A_csr)
-        ms, min_ms, max_ms = triton.testing.do_bench(lambda: sptrsv_numba_csr_sync_free_thread_coarsening(d_data, d_indices, d_indptr, d_x, A.shape[0], A.shape[1], A_csr.nnz, dep_count, succ_offsets, succ_indices, thread_coarsening_factor=1, threads_per_block=threads_per_block), quantiles=quantiles, warmup=warmpup, rep=rep)
-    
-    # H-Level CSC (with CUDA Graphs and Warp-Level Optimization)
-    if provider.startswith('numba-csc-h-level-bw'):
-        band_width = int(provider.replace('numba-csc-h-level-bw', ''))
-        d_data = cuda.to_device(A.data)
-        d_indices = cuda.to_device(A.indices)
-        d_indptr = cuda.to_device(A.indptr)
-        d_x = cuda.to_device(np.zeros(n))
-        wavefronts = compute_wavefront(A)
-        wave_start_loc, waves = compact_2d_list(wavefronts)
-        waves_gpu = cuda.to_device(waves)
         # Pre-compute analysis OUTSIDE the benchmark loop
         h_level_data = sptrsv_h_level_analyze(d_indptr, d_indices, waves_gpu, wave_start_loc, band_width=band_width)
         # Benchmark ONLY the solver
         ms, min_ms, max_ms = triton.testing.do_bench(lambda: sptrsv_numba_csc_h_level_solve(d_data, d_indices, d_indptr, d_x, A.shape[0], A.shape[1], A.nnz, h_level_data), quantiles=quantiles, warmup=warmpup, rep=rep)
     
-    # H-Level CSR (with CUDA Graphs and Warp-Level Optimization)
-    if provider.startswith('numba-csr-h-level-bw'):
-        band_width = int(provider.replace('numba-csr-h-level-bw', ''))
+    if provider.startswith('csc-h-sf-bw'):
+        band_width = int(provider.replace('csc-h-sf-bw', ''))
+        d_data = cuda.to_device(A.data)
+        d_indices = cuda.to_device(A.indices)
+        d_indptr = cuda.to_device(A.indptr)
+        d_x = cuda.to_device(np.zeros(n))
+        wavefronts = compute_wavefront(A)
+        wave_start_loc, waves = compact_2d_list(wavefronts)
+        waves_gpu = cuda.to_device(waves)
+        dep_counts = incoming_edge(A)
+        h_level_data = sptrsv_h_level_analyze(d_indptr, d_indices, waves_gpu, wave_start_loc, band_width=band_width)
+        ms, min_ms, max_ms = triton.testing.do_bench(lambda: sptrsv_numba_csc_syncfree_h_level_solve(d_data, d_indices, d_indptr, d_x, A.shape[0], A.shape[1], A.nnz, h_level_data, dep_counts), quantiles=quantiles, warmup=warmpup, rep=rep)
+    
+    if provider.startswith('csr-h-bw'):
+        band_width = int(provider.replace('csr-h-bw', ''))
         A_csr = A.tocsr()
+        A_csr.sort_indices()
         d_data = cuda.to_device(A_csr.data)
         d_indices = cuda.to_device(A_csr.indices)
         d_indptr = cuda.to_device(A_csr.indptr)
@@ -1690,6 +1374,20 @@ def benchmark(matrices, provider):
         # Benchmark ONLY the solver
         ms, min_ms, max_ms = triton.testing.do_bench(lambda: sptrsv_numba_csr_h_level_solve(d_data, d_indices, d_indptr, d_x, A.shape[0], A.shape[1], A_csr.nnz, h_level_data), quantiles=quantiles, warmup=warmpup, rep=rep)
     
+    if provider.startswith('csr-h-sf-bw'):
+        band_width = int(provider.replace('csr-h-sf-bw', ''))
+        A_csr = A.tocsr()
+        A_csr.sort_indices()
+        d_data = cuda.to_device(A_csr.data)
+        d_indices = cuda.to_device(A_csr.indices)
+        d_indptr = cuda.to_device(A_csr.indptr)
+        d_x = cuda.to_device(np.zeros(n))
+        wavefronts = compute_wavefront(A)
+        wave_start_loc, waves = compact_2d_list(wavefronts)
+        waves_gpu = cuda.to_device(waves)
+        h_level_data = sptrsv_h_level_analyze(d_indptr, d_indices, waves_gpu, wave_start_loc, band_width=band_width)
+        ms, min_ms, max_ms = triton.testing.do_bench(lambda: sptrsv_numba_csr_syncfree_h_level_solve(d_data, d_indices, d_indptr, d_x, A.shape[0], A.shape[1], A_csr.nnz, h_level_data), quantiles=quantiles, warmup=warmpup, rep=rep)
+
     # CSC 3-Level Coarsening (wavefront + warp + thread)
     if provider.startswith('numba-csc-coarsened-c') and '-w' in provider and '-tc' in provider:
         parts = provider.replace('numba-csc-coarsened-c', '').split('-w')
@@ -1718,6 +1416,7 @@ def benchmark(matrices, provider):
         threads_per_block = warps * 32
         
         A_csr = A.tocsr()
+        A_csr.sort_indices()
         d_data = cuda.to_device(A_csr.data)
         d_indices = cuda.to_device(A_csr.indices)
         d_indptr = cuda.to_device(A_csr.indptr)
@@ -1735,4 +1434,3 @@ def benchmark(matrices, provider):
 
 # Call the benchmark function (plots disabled, CSV logging enabled)
 benchmark.run(print_data=True, save_path=".", show_plots=False)
-
