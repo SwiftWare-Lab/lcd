@@ -40,5 +40,5 @@ export SPTRSV_QUICK=${SPTRSV_QUICK:-1}
 echo "Benchmarking ${SPTRSV_MATRIX} (task ${SLURM_ARRAY_TASK_ID}/${#MATRICES[@]})"
 
 cd "$ROOT"
-$PYTHON_BIN benchmark/sptrsv/slurm_sptrsv_benchmark.py
+$PYTHON_BIN slurm_sptrsv_benchmark.py
 

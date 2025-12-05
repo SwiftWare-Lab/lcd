@@ -43,6 +43,8 @@ from kernels.sptrsv_hlevel import (
     sptrsv_h_level_analyze,
     sptrsv_numba_csc_h_level_solve, sptrsv_numba_csr_h_level_solve,
     sptrsv_numba_csc_h_level_graph, sptrsv_numba_csr_h_level_graph,
+    sptrsv_numba_csc_syncfree_h_level_graph, sptrsv_numba_csr_syncfree_h_level_graph,
+    sptrsv_numba_csc_syncfree_h_level_solve, sptrsv_numba_csr_syncfree_h_level_solve,
 )
 
 import warnings
@@ -331,13 +333,15 @@ for bw in band_widths:
     method_list.extend([
         f"csc-h-bw{bw}",
         f"csr-h-bw{bw}",
+        f"csc-h-sf-bw{bw}",
+        f"csr-h-sf-bw{bw}",
         ])
 
 provider_whitelist = None
 if PROVIDER_FILTER:
     provider_whitelist = {p.strip() for p in PROVIDER_FILTER.split(",") if p.strip()}
-elif QUICK:
-    provider_whitelist = {"cusparse", "csc-wf-base", "csc-sf-base", "csr-wf-base", "csr-sf-base"}
+# elif QUICK:
+#     provider_whitelist = {"cusparse", "csc-wf-base", "csc-sf-base", "csr-wf-base", "csr-sf-base"}
 
 if provider_whitelist:
     before = len(method_list)
@@ -900,6 +904,23 @@ def correctness_test():
             except Exception as e:
                 print(f"\n{method_name} failed: {e}")
             
+            # Test CSC Sync-Free H-Level
+            method_name = f'csc-h-sf-bw{bw}'
+            try:
+                dep_counts_csc = incoming_edge(A)
+                y_h_level_sf_csc = sptrsv_numba_csc_syncfree_h_level_graph(
+                    d_data, d_indices, d_indptr, d_b, A.shape[0], A.shape[1], A.nnz,
+                    waves, wave_start_loc, dep_counts_csc, band_width=bw)
+                y_h_level_sf_csc_cpu = y_h_level_sf_csc.copy_to_host()
+                
+                if np.allclose(x_cpu, y_h_level_sf_csc_cpu, atol=1e-5):
+                    print(f"\n{method_name} Solutions match within tolerance!")
+                    method_correctness[mat_name][method_name] = 1
+                else:
+                    print(f"\nWarning: {method_name} Solutions do not match!")
+            except Exception as e:
+                print(f"\n{method_name} failed: {e}")
+
             # Test CSR H-Level (now using CUDA graphs)
             method_name = f'csr-h-bw{bw}'
             try:
@@ -909,6 +930,22 @@ def correctness_test():
                 y_h_level_csr_cpu = y_h_level_csr.copy_to_host()
                 
                 if np.allclose(x_cpu, y_h_level_csr_cpu, atol=1e-5):
+                    print(f"\n{method_name} Solutions match within tolerance!")
+                    method_correctness[mat_name][method_name] = 1
+                else:
+                    print(f"\nWarning: {method_name} Solutions do not match!")
+            except Exception as e:
+                print(f"\n{method_name} failed: {e}")
+            
+            # Test CSR Sync-Free H-Level
+            method_name = f'csr-h-sf-bw{bw}'
+            try:
+                y_h_level_sf = sptrsv_numba_csr_syncfree_h_level_graph(
+                    d_data_csr, d_indices_csr, d_indptr_csr, d_b_csr, n, n, A_csr_numba.nnz,
+                    waves_csr_numba, wave_start_loc_csr_numba, band_width=bw)
+                y_h_level_sf_cpu = y_h_level_sf.copy_to_host()
+                
+                if np.allclose(x_cpu, y_h_level_sf_cpu, atol=1e-5):
                     print(f"\n{method_name} Solutions match within tolerance!")
                     method_correctness[mat_name][method_name] = 1
                 else:
@@ -1327,6 +1364,19 @@ def benchmark(matrices, provider):
         h_level_data = sptrsv_h_level_analyze(d_indptr, d_indices, waves_gpu, wave_start_loc, band_width=band_width)
         ms, min_ms, max_ms = triton.testing.do_bench(lambda: sptrsv_numba_csc_h_level_solve(d_data, d_indices, d_indptr, d_x, A.shape[0], A.shape[1], A.nnz, h_level_data), quantiles=quantiles, warmup=warmpup, rep=rep)
     
+    if provider.startswith('csc-h-sf-bw'):
+        band_width = int(provider.replace('csc-h-sf-bw', ''))
+        d_data = cuda.to_device(A.data)
+        d_indices = cuda.to_device(A.indices)
+        d_indptr = cuda.to_device(A.indptr)
+        d_x = cuda.to_device(np.zeros(n))
+        wavefronts = compute_wavefront(A)
+        wave_start_loc, waves = compact_2d_list(wavefronts)
+        waves_gpu = cuda.to_device(waves)
+        dep_counts = incoming_edge(A)
+        h_level_data = sptrsv_h_level_analyze(d_indptr, d_indices, waves_gpu, wave_start_loc, band_width=band_width)
+        ms, min_ms, max_ms = triton.testing.do_bench(lambda: sptrsv_numba_csc_syncfree_h_level_solve(d_data, d_indices, d_indptr, d_x, A.shape[0], A.shape[1], A.nnz, h_level_data, dep_counts), quantiles=quantiles, warmup=warmpup, rep=rep)
+    
     if provider.startswith('csr-h-bw'):
         band_width = int(provider.replace('csr-h-bw', ''))
         A_csr = A.tocsr()
@@ -1339,6 +1389,19 @@ def benchmark(matrices, provider):
         waves_gpu = cuda.to_device(waves)
         h_level_data = sptrsv_h_level_analyze(d_indptr, d_indices, waves_gpu, wave_start_loc, band_width=band_width)
         ms, min_ms, max_ms = triton.testing.do_bench(lambda: sptrsv_numba_csr_h_level_solve(d_data, d_indices, d_indptr, d_x, A.shape[0], A.shape[1], A_csr.nnz, h_level_data), quantiles=quantiles, warmup=warmpup, rep=rep)
+    
+    if provider.startswith('csr-h-sf-bw'):
+        band_width = int(provider.replace('csr-h-sf-bw', ''))
+        A_csr = A.tocsr()
+        d_data = cuda.to_device(A_csr.data)
+        d_indices = cuda.to_device(A_csr.indices)
+        d_indptr = cuda.to_device(A_csr.indptr)
+        d_x = cuda.to_device(np.zeros(n))
+        wavefronts = compute_wavefront(A)
+        wave_start_loc, waves = compact_2d_list(wavefronts)
+        waves_gpu = cuda.to_device(waves)
+        h_level_data = sptrsv_h_level_analyze(d_indptr, d_indices, waves_gpu, wave_start_loc, band_width=band_width)
+        ms, min_ms, max_ms = triton.testing.do_bench(lambda: sptrsv_numba_csr_syncfree_h_level_solve(d_data, d_indices, d_indptr, d_x, A.shape[0], A.shape[1], A_csr.nnz, h_level_data), quantiles=quantiles, warmup=warmpup, rep=rep)
     
     # Keep old providers for backwards compatibility (if needed for testing)
     if provider == 'triton':
