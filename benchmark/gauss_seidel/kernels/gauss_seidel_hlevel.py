@@ -272,3 +272,232 @@ def gs_numba_hlevel_solve(data, indices, indptr, b, x, analysis_data,
         
     cp_stream.synchronize()
 
+# -------------------------------------------------------------------------
+# 4. HELPERS FOR SYNC-FREE
+# -------------------------------------------------------------------------
+
+@cuda.jit
+def reset_counter_kernel(counter):
+    if cuda.threadIdx.x == 0 and cuda.blockIdx.x == 0:
+        counter[0] = 0
+
+@cuda.jit
+def set_zero_kernel(arr):
+    idx = cuda.grid(1)
+    if idx < arr.size:
+        arr[idx] = 0
+
+def get_safe_persistent_grid_size(threads_per_block):
+    """
+    Calculates a CONSERVATIVE grid size.
+    GS kernels are register-heavy. We assume low occupancy (e.g., 2 blocks/SM).
+    """
+    device = cuda.get_current_device()
+    num_sms = device.MULTIPROCESSOR_COUNT
+    blocks_per_sm = 2 
+    return num_sms * blocks_per_sm
+
+# -------------------------------------------------------------------------
+# 5. KERNEL: SYNC-FREE GAUSS-SEIDEL (Normal) - FIXED
+# -------------------------------------------------------------------------
+
+@cuda.jit
+def gs_hlevel_syncfree_kernel(data, indices, indptr, b, x,
+                              h_task_nodes, task_ptr,
+                              done, task_counter,
+                              num_tasks_limit, task_offset,
+                              sub_warp_size, iter_offset):
+    tid = cuda.threadIdx.x
+    bid = cuda.blockIdx.x
+    block_dim = cuda.blockDim.x
+    
+    # 1. Block-Relative IDs (For Task Assignment)
+    #    This determines which "logical group" this thread belongs to within the block
+    groups_per_block = block_dim // sub_warp_size
+    local_group_id = tid // sub_warp_size
+    lane = tid % sub_warp_size  # Lane within the sub-warp (0..sub_warp_size-1)
+    
+    # 2. Warp-Relative IDs (For Hardware Primitives: syncwarp, shfl)
+    #    Hardware primitives always operate on the physical warp (0..31)
+    warp_lane_id = tid % 32
+    warp_group_id = warp_lane_id // sub_warp_size
+    
+    # Construct Mask relative to the PHYSICAL WARP
+    # e.g., if sub_warp=8, group 0 uses 0x000000FF, group 1 uses 0x0000FF00
+    mask_bits = (1 << sub_warp_size) - 1
+    sub_warp_mask = (mask_bits << (warp_group_id * sub_warp_size)) & 0xFFFFFFFF
+    
+    # Source lane for broadcast (relative to physical warp)
+    root_lane_in_warp = warp_group_id * sub_warp_size
+    
+    while True:
+        # Dynamic Task Fetching
+        local_task_id = -1
+        if lane == 0:
+            local_task_id = cuda.atomic.add(task_counter, 0, 1)
+        
+        # Broadcast task ID to sub-warp using CORRECT warp-relative mask and lane
+        local_task_id = cuda.shfl_sync(sub_warp_mask, local_task_id, root_lane_in_warp)
+        
+        if local_task_id >= num_tasks_limit:
+            return
+
+        # Calculate Global Task from Block/Group logic
+        global_group_id = (bid * groups_per_block) + local_group_id
+        global_task_id = task_offset + local_task_id # Note: task_offset is usually 0 for persistent
+        
+        # Safety: The atomic counter maps 1:1 to tasks. 
+        # But we must offset by 'task_offset' if doing banded.
+        # Actually, if we use a shared counter, we just need the value from atomic.
+        # FIX: The atomic returns 0..N. That IS the task index relative to this launch.
+        # So we just use that directly + offset.
+        
+        start_node = task_ptr[task_offset + local_task_id]
+        end_node = task_ptr[task_offset + local_task_id + 1]
+        
+        for i in range(start_node, end_node):
+            row = h_task_nodes[i]
+            row_start = indptr[row]
+            row_end = indptr[row + 1]
+            
+            sigma = 0.0
+            diag = 1.0
+            
+            # Parallel Reduction
+            for j in range(row_start + lane, row_end, sub_warp_size):
+                col = indices[j]
+                val = data[j]
+                
+                if col == row:
+                    diag = val
+                else:
+                    # Per-lane dependency check
+                    if col < row:
+                        while cuda.atomic.add(done, col, 0) < iter_offset:
+                            pass
+                        cuda.threadfence()
+                    
+                    sigma += val * x[col]
+
+            # Sync sub-warp (using correct mask)
+            cuda.syncwarp(sub_warp_mask)
+
+            # Sub-Warp Reduction
+            if sub_warp_size >= 32: sigma += cuda.shfl_down_sync(sub_warp_mask, sigma, 16)
+            if sub_warp_size >= 16: sigma += cuda.shfl_down_sync(sub_warp_mask, sigma, 8)
+            if sub_warp_size >= 8:  sigma += cuda.shfl_down_sync(sub_warp_mask, sigma, 4)
+            if sub_warp_size >= 4:  sigma += cuda.shfl_down_sync(sub_warp_mask, sigma, 2)
+            if sub_warp_size >= 2:  sigma += cuda.shfl_down_sync(sub_warp_mask, sigma, 1)
+            
+            # Diagonal Reduction (Simple Broadcast fallback)
+            # If diag is distributed, we need to find the non-1.0 value
+            temp_diag = diag
+            # XOR reduction or similar is safest to find the 'one true diag'
+            # But here we just Propagate the non-1.0 value down
+            if sub_warp_size >= 32:
+                o = cuda.shfl_down_sync(sub_warp_mask, temp_diag, 16)
+                if o != 1.0: temp_diag = o
+            if sub_warp_size >= 16:
+                o = cuda.shfl_down_sync(sub_warp_mask, temp_diag, 8)
+                if o != 1.0: temp_diag = o
+            if sub_warp_size >= 8:
+                o = cuda.shfl_down_sync(sub_warp_mask, temp_diag, 4)
+                if o != 1.0: temp_diag = o
+            if sub_warp_size >= 4:
+                o = cuda.shfl_down_sync(sub_warp_mask, temp_diag, 2)
+                if o != 1.0: temp_diag = o
+            if sub_warp_size >= 2:
+                o = cuda.shfl_down_sync(sub_warp_mask, temp_diag, 1)
+                if o != 1.0: temp_diag = o
+            diag = temp_diag
+
+            # Fallback linear scan if missing
+            if lane == 0 and diag == 1.0:
+                 for j in range(row_start, row_end):
+                    if indices[j] == row:
+                        diag = data[j]
+                        break
+            
+            if lane == 0:
+                x[row] = (b[row] - sigma) / diag
+                cuda.threadfence()
+                cuda.atomic.exch(done, row, iter_offset)
+            
+            cuda.syncwarp(sub_warp_mask)
+
+# -------------------------------------------------------------------------
+# 6. SOLVER: BANDED SYNC-FREE GS
+# -------------------------------------------------------------------------
+
+def gs_numba_hlevel_syncfree_banded_solve(data, indices, indptr, b, x, analysis_data, 
+                                          max_iter=10, sub_warp_size=8):
+    d_h_nodes, d_task_ptr, h_level_ptr = analysis_data
+    n = len(b)
+    
+    d_done = cuda.to_device(np.zeros(n, dtype=np.int32))
+    d_task_counter = cuda.to_device(np.zeros(1, dtype=np.int32))
+    
+    threads_per_block = 128
+    chains_per_block = threads_per_block // sub_warp_size
+    hardware_cap = get_safe_persistent_grid_size(threads_per_block)
+    
+    cp_stream = cp.cuda.Stream(non_blocking=True)
+    nb_stream = cuda.external_stream(cp_stream.ptr)
+    
+    for k in range(1, max_iter + 1):
+        num_bands = len(h_level_ptr) - 1
+        for i in range(num_bands):
+            start_task = h_level_ptr[i]
+            end_task = h_level_ptr[i+1]
+            num_tasks = end_task - start_task
+            
+            if num_tasks > 0:
+                reset_counter_kernel[1, 1, nb_stream](d_task_counter)
+                
+                needed = (num_tasks + chains_per_block - 1) // chains_per_block
+                grid_size = min(needed, hardware_cap)
+                grid_size = max(grid_size, 1)
+                
+                gs_hlevel_syncfree_kernel[grid_size, threads_per_block, nb_stream](
+                    data, indices, indptr, b, x,
+                    d_h_nodes, d_task_ptr,
+                    d_done, d_task_counter,
+                    num_tasks, start_task,
+                    sub_warp_size, k
+                )
+    cp_stream.synchronize()
+
+# -------------------------------------------------------------------------
+# 7. SOLVER: PERSISTENT SYNC-FREE GS
+# -------------------------------------------------------------------------
+
+def gs_numba_hlevel_syncfree_persistent_solve(data, indices, indptr, b, x, analysis_data, 
+                                              max_iter=10, sub_warp_size=8):
+    d_h_nodes, d_task_ptr, h_level_ptr = analysis_data
+    n = len(b)
+    d_done = cuda.to_device(np.zeros(n, dtype=np.int32))
+    d_task_counter = cuda.to_device(np.zeros(1, dtype=np.int32))
+    
+    threads_per_block = 128
+    chains_per_block = threads_per_block // sub_warp_size
+    num_total_tasks = len(d_task_ptr) - 1
+    
+    needed_blocks = (num_total_tasks + chains_per_block - 1) // chains_per_block
+    hardware_cap = get_safe_persistent_grid_size(threads_per_block)
+    grid_size = min(needed_blocks, hardware_cap)
+    grid_size = max(grid_size, 1)
+    
+    cp_stream = cp.cuda.Stream(non_blocking=True)
+    nb_stream = cuda.external_stream(cp_stream.ptr)
+    
+    for k in range(1, max_iter + 1):
+        reset_counter_kernel[1, 1, nb_stream](d_task_counter)
+        
+        gs_hlevel_syncfree_kernel[grid_size, threads_per_block, nb_stream](
+            data, indices, indptr, b, x,
+            d_h_nodes, d_task_ptr,
+            d_done, d_task_counter,
+            num_total_tasks, 0,
+            sub_warp_size, k
+        )
+    cp_stream.synchronize()

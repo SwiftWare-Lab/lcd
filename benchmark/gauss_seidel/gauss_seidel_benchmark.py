@@ -21,7 +21,9 @@ from kernels.gauss_seidel_baseline import (
 )
 from kernels.gauss_seidel_hlevel import (
     gs_numba_hlevel_solve,
-    gs_h_level_analyze
+    gs_h_level_analyze,
+    gs_numba_hlevel_syncfree_banded_solve,
+    gs_numba_hlevel_syncfree_persistent_solve,
 )
 from kernels.gauss_seidel_unrolled import (
     gs_numba_wavefront_mapping,
@@ -47,7 +49,9 @@ from kernels.gauss_seidel_unrolled_diag import (
 )
 from kernels.gauss_seidel_hlevel_diag import (
     gs_numba_hlevel_solve_diag,
-    gs_h_level_analyze_diag
+    gs_h_level_analyze_diag,
+    gs_numba_hlevel_syncfree_banded_solve_diag,
+    gs_numba_hlevel_syncfree_persistent_solve_diag,
 )
 from kernels.gauss_seidel_utils import extract_diagonal_info_gpu
 from bench_utils import get_matrix_signature
@@ -76,7 +80,7 @@ mtx_list = [
 # ============================================================================
 unroll_factors = [4, 8, 16, 32, 64]
 thread_counts = [32, 64, 128, 256]
-band_widths = [2, 4, 8, 16]
+band_widths = [1, 2, 4, 8, 16]
 num_iterations = 10
 
 # ============================================================================
@@ -104,29 +108,29 @@ method_list.extend([
     "gs-sf-base-diag",
 ])
 
-# ----------------------------------------------------------------------------
-# TEST CANDIDATES - WAVEFRONT - UNROLLED (Regular)
-# ----------------------------------------------------------------------------
-# Mapping (u1)
-for threads in thread_counts:
-    method_list.append(f"gs-wf-u1-t{threads}")
+# # ----------------------------------------------------------------------------
+# # TEST CANDIDATES - WAVEFRONT - UNROLLED (Regular)
+# # ----------------------------------------------------------------------------
+# # Mapping (u1)
+# for threads in thread_counts:
+#     method_list.append(f"gs-wf-u1-t{threads}")
 
-# Explicit unrolling (u4-u64)
-for factor in unroll_factors:
-    for threads in thread_counts:
-        method_list.append(f"gs-wf-u{factor}-t{threads}")
+# # Explicit unrolling (u4-u64)
+# for factor in unroll_factors:
+#     for threads in thread_counts:
+#         method_list.append(f"gs-wf-u{factor}-t{threads}")
 
-# ----------------------------------------------------------------------------
-# TEST CANDIDATES - WAVEFRONT - UNROLLED (Diagonal-Optimized)
-# ----------------------------------------------------------------------------
-# Mapping (u1)
-for threads in thread_counts:
-    method_list.append(f"gs-wf-u1-t{threads}-diag")
+# # ----------------------------------------------------------------------------
+# # TEST CANDIDATES - WAVEFRONT - UNROLLED (Diagonal-Optimized)
+# # ----------------------------------------------------------------------------
+# # Mapping (u1)
+# for threads in thread_counts:
+#     method_list.append(f"gs-wf-u1-t{threads}-diag")
 
-# Explicit unrolling (u4-u64)
-for factor in unroll_factors:
-    for threads in thread_counts:
-        method_list.append(f"gs-wf-u{factor}-t{threads}-diag")
+# # Explicit unrolling (u4-u64)
+# for factor in unroll_factors:
+#     for threads in thread_counts:
+#         method_list.append(f"gs-wf-u{factor}-t{threads}-diag")
 
 # ----------------------------------------------------------------------------
 # TEST CANDIDATES - SYNC-FREE - UNROLLED (Regular)
@@ -151,6 +155,10 @@ for bw in band_widths:
     method_list.extend([
         f"gs-h-bw{bw}",
         f"gs-h-bw{bw}-diag",
+        f"gs-h-sf-bw{bw}",
+        f"gs-h-sf-bw{bw}-diag",
+        f"gs-h-sf-persist-bw{bw}",
+        f"gs-h-sf-persist-bw{bw}-diag",
     ])
 
 def compute_wavefront_gs(A):
@@ -285,6 +293,10 @@ def correctness_test():
         'gs-sf-u4-t128-diag',     # Sync-free diag
         'gs-h-bw8',               # H-level
         'gs-h-bw8-diag',          # H-level diag
+        'gs-h-sf-bw8',            # Sync-free H-level
+        'gs-h-sf-bw8-diag',       # Sync-free H-level diag
+        'gs-h-sf-persist-bw8',    # Persistent Sync-free H-level
+        'gs-h-sf-persist-bw8-diag',# Persistent Sync-free H-level diag
     ]
     
     if PYAMGX_AVAILABLE:
@@ -439,19 +451,49 @@ def correctness_test():
                     wave_start, waves = compact_wavefronts(wavefronts)
                     d_waves = cuda.to_device(waves)
                     
-                    bw = int(method.replace('gs-h-bw', '').replace('-diag', ''))
-                    
-                    if 'diag' in method:
-                        d_diag_pos, d_diag_vals = extract_diagonal_info_gpu(A)
-                        analysis_data = gs_h_level_analyze_diag(d_indptr, d_indices, d_waves, 
+                    if 'gs-h-sf-persist' in method:
+                        bw = int(method.replace('gs-h-sf-persist-bw', '').replace('-diag', ''))
+                        if 'diag' in method:
+                            d_diag_pos, d_diag_vals = extract_diagonal_info_gpu(A)
+                            analysis_data = gs_h_level_analyze_diag(d_indptr, d_indices, d_waves, 
+                                                                    wave_start, band_width=bw)
+                            gs_numba_hlevel_syncfree_persistent_solve_diag(
+                                d_data, d_indices, d_indptr, d_diag_pos, d_diag_vals,
+                                d_b, d_x, analysis_data, max_iter=num_iterations, sub_warp_size=8)
+                        else:
+                            analysis_data = gs_h_level_analyze(d_indptr, d_indices, d_waves, 
                                                                wave_start, band_width=bw)
-                        gs_numba_hlevel_solve_diag(d_data, d_indices, d_indptr, d_diag_pos, d_diag_vals,
-                                                  d_b, d_x, analysis_data, max_iter=num_iterations, sub_warp_size=8)
+                            gs_numba_hlevel_syncfree_persistent_solve(
+                                d_data, d_indices, d_indptr, d_b, d_x,
+                                analysis_data, max_iter=num_iterations, sub_warp_size=8)
+                    elif 'gs-h-sf' in method:
+                        bw = int(method.replace('gs-h-sf-bw', '').replace('-diag', ''))
+                        if 'diag' in method:
+                            d_diag_pos, d_diag_vals = extract_diagonal_info_gpu(A)
+                            analysis_data = gs_h_level_analyze_diag(d_indptr, d_indices, d_waves, 
+                                                                    wave_start, band_width=bw)
+                            gs_numba_hlevel_syncfree_banded_solve_diag(
+                                d_data, d_indices, d_indptr, d_diag_pos, d_diag_vals,
+                                d_b, d_x, analysis_data, max_iter=num_iterations, sub_warp_size=8)
+                        else:
+                            analysis_data = gs_h_level_analyze(d_indptr, d_indices, d_waves, 
+                                                               wave_start, band_width=bw)
+                            gs_numba_hlevel_syncfree_banded_solve(
+                                d_data, d_indices, d_indptr, d_b, d_x, 
+                                analysis_data, max_iter=num_iterations, sub_warp_size=8)
                     else:
-                        analysis_data = gs_h_level_analyze(d_indptr, d_indices, d_waves, 
-                                                          wave_start, band_width=bw)
-                        gs_numba_hlevel_solve(d_data, d_indices, d_indptr, d_b, d_x, 
-                                            analysis_data, max_iter=num_iterations, sub_warp_size=8)
+                        bw = int(method.replace('gs-h-bw', '').replace('-diag', ''))
+                        if 'diag' in method:
+                            d_diag_pos, d_diag_vals = extract_diagonal_info_gpu(A)
+                            analysis_data = gs_h_level_analyze_diag(d_indptr, d_indices, d_waves, 
+                                                                    wave_start, band_width=bw)
+                            gs_numba_hlevel_solve_diag(d_data, d_indices, d_indptr, d_diag_pos, d_diag_vals,
+                                                       d_b, d_x, analysis_data, max_iter=num_iterations, sub_warp_size=8)
+                        else:
+                            analysis_data = gs_h_level_analyze(d_indptr, d_indices, d_waves, 
+                                                              wave_start, band_width=bw)
+                            gs_numba_hlevel_solve(d_data, d_indices, d_indptr, d_b, d_x, 
+                                                analysis_data, max_iter=num_iterations, sub_warp_size=8)
                     
                     x_test = d_x.copy_to_host()
                 
@@ -840,6 +882,54 @@ def benchmark(matrices, provider):
                                  analysis_data, max_iter=num_iterations, sub_warp_size=8)
         ms, min_ms, max_ms = triton.testing.do_bench(run, quantiles=quantiles, 
                                                       warmup=warmup, rep=rep)
+
+    elif provider.startswith('gs-h-sf-bw') and not provider.endswith('-diag'):
+        band_width = int(provider.replace('gs-h-sf-bw', '').replace('-diag', ''))
+        
+        d_data = cuda.to_device(A.data)
+        d_indices = cuda.to_device(A.indices.astype(np.int32))
+        d_indptr = cuda.to_device(A.indptr.astype(np.int32))
+        d_b = cuda.to_device(b)
+        d_x = cuda.device_array(n, dtype=np.float64)
+        d_x_init = cuda.to_device(x_init.copy())
+        
+        wavefronts = compute_wavefront_gs(A)
+        wave_start, waves = compact_wavefronts(wavefronts)
+        d_waves = cuda.to_device(waves)
+        
+        analysis_data = gs_h_level_analyze(d_indptr, d_indices, d_waves, 
+                                           wave_start, band_width=band_width)
+        
+        def run():
+            d_x.copy_to_device(d_x_init)
+            gs_numba_hlevel_syncfree_banded_solve(d_data, d_indices, d_indptr, d_b, d_x, 
+                                                 analysis_data, max_iter=num_iterations, sub_warp_size=8)
+        ms, min_ms, max_ms = triton.testing.do_bench(run, quantiles=quantiles, 
+                                                      warmup=warmup, rep=rep)
+
+    elif provider.startswith('gs-h-sf-persist-bw') and not provider.endswith('-diag'):
+        band_width = int(provider.replace('gs-h-sf-persist-bw', '').replace('-diag', ''))
+        
+        d_data = cuda.to_device(A.data)
+        d_indices = cuda.to_device(A.indices.astype(np.int32))
+        d_indptr = cuda.to_device(A.indptr.astype(np.int32))
+        d_b = cuda.to_device(b)
+        d_x = cuda.device_array(n, dtype=np.float64)
+        d_x_init = cuda.to_device(x_init.copy())
+        
+        wavefronts = compute_wavefront_gs(A)
+        wave_start, waves = compact_wavefronts(wavefronts)
+        d_waves = cuda.to_device(waves)
+        
+        analysis_data = gs_h_level_analyze(d_indptr, d_indices, d_waves, 
+                                           wave_start, band_width=band_width)
+        
+        def run():
+            d_x.copy_to_device(d_x_init)
+            gs_numba_hlevel_syncfree_persistent_solve(d_data, d_indices, d_indptr, d_b, d_x, 
+                                                     analysis_data, max_iter=num_iterations, sub_warp_size=8)
+        ms, min_ms, max_ms = triton.testing.do_bench(run, quantiles=quantiles, 
+                                                      warmup=warmup, rep=rep)
     
     # ========================================================================
     # H-LEVEL - DIAGONAL-OPTIMIZED
@@ -866,6 +956,56 @@ def benchmark(matrices, provider):
             d_x.copy_to_device(d_x_init)
             gs_numba_hlevel_solve_diag(d_data, d_indices, d_indptr, d_diag_pos, d_diag_vals,
                                       d_b, d_x, analysis_data, max_iter=num_iterations, sub_warp_size=8)
+        ms, min_ms, max_ms = triton.testing.do_bench(run, quantiles=quantiles, 
+                                                      warmup=warmup, rep=rep)
+
+    elif provider.startswith('gs-h-sf-bw') and provider.endswith('-diag'):
+        band_width = int(provider.replace('gs-h-sf-bw', '').replace('-diag', ''))
+        
+        d_data = cuda.to_device(A.data)
+        d_indices = cuda.to_device(A.indices.astype(np.int32))
+        d_indptr = cuda.to_device(A.indptr.astype(np.int32))
+        d_diag_pos, d_diag_vals = extract_diagonal_info_gpu(A)
+        d_b = cuda.to_device(b)
+        d_x = cuda.device_array(n, dtype=np.float64)
+        d_x_init = cuda.to_device(x_init.copy())
+        
+        wavefronts = compute_wavefront_gs(A)
+        wave_start, waves = compact_wavefronts(wavefronts)
+        d_waves = cuda.to_device(waves)
+        
+        analysis_data = gs_h_level_analyze_diag(d_indptr, d_indices, d_waves, 
+                                                wave_start, band_width=band_width)
+        
+        def run():
+            d_x.copy_to_device(d_x_init)
+            gs_numba_hlevel_syncfree_banded_solve_diag(d_data, d_indices, d_indptr, d_diag_pos, d_diag_vals,
+                                                      d_b, d_x, analysis_data, max_iter=num_iterations, sub_warp_size=8)
+        ms, min_ms, max_ms = triton.testing.do_bench(run, quantiles=quantiles, 
+                                                      warmup=warmup, rep=rep)
+
+    elif provider.startswith('gs-h-sf-persist-bw') and provider.endswith('-diag'):
+        band_width = int(provider.replace('gs-h-sf-persist-bw', '').replace('-diag', ''))
+        
+        d_data = cuda.to_device(A.data)
+        d_indices = cuda.to_device(A.indices.astype(np.int32))
+        d_indptr = cuda.to_device(A.indptr.astype(np.int32))
+        d_diag_pos, d_diag_vals = extract_diagonal_info_gpu(A)
+        d_b = cuda.to_device(b)
+        d_x = cuda.device_array(n, dtype=np.float64)
+        d_x_init = cuda.to_device(x_init.copy())
+        
+        wavefronts = compute_wavefront_gs(A)
+        wave_start, waves = compact_wavefronts(wavefronts)
+        d_waves = cuda.to_device(waves)
+        
+        analysis_data = gs_h_level_analyze_diag(d_indptr, d_indices, d_waves, 
+                                                wave_start, band_width=band_width)
+        
+        def run():
+            d_x.copy_to_device(d_x_init)
+            gs_numba_hlevel_syncfree_persistent_solve_diag(d_data, d_indices, d_indptr, d_diag_pos, d_diag_vals,
+                                                           d_b, d_x, analysis_data, max_iter=num_iterations, sub_warp_size=8)
         ms, min_ms, max_ms = triton.testing.do_bench(run, quantiles=quantiles, 
                                                       warmup=warmup, rep=rep)
     
