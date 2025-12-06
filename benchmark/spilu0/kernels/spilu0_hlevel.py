@@ -308,7 +308,7 @@ def get_hardware_grid_cap(threads_per_block):
     return num_sms * blocks_per_sm
 
 # -------------------------------------------------------------------------
-# 7. KERNEL: SYNC-FREE ILU0 (Common for Banded and Persistent)
+# 7. KERNEL: SYNC-FREE ILU0 H-LEVEL
 # -------------------------------------------------------------------------
 
 @cuda.jit
@@ -397,7 +397,7 @@ def ilu0_csr_syncfree_warp_kernel(data, indices, indptr, diag_pos,
             cuda.syncwarp(0xFFFFFFFF)
 
 # -------------------------------------------------------------------------
-# 8. VARIANT C: BANDED SYNC-FREE SOLVER (Safe Tiled Execution)
+# 8. VARIANT C: BANDED SYNC-FREE
 # -------------------------------------------------------------------------
 
 def ilu0_numba_csr_syncfree_h_level_solve(data, indices, indptr, n, analysis_data, diag_pos):
@@ -453,7 +453,7 @@ def ilu0_numba_csr_syncfree_h_level_graph(data, indices, indptr, n,
     ilu0_numba_csr_syncfree_h_level_solve(data, indices, indptr, n, _ANALYSIS_CACHE[key], diag_pos)
 
 # -------------------------------------------------------------------------
-# 9. VARIANT E: PERSISTENT SYNC-FREE SOLVER (Fastest / Hardware Clamped)
+# 9. VARIANT E: PERSISTENT SYNC-FREE
 # -------------------------------------------------------------------------
 
 def ilu0_numba_csr_syncfree_persistent_solve(data, indices, indptr, n, analysis_data, diag_pos):
