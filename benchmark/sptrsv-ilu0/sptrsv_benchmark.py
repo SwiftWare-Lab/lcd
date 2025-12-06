@@ -48,6 +48,10 @@ from kernels.sptrsv_hlevel import (
     sptrsv_h_level_analyze,
     sptrsv_numba_csr_h_level_solve,
     sptrsv_numba_csr_h_level_graph,
+    sptrsv_numba_csr_syncfree_h_level_graph,
+    sptrsv_numba_csr_syncfree_h_level_solve,
+    sptrsv_numba_csr_syncfree_persistent_graph,
+    sptrsv_numba_csr_syncfree_persistent_solve,
 )
 
 import warnings
@@ -305,6 +309,8 @@ for threads in thread_counts:
 for bw in band_widths:
     method_list.extend([
         f"csr-h-bw{bw}",
+        f"csr-h-sf-bw{bw}",
+        f"csr-h-sf-persist-bw{bw}",
     ])
 
 def correctness_test():
@@ -568,6 +574,38 @@ def correctness_test():
                     print(f"\nWarning: {method_name} Solutions do not match!")
             except Exception as e:
                 print(f"\n{method_name} failed: {e}")
+
+            # Test CSR Sync-Free H-Level
+            method_name = f'csr-h-sf-bw{bw}'
+            try:
+                y_h_level_sf = sptrsv_numba_csr_syncfree_h_level_graph(
+                    d_data, d_indices, d_indptr, d_b, n, n, A.nnz,
+                    waves_csr, wave_start_loc_csr, band_width=bw)
+                y_h_level_sf_cpu = y_h_level_sf.copy_to_host()
+                
+                if np.allclose(x_cpu, y_h_level_sf_cpu, atol=1e-5):
+                    print(f"\n{method_name} Solutions match within tolerance!")
+                    method_correctness[mat_name][method_name] = 1
+                else:
+                    print(f"\nWarning: {method_name} Solutions do not match!")
+            except Exception as e:
+                print(f"\n{method_name} failed: {e}")
+
+            # Test CSR Sync-Free H-Level (Persistent)
+            method_name = f'csr-h-sf-persist-bw{bw}'
+            try:
+                y_h_level_sf_persist = sptrsv_numba_csr_syncfree_persistent_graph(
+                    d_data, d_indices, d_indptr, d_b, n, n, A.nnz,
+                    waves_csr, wave_start_loc_csr, band_width=bw)
+                y_h_level_sf_persist_cpu = y_h_level_sf_persist.copy_to_host()
+                
+                if np.allclose(x_cpu, y_h_level_sf_persist_cpu, atol=1e-5):
+                    print(f"\n{method_name} Solutions match within tolerance!")
+                    method_correctness[mat_name][method_name] = 1
+                else:
+                    print(f"\nWarning: {method_name} Solutions do not match!")
+            except Exception as e:
+                print(f"\n{method_name} failed: {e}")
         
         # Test 3-level coarsening variants (CSR only)
         print("\nTesting 3-level coarsening (wavefront + warp + thread)...")
@@ -822,6 +860,34 @@ def benchmark(matrices, provider):
         waves_gpu = cuda.to_device(waves)
         h_level_data = sptrsv_h_level_analyze(d_indptr, d_indices, waves_gpu, wave_start_loc, band_width=band_width)
         ms, min_ms, max_ms = triton.testing.do_bench(lambda: sptrsv_numba_csr_h_level_solve(d_data, d_indices, d_indptr, d_x, A.shape[0], A.shape[1], A.nnz, h_level_data), quantiles=quantiles, warmup=warmpup, rep=rep)
+    
+    if provider.startswith('csr-h-sf-bw'):
+        band_width = int(provider.replace('csr-h-sf-bw', ''))
+        d_data = cuda.to_device(A.data)
+        d_indices = cuda.to_device(A.indices)
+        d_indptr = cuda.to_device(A.indptr)
+        d_x = cuda.to_device(np.zeros(n))
+        # Note: compute_wavefront expects CSC format
+        A_csc_for_waves = A.tocsc()
+        wavefronts = compute_wavefront(A_csc_for_waves)
+        wave_start_loc, waves = compact_2d_list(wavefronts)
+        waves_gpu = cuda.to_device(waves)
+        h_level_data = sptrsv_h_level_analyze(d_indptr, d_indices, waves_gpu, wave_start_loc, band_width=band_width)
+        ms, min_ms, max_ms = triton.testing.do_bench(lambda: sptrsv_numba_csr_syncfree_h_level_solve(d_data, d_indices, d_indptr, d_x, A.shape[0], A.shape[1], A.nnz, h_level_data), quantiles=quantiles, warmup=warmpup, rep=rep)
+    
+    if provider.startswith('csr-h-sf-persist-bw'):
+        band_width = int(provider.replace('csr-h-sf-persist-bw', ''))
+        d_data = cuda.to_device(A.data)
+        d_indices = cuda.to_device(A.indices)
+        d_indptr = cuda.to_device(A.indptr)
+        d_x = cuda.to_device(np.zeros(n))
+        # Note: compute_wavefront expects CSC format
+        A_csc_for_waves = A.tocsc()
+        wavefronts = compute_wavefront(A_csc_for_waves)
+        wave_start_loc, waves = compact_2d_list(wavefronts)
+        waves_gpu = cuda.to_device(waves)
+        h_level_data = sptrsv_h_level_analyze(d_indptr, d_indices, waves_gpu, wave_start_loc, band_width=band_width)
+        ms, min_ms, max_ms = triton.testing.do_bench(lambda: sptrsv_numba_csr_syncfree_persistent_solve(d_data, d_indices, d_indptr, d_x, A.shape[0], A.shape[1], A.nnz, h_level_data), quantiles=quantiles, warmup=warmpup, rep=rep)
     
     # Keep old providers for backwards compatibility (if needed for testing)
     if provider == 'triton':
