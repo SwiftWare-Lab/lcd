@@ -165,7 +165,7 @@ public:
         // C. Process Nodes
         for (int nodeId : sortedOrder) {
             DagNode& node = nodes[nodeId];
-            std::cout << "[DEBUG] Processing Node " << nodeId << " ('" << node.name << "')" << std::endl;
+            // std::cout << "[DEBUG] Processing Node " << nodeId << " ('" << node.name << "')" << std::endl;
             
             int myStreamIdx = -1;
             bool inherited = false;
@@ -207,7 +207,7 @@ public:
             }
 
             // Execute
-            std::cout << "  -> Launching Kernel Op on Stream " << myStreamIdx << "..." << std::endl;
+            // std::cout << "  -> Launching Kernel Op on Stream " << myStreamIdx << "..." << std::endl;
             cudaGetLastError(); 
             node.kernelOp(myStream);
             

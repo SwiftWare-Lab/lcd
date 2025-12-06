@@ -53,5 +53,5 @@ target_link_libraries(test PRIVATE
         CUDA::cudart
         CUDA::cublas          # 🟩 required
         CUDA::cublasLt        # optional but recommended
-        CUDA::cuda_driver)
-
+        CUDA::cuda_driver
+        CUDA::cusparse)

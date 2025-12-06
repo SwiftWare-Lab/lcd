@@ -33,7 +33,7 @@ void scatter_kernel(const float* __restrict__ update,
                     int n)
 {
     int tid = blockIdx.x * blockDim.x + threadIdx.x;
-    printf("%d\n", tid);
+    // printf("%d\n", tid);
     if (tid >= n) return;
     int r = row_idx[tid];
     atomicAdd(x + r, update[tid]);
@@ -114,7 +114,7 @@ cudaGraph_t sptrsv_csc_supernodal_wavefront_cudagraph(
                 float* d_update = nullptr;
                 CUDA_CHECK(cudaMallocAsync(&d_update, sizeof(float) * n_scatter, stream));
 
-                const float alpha = 1.0;
+                const float alpha = -1.0;
                 const float beta  = 0.0;
 
 
