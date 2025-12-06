@@ -1,20 +1,21 @@
 #!/bin/bash
-#SBATCH -J sptrsv-bench
-#SBATCH -o sptrsv-%A-%a.out
-#SBATCH -e sptrsv-%A-%a.err
-#SBATCH -p gpu
-#SBATCH --gres=gpu:1
-#SBATCH -N 1
-#SBATCH --ntasks=1
-#SBATCH --cpus-per-task=8
-#SBATCH --mem=32G
-#SBATCH -t 04:00:00
+#SBATCH --export=ALL
+#SBATCH --job-name="sptrsv"
+#SBATCH --nodes=1
+#SBATCH --gpus-per-node=1
+#SBATCH --output="sptrsv.%A-%a.out"
+#SBATCH -t 03:59:00
 #SBATCH --array=0-1
+
+module load StdEnv/2023
+module load python
+module load gcc
+module load cuda
 
 set -euo pipefail
 
 ROOT=${ROOT:-$PWD}
-PYTHON_BIN=${PYTHON_BIN:-python}
+PYTHON_BIN=/scratch/dama/venv/bin/python
 MATRIX_LIST_FILE=${MATRIX_LIST_FILE:-$(dirname "$0")/matrix_list.txt}
 
 readarray -t MATRICES < <(grep -v '^\s*#' "$MATRIX_LIST_FILE" | sed '/^\s*$/d')
