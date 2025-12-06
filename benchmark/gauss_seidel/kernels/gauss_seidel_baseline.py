@@ -4,10 +4,9 @@ from numba import cuda
 try:
     import pyamgx
     PYAMGX_AVAILABLE = True
-    pyamgx.initialize()
+    # pyamgx.initialize()
 except ImportError:
     PYAMGX_AVAILABLE = False
-    print("Warning: pyamgx not found. AMGX baseline will be skipped.")
 
 # ============================================================================
 # CPU Baseline Implementations
@@ -211,52 +210,62 @@ def gs_numba_syncfree(data, indices, indptr, csc_indices_L, csc_indptr_L,
 # Library Baseline: AMGX (NVIDIA's Industrial-Strength GPU Library)
 # ============================================================================
 
+# _AMGX_INITIALIZED = False
+
 class AMGXGaussSeidelSolver:
     """
-    Robust Wrapper for NVIDIA AMGX Gauss-Seidel.
-    Uses module-level initialization for stability.
+    Wrapper for NVIDIA AMGX. 
+    Assumes pyamgx.initialize() is called ONCE in the main script.
     """
     def __init__(self, max_iters=10, tol=1e-6):
         if not PYAMGX_AVAILABLE:
             raise RuntimeError("pyamgx is required")
-        self.max_iters = max_iters
-        self.tol = tol
+        self.max_iters = int(max_iters) # Ensure int
+        self.tol = float(tol)           # Ensure float
         self.is_setup = False
 
     def setup(self, A_csr, b, x_init):
-        self.cfg = pyamgx.Config()
-        self.cfg.create_from_dict({
-            "config_version": 2,
+        import json
+        
+        # Standard Dictionary Config
+        # We explicitly set the determinant to ensure correct resource allocation
+        config_dict = {
+            "config_version": 2, 
             "solver": {
-                "solver": "MULTICOLOR_GS",  # or GAUSS_SEIDEL?
+                "solver": "MULTICOLOR_GS",
                 "max_iters": self.max_iters,
-                "monitor_residual": 1, 
+                "monitor_residual": 1,
                 "tolerance": self.tol,
                 "print_solve_stats": 0,
+                "obtain_timings": 0
             }
-        })
-
+        }
+        
+        # Create Config and Resources
+        self.cfg = pyamgx.Config()
+        self.cfg.create(json.dumps(config_dict))
         self.resources = pyamgx.Resources(self.cfg)
 
+        # Create Matrix/Vectors
         self.solver = pyamgx.Solver(self.resources, self.cfg)
-
         self.d_A = pyamgx.Matrix()
-        self.d_A.create(self.resources, mode='dDDI')
-        
         self.d_b = pyamgx.Vector()
-        self.d_b.create(self.resources, mode='dDDI')
-        
         self.d_x = pyamgx.Vector()
+
+        # Create handles (dDDI = double data, Device, Device, Int indices)
+        self.d_A.create(self.resources, mode='dDDI')
+        self.d_b.create(self.resources, mode='dDDI')
         self.d_x.create(self.resources, mode='dDDI')
 
+        # Type enforcement
         if A_csr.indices.dtype != np.int32: A_csr.indices = A_csr.indices.astype(np.int32)
         if A_csr.indptr.dtype != np.int32: A_csr.indptr = A_csr.indptr.astype(np.int32)
         if A_csr.data.dtype != np.float64: A_csr.data = A_csr.data.astype(np.float64)
 
+        # Upload
         self.d_A.upload_CSR(A_csr)
         self.solver.setup(self.d_A)
         self.d_b.upload(b.astype(np.float64))
-        
         self.x_init_host = x_init.astype(np.float64)
         self.d_x.upload(self.x_init_host)
         
@@ -279,4 +288,83 @@ class AMGXGaussSeidelSolver:
             self.solver.destroy()
             self.resources.destroy()
             self.cfg.destroy()
+            self.is_setup = False
+
+# ============================================================================
+# Library Baseline: PETSc
+# ============================================================================
+
+try:
+    import sys
+    from petsc4py import PETSc
+    PETSC_AVAILABLE = True
+except ImportError:
+    PETSC_AVAILABLE = False
+
+class PETScGaussSeidelSolver:
+    """
+    Wrapper for PETSc GPU Gauss-Seidel (SOR).
+    Uses 'aijcusparse' backend which leverages NVIDIA cuSPARSE.
+    """
+    def __init__(self, max_iters=10, tol=1e-6):
+        if not PETSC_AVAILABLE:
+            raise RuntimeError("petsc4py is required")
+        self.max_iters = max_iters
+        self.tol = tol
+        self.is_setup = False
+
+    def setup(self, A_csr, b, x_init):
+        # 1. Create Matrix on GPU
+        # We create explicitly as 'aijcusparse' to force CUDA backend
+        self.A = PETSc.Mat().create()
+        self.A.setSizes([A_csr.shape[0], A_csr.shape[1]])
+        self.A.setType('aijcusparse') # <--- CRITICAL for GPU
+        
+        # Preallocate and fill (efficient bulk set)
+        self.A.setUp()
+        self.A.setValuesCSR(A_csr.indptr, A_csr.indices, A_csr.data)
+        self.A.assemble()
+
+        # 2. Create Vectors on GPU
+        # 'cuda' type ensures data resides on device
+        self.b = PETSc.Vec().create()
+        self.b.setSizes(len(b))
+        self.b.setType('cuda') 
+        self.b.setValues(range(len(b)), b)
+        self.b.assemble()
+
+        self.x = self.b.duplicate()
+        self.x.setValues(range(len(x_init)), x_init)
+        self.x.assemble()
+        
+        # Save initial x for reset
+        self.x_init_vals = x_init.copy()
+        
+        self.is_setup = True
+
+    def reset_x(self):
+        # Reset x to initial guess
+        self.x.setValues(range(len(self.x_init_vals)), self.x_init_vals)
+        self.x.assemble()
+
+    def solve(self):
+        # Option 1: Direct SOR call
+        # omega=1.0 is Gauss-Seidel. 
+        # its=max_iters, lits=1 (local iters)
+        # FIX: Use keyword 'sortype' instead of 'flag'
+        self.A.SOR(self.b, self.x, omega=1.0, 
+                   its=self.max_iters, lits=1,
+                   sortype=PETSc.Mat.SORType.FORWARD_SWEEP)
+        
+        # Note: PETSc GPU operations are asynchronous. 
+        # The benchmark script must call cuda.synchronize() after this function returns.
+
+    def download_result(self):
+        return self.x.getArray()
+
+    def destroy(self):
+        if self.is_setup:
+            self.A.destroy()
+            self.b.destroy()
+            self.x.destroy()
             self.is_setup = False

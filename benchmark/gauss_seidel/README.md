@@ -104,3 +104,150 @@ Benchmark methods follow the pattern: `{category}-{method}-{variant}-{params}`
 **H-Level**:
 - `gs-h-bw8` - H-level bandwidth 8
 - `gs-h-bw16-diag` - H-level bandwidth 16, diagonal-optimized
+
+
+---
+
+# GPU Sparse Solver Benchmarking: Environment Setup
+
+This guide details the installation of NVIDIA AMGX (via `pyamgx`) and PETSc (via `petsc4py`) with full CUDA support. These are required to run the library baselines for the Gauss-Seidel benchmarks.
+
+## Prerequisites
+
+* **CUDA Toolkit** (nvcc must be in PATH)
+* **MPI** (OpenMPI or MPICH)
+* **C++ Compiler** (gcc/g++)
+* **CMake**
+* **Python 3.x** with `pip` and `numpy` installed.
+
+---
+
+## 1. Installing PETSc with CUDA (petsc4py)
+
+The standard `pip install petsc4py` installs a CPU-only binary. You must build PETSc from source to enable the `aijcusparse` matrix type.
+
+### Step 1: Download and Configure
+Clone the repository and configure it to use NVIDIA compilers.
+
+```bash
+git clone -b release [https://gitlab.com/petsc/petsc.git](https://gitlab.com/petsc/petsc.git)
+cd petsc
+
+# Configure with CUDA enabled
+./configure \
+  --with-cuda=1 \
+  --with-cudac=nvcc \
+  --with-debugging=0 \
+  --with-cc=mpicc \
+  --with-cxx=mpicxx \
+  --with-fc=mpifort \
+  --download-f2cblaslapack \
+  COPTFLAGS="-O3" \
+  CXXOPTFLAGS="-O3" \
+  CUDAOPTFLAGS="-O3"
+````
+
+### Step 2: Compile
+
+Run the build command suggested at the end of the configuration step.
+
+```bash
+make all check
+```
+
+### Step 3: Link Python Bindings
+
+**Critical:** You must export environment variables so `pip` finds your local GPU build instead of downloading a CPU version from PyPI.
+
+```bash
+# Set these based on the output of 'make all check'
+export PETSC_DIR=$(pwd)
+export PETSC_ARCH=arch-linux-c-opt  # Check your actual arch name
+
+# Force pip to compile bindings against your local source
+pip uninstall -y petsc petsc4py
+pip install petsc4py --no-binary :all:
+```
+
+### Step 4: Runtime Configuration
+
+If you are running on a single node with standard OpenMPI, you must disable GPU-aware MPI checks to prevent `MPI_ABORT error 76`.
+
+```bash
+export PETSC_OPTIONS="-use_gpu_aware_mpi 0"
+```
+
+-----
+
+## 2\. Installing AMGX (pyamgx)
+
+If you encounter "Invalid/null C wrapper" errors, it usually indicates a binary mismatch between the PyPI wheel and your system drivers. It is safer to build AMGX from source.
+
+### Step 1: Build AMGX Core
+
+```bash
+git clone [https://github.com/NVIDIA/AMGX.git](https://github.com/NVIDIA/AMGX.git)
+cd AMGX
+mkdir build && cd build
+cmake ..
+make -j16 all
+```
+
+### Step 2: Install Python Bindings
+
+Tell `pyamgx` where to find the C++ library you just built.
+
+```bash
+export AMGX_DIR=/path/to/AMGX_root_folder
+export AMGX_BUILD_DIR=/path/to/AMGX_root_folder/build
+
+pip install pyamgx
+```
+
+-----
+
+## 3\. Installing CuPy (Standard Baseline)
+
+CuPy provides a direct interface to `cuSPARSE` and is easier to install than PETSc/AMGX.
+
+```bash
+pip install cupy-cuda12x  # Adjust 12x to match your CUDA version (e.g., 11x or 12x)
+```
+
+-----
+
+## 4\. Verification
+
+Use these snippets to ensure the libraries are correctly using the GPU.
+
+**Verify PETSc (CUDA):**
+
+```python
+from petsc4py import PETSc
+try:
+    A = PETSc.Mat().create()
+    A.setType('aijcusparse') 
+    print("Success: PETSc has CUDA support!")
+except Exception as e:
+    print(f"Failure: {e}")
+```
+
+**Verify AMGX:**
+
+```python
+import pyamgx
+pyamgx.initialize()
+cfg = pyamgx.Config()
+cfg.create("exception_handling=1")
+rsrc = pyamgx.Resources(cfg)
+m = pyamgx.Matrix()
+try:
+    m.create(rsrc, mode='dDDI') # Double Precision, Device, Device, Int32
+    print("Success: AMGX handle created.")
+except Exception as e:
+    print(f"Failure: {e}")
+m.destroy()
+rsrc.destroy()
+cfg.destroy()
+pyamgx.finalize()
+```

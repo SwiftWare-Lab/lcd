@@ -1,8 +1,10 @@
 import sys
 import os
+os.environ["PETSC_OPTIONS"] = "-use_gpu_aware_mpi 0"
+
 # Add parent directory to path for bench_utils
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
-
+import time
 import warnings
 import numpy as np
 import scipy.io as spio
@@ -11,14 +13,26 @@ import triton
 from numba import cuda
 from numba.core.errors import NumbaPerformanceWarning
 
+try:
+    import cupy as cp
+    CUPY_AVAILABLE = True
+except ImportError:
+    CUPY_AVAILABLE = False
+
 from kernels.gauss_seidel_baseline import (
     gauss_seidel_csr,
     gauss_seidel_diag_csr,
     gs_numba_wavefront,
     gs_numba_syncfree,
     PYAMGX_AVAILABLE,
-    AMGXGaussSeidelSolver
+    PETSC_AVAILABLE,
+    AMGXGaussSeidelSolver,
+    PETScGaussSeidelSolver
 )
+
+if PETSC_AVAILABLE:
+    from petsc4py import PETSc
+
 from kernels.gauss_seidel_hlevel import (
     gs_numba_hlevel_solve,
     gs_h_level_analyze,
@@ -54,6 +68,8 @@ from kernels.gauss_seidel_hlevel_diag import (
     gs_numba_hlevel_syncfree_persistent_solve_diag,
 )
 from kernels.gauss_seidel_utils import extract_diagonal_info_gpu
+from kernels.gauss_seidel_cupy import CuPyGaussSeidelSolver
+
 from bench_utils import get_matrix_signature
 
 warnings.filterwarnings('ignore', category=NumbaPerformanceWarning)
@@ -65,9 +81,9 @@ print(f"Compute Capability: {device.compute_capability}")
 mtx_list = [
 "/home/mad29/projects/testdata/matrices/1138_bus.mtx",
 # "/home/mad29/projects/testdata/matrices/2cubes_sphere.mtx",
-# "/home/mad29/projects/testdata/matrices/bcsstk08.mtx",
-# "/home/mad29/projects/testdata/matrices/bcsstk09.mtx",
-# "/home/mad29/projects/testdata/matrices/bcsstk10.mtx",
+"/home/mad29/projects/testdata/matrices/bcsstk08.mtx",
+"/home/mad29/projects/testdata/matrices/bcsstk09.mtx",
+"/home/mad29/projects/testdata/matrices/bcsstk10.mtx",
 # "/home/mad29/projects/testdata/matrices/bcsstk11.mtx",
 # "/home/mad29/projects/testdata/matrices/bcsstk12.mtx",
 # "/home/mad29/projects/testdata/matrices/bcsstk13.mtx",
@@ -97,13 +113,18 @@ method_list.extend([
     "cpu-sequential-diag",
 ])
 
-# Add AMGX if available
 # if PYAMGX_AVAILABLE:
-    # method_list.append("amgx-gauss-seidel")
+#     method_list.append("amgx-gauss-seidel")
+
+if PETSC_AVAILABLE:
+    method_list.append("petsc-gauss-seidel")
+
+if CUPY_AVAILABLE:
+    method_list.append("cupy-gauss-seidel")
 
 method_list.extend([
-    "gs-wf-base",
-    "gs-wf-base-diag",
+    # "gs-wf-base",
+    # "gs-wf-base-diag",
     "gs-sf-base",
     "gs-sf-base-diag",
 ])
@@ -301,6 +322,11 @@ def correctness_test():
     
     if PYAMGX_AVAILABLE:
         test_methods.insert(2, 'amgx-gauss-seidel')
+
+    if PETSC_AVAILABLE:
+        test_methods.insert(3, 'petsc-gauss-seidel')
+    if CUPY_AVAILABLE:
+        test_methods.insert(4, 'cupy-gauss-seidel')
     
     for mtx_matrix_path in mtx_list:
         print(f"------------ matrix: {mtx_matrix_path}")
@@ -350,6 +376,26 @@ def correctness_test():
                     amgx_solver.solve()
                     x_test = amgx_solver.download_result()
                     amgx_solver.destroy()
+
+                elif method == 'petsc-gauss-seidel':
+                    try:
+                        PETSc.Sys.popErrorHandler()
+                    except:
+                        pass
+                    
+                    petsc_solver = PETScGaussSeidelSolver(max_iters=num_iterations, tol=1e-6)
+                    petsc_solver.setup(A, b, x_init.copy())
+                    petsc_solver.solve()
+                    cuda.synchronize() # Ensure GPU done
+                    x_test = petsc_solver.download_result()
+                    petsc_solver.destroy()
+
+                elif method == 'cupy-gauss-seidel':
+                    cupy_solver = CuPyGaussSeidelSolver(max_iters=num_iterations)
+                    cupy_solver.setup(A, b, x_init.copy())
+                    cupy_solver.solve()
+                    x_test = cupy_solver.download_result()
+                    cupy_solver.destroy()
                 
                 elif method.startswith('gs-wf'):
                     # Wavefront test
@@ -589,25 +635,135 @@ def benchmark(matrices, provider):
         ms, min_ms, max_ms = triton.testing.do_bench(run_cpu_diag, quantiles=quantiles, 
                                                       warmup=warmup, rep=rep)
     
+    # # ========================================================================
+    # # AMGX BASELINE
+    # # ========================================================================
+    # elif provider == 'amgx-gauss-seidel':
+    #     if not PYAMGX_AVAILABLE:
+    #         print(f"AMGX not available, skipping...")
+    #         return float('nan'), float('nan'), float('nan')
+        
+    #     amgx_solver = AMGXGaussSeidelSolver(max_iters=num_iterations, tol=1e-6)
+    #     amgx_solver.setup(A, b, x_init.copy())
+        
+    #     def run_amgx():
+    #         amgx_solver.reset_x()
+    #         amgx_solver.solve()
+        
+    #     ms, min_ms, max_ms = triton.testing.do_bench(run_amgx, quantiles=quantiles, 
+    #                                                   warmup=warmup, rep=rep)
+    #     amgx_solver.destroy()
+
     # ========================================================================
-    # AMGX BASELINE
+    # AMGX BASELINE (Manual Benchmarking for Stability)
     # ========================================================================
     elif provider == 'amgx-gauss-seidel':
         if not PYAMGX_AVAILABLE:
             print(f"AMGX not available, skipping...")
             return float('nan'), float('nan'), float('nan')
         
+        # Initialize library globally only once if needed (though best done in main)
+        try:
+            import pyamgx
+            # Check if we can/need to initialize without crashing
+            # Note: We rely on the try/except in main or manual handling
+            pass 
+        except:
+            pass
+
         amgx_solver = AMGXGaussSeidelSolver(max_iters=num_iterations, tol=1e-6)
-        amgx_solver.setup(A, b, x_init.copy())
-        
-        def run_amgx():
-            amgx_solver.reset_x()
-            amgx_solver.solve()
-        
-        ms, min_ms, max_ms = triton.testing.do_bench(run_amgx, quantiles=quantiles, 
-                                                      warmup=warmup, rep=rep)
-        amgx_solver.destroy()
+        try:
+            amgx_solver.setup(A, b, x_init.copy())
+            
+            # --- Manual Benchmark Loop ---
+            # This ensures fairness by using cuda.synchronize() just like Triton
+            # but avoids Triton's internal context handling crashing AMGX.
+            
+            # 1. Warmup
+            for _ in range(warmup):
+                amgx_solver.reset_x()
+                amgx_solver.solve()
+            cuda.synchronize()
+            
+            # 2. Timing
+            timings = []
+            for _ in range(rep):
+                amgx_solver.reset_x()
+                cuda.synchronize() # Sync before timer start
+                
+                start_t = time.perf_counter()
+                amgx_solver.solve()
+                cuda.synchronize() # Sync after execution (Fairness with Triton)
+                end_t = time.perf_counter()
+                
+                timings.append((end_t - start_t) * 1000.0) # Convert to ms
+
+            ms = np.median(timings)
+            min_ms = np.min(timings)
+            max_ms = np.max(timings)
+            
+        except Exception as e:
+            print(f"AMGX Benchmarking failed: {e}")
+            ms, min_ms, max_ms = float('nan'), float('nan'), float('nan')
+        finally:
+            amgx_solver.destroy()
     
+
+    # ========================================================================
+    # PETSc BASELINE
+    # ========================================================================
+    elif provider == 'petsc-gauss-seidel':
+        if not PETSC_AVAILABLE:
+            return float('nan'), float('nan'), float('nan')
+            
+        # Initialize PETSc with arguments to ensure CUDA is active
+        try:
+            PETSc.Sys.popErrorHandler() # Optional: Cleaner tracebacks
+        except:
+            pass
+        
+        solver = PETScGaussSeidelSolver(max_iters=num_iterations)
+        try:
+            # Wrap setup in try-except to handle potential initialization errors
+            try:
+                solver.setup(A, b, x_init)
+            except Exception as e:
+                print(f"PETSc setup failed: {e}")
+                return float('nan'), float('nan'), float('nan')
+            
+            # Define the runner function for Triton
+            # This mimics the structure of your other baselines (reset + solve)
+            def run_petsc():
+                solver.reset_x()
+                solver.solve()
+            
+            # Use Triton's standard benchmarking harness
+            ms, min_ms, max_ms = triton.testing.do_bench(run_petsc, quantiles=quantiles, 
+                                                          warmup=warmup, rep=rep)
+            
+        except Exception as e:
+            print(f"PETSc benchmark runtime error: {e}")
+            return float('nan'), float('nan'), float('nan')
+        finally:
+            solver.destroy()
+
+    # ========================================================================
+    # CuPy BASELINE (cusparse wrapper)
+    # ========================================================================
+    elif provider == 'cupy-gauss-seidel':
+        if not CUPY_AVAILABLE:
+            return float('nan'), float('nan'), float('nan')
+
+        solver = CuPyGaussSeidelSolver(max_iters=num_iterations)
+        solver.setup(A, b, x_init)
+        
+        def run_cupy():
+            solver.reset_x()
+            solver.solve()
+            
+        ms, min_ms, max_ms = triton.testing.do_bench(run_cupy, quantiles=quantiles, 
+                                                      warmup=warmup, rep=rep)
+
     # ========================================================================
     # GPU BASELINES - REGULAR
     # ========================================================================
@@ -1019,13 +1175,22 @@ def benchmark(matrices, provider):
     return perf(ms), perf(min_ms), perf(max_ms)
 
 if __name__ == "__main__":
-    benchmark.run(print_data=True, save_path=".", show_plots=False)
-    
-    # Finalize AMGX at the very end
     if PYAMGX_AVAILABLE:
         try:
             import pyamgx
-            pyamgx.finalize()
-        except:
-            pass  # Already finalized or failed
+            pyamgx.initialize()
+        except pyamgx.AMGXError as e:
+            if "already registered" not in str(e):
+                print(f"AMGX Critical Init Error: {e}")
+        except Exception as e:
+            print(f"AMGX General Init Error: {e}")
 
+    try:
+        benchmark.run(print_data=True, save_path=".", show_plots=False)
+    finally:
+        if PYAMGX_AVAILABLE:
+            try:
+                import pyamgx
+                pyamgx.finalize()
+            except:
+                pass
