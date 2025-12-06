@@ -282,3 +282,216 @@ def ilu0_numba_csr_h_level_graph_auto(data, indices, indptr, M,
         
     ilu0_numba_csr_h_level_graph(data, indices, indptr, M, _ANALYSIS_CACHE[key], diag_pos)
 
+# -------------------------------------------------------------------------
+# 6. HELPERS FOR SYNC-FREE
+# -------------------------------------------------------------------------
+
+@cuda.jit
+def reset_counter_kernel(counter):
+    """Resets a single-element counter to 0."""
+    if cuda.threadIdx.x == 0 and cuda.blockIdx.x == 0:
+        counter[0] = 0
+
+@cuda.jit
+def set_zero_kernel(arr):
+    """Sets all elements of an array to 0."""
+    idx = cuda.grid(1)
+    if idx < arr.size:
+        arr[idx] = 0
+
+def get_hardware_grid_cap(threads_per_block):
+    """Calculates max resident blocks to prevent deadlock in persistent kernels."""
+    device = cuda.get_current_device()
+    num_sms = device.MULTIPROCESSOR_COUNT
+    # SpILU0 has high register pressure, conservative estimate:
+    blocks_per_sm = 8 
+    return num_sms * blocks_per_sm
+
+# -------------------------------------------------------------------------
+# 7. KERNEL: SYNC-FREE ILU0 (Common for Banded and Persistent)
+# -------------------------------------------------------------------------
+
+@cuda.jit
+def ilu0_csr_syncfree_warp_kernel(data, indices, indptr, diag_pos,
+                                  h_task_nodes, task_ptr,
+                                  done, task_counter,
+                                  num_tasks_limit, task_offset):
+    """
+    Sync-Free ILU0 Kernel.
+    Uses atomic flags ('done') to manage dependencies between rows.
+    """
+    warp_id = cuda.threadIdx.x // 32
+    lane_id = cuda.threadIdx.x % 32
+    
+    while True:
+        # 1. Dynamic Task Fetching
+        local_task_id = -1
+        if lane_id == 0:
+            local_task_id = cuda.atomic.add(task_counter, 0, 1)
+        local_task_id = cuda.shfl_sync(0xFFFFFFFF, local_task_id, 0)
+        
+        if local_task_id >= num_tasks_limit:
+            return
+
+        global_task_id = task_offset + local_task_id
+        
+        start_node_ptr = task_ptr[global_task_id]
+        end_node_ptr = task_ptr[global_task_id + 1]
+        
+        # 2. Execute Chain
+        for i in range(start_node_ptr, end_node_ptr):
+            row = h_task_nodes[i]
+            
+            row_start = indptr[row]
+            row_end = indptr[row + 1]
+            
+            # Iterate over lower triangular part (columns k < row)
+            for k_ptr in range(row_start, row_end):
+                k = indices[k_ptr]
+                
+                # Stop if we reach diagonal or upper
+                if k >= row:
+                    break
+                
+                # --- SYNC-FREE WAIT ---
+                # Before using row 'k' to update row 'i', row 'k' must be finished.
+                if lane_id == 0:
+                    while cuda.atomic.add(done, k, 0) == 0:
+                        pass
+                    cuda.threadfence()
+                
+                cuda.syncwarp(0xFFFFFFFF)
+                # ----------------------
+                
+                # Proceed with standard ILU0 update logic
+                diag_ptr = diag_pos[k]
+                u_kk = data[diag_ptr]
+                
+                if u_kk != 0.0:
+                    # Lane 0 computes multiplier L_ik
+                    if lane_id == 0:
+                        l_ik = data[k_ptr] / u_kk
+                        data[k_ptr] = l_ik
+                    
+                    cuda.syncwarp(0xFFFFFFFF)
+                    l_ik = cuda.shfl_sync(0xFFFFFFFF, data[k_ptr] if lane_id == 0 else 0.0, 0)
+                    
+                    k_row_start = indptr[k]
+                    k_row_end = indptr[k + 1]
+                    
+                    # Parallel Update: A[i, j] -= L[i, k] * U[k, j]
+                    for j_ptr in range(k_ptr + 1 + lane_id, row_end, 32):
+                        jcol = indices[j_ptr]
+                        # Find U[k, j] via binary search
+                        pos = bin_search_col(indices, k_row_start, k_row_end, jcol)
+                        if pos != -1:
+                            data[j_ptr] -= l_ik * data[pos]
+                    
+                    cuda.syncwarp(0xFFFFFFFF)
+
+            # --- MARK COMPLETED ---
+            if lane_id == 0:
+                cuda.threadfence()
+                cuda.atomic.exch(done, row, 1)
+            
+            cuda.syncwarp(0xFFFFFFFF)
+
+# -------------------------------------------------------------------------
+# 8. VARIANT C: BANDED SYNC-FREE SOLVER (Safe Tiled Execution)
+# -------------------------------------------------------------------------
+
+def ilu0_numba_csr_syncfree_h_level_solve(data, indices, indptr, n, analysis_data, diag_pos):
+    """
+    Banded Sync-Free ILU0. Safely loops over bands to prevent deadlock.
+    """
+    d_h_nodes, d_task_ptr, h_level_ptr = analysis_data
+    
+    # Setup Done array (0 = not ready, 1 = ready)
+    d_done = cuda.to_device(np.zeros(n, dtype=np.int32))
+    d_task_counter = cuda.to_device(np.zeros(1, dtype=np.int32))
+    
+    threads_per_block = 128
+    warps_per_block = threads_per_block // 32
+    
+    cp_stream = cp.cuda.Stream(non_blocking=True)
+    nb_stream = cuda.external_stream(cp_stream.ptr)
+    
+    cp_stream.begin_capture()
+    
+    num_bands = len(h_level_ptr) - 1
+    for i in range(num_bands):
+        start_task = h_level_ptr[i]
+        end_task = h_level_ptr[i+1]
+        num_tasks_in_band = end_task - start_task
+        
+        if num_tasks_in_band > 0:
+            # Reset counter for this band
+            reset_counter_kernel[1, 1, nb_stream](d_task_counter)
+            
+            grid_size = (num_tasks_in_band + warps_per_block - 1) // warps_per_block
+            grid_size = min(grid_size, 256)
+            grid_size = max(grid_size, 1)
+            
+            ilu0_csr_syncfree_warp_kernel[grid_size, threads_per_block, nb_stream](
+                data, indices, indptr, diag_pos,
+                d_h_nodes, d_task_ptr,
+                d_done, d_task_counter,
+                num_tasks_in_band, start_task
+            )
+            
+    graph = cp_stream.end_capture()
+    graph.launch(stream=cp_stream)
+    cp_stream.synchronize()
+
+def ilu0_numba_csr_syncfree_h_level_graph(data, indices, indptr, n, 
+                                          wavefronts, wave_start, diag_pos, band_width=64):
+    key = (indptr.device_ctypes_pointer.value, band_width)
+    if key not in _ANALYSIS_CACHE:
+        _ANALYSIS_CACHE[key] = ilu0_h_level_analyze(
+            indptr, indices, wavefronts, wave_start, band_width
+        )
+    ilu0_numba_csr_syncfree_h_level_solve(data, indices, indptr, n, _ANALYSIS_CACHE[key], diag_pos)
+
+# -------------------------------------------------------------------------
+# 9. VARIANT E: PERSISTENT SYNC-FREE SOLVER (Fastest / Hardware Clamped)
+# -------------------------------------------------------------------------
+
+def ilu0_numba_csr_syncfree_persistent_solve(data, indices, indptr, n, analysis_data, diag_pos):
+    """
+    Persistent Sync-Free ILU0. 
+    Launches one grid clamped to hardware capacity. Threads loop until done.
+    """
+    d_h_nodes, d_task_ptr, h_level_ptr = analysis_data
+    
+    d_done = cuda.to_device(np.zeros(n, dtype=np.int32))
+    d_task_counter = cuda.to_device(np.zeros(1, dtype=np.int32))
+    
+    threads_per_block = 128
+    warps_per_block = threads_per_block // 32
+    
+    # Total tasks across the whole matrix
+    num_total_tasks = len(d_task_ptr) - 1
+    
+    # Calculate Grid Size (Clamped)
+    needed_blocks = (num_total_tasks + warps_per_block - 1) // warps_per_block
+    hardware_cap = get_hardware_grid_cap(threads_per_block)
+    
+    grid_size = min(needed_blocks, hardware_cap)
+    grid_size = max(grid_size, 1)
+    
+    # Launch Single Persistent Kernel
+    ilu0_csr_syncfree_warp_kernel[grid_size, threads_per_block](
+        data, indices, indptr, diag_pos,
+        d_h_nodes, d_task_ptr,
+        d_done, d_task_counter,
+        num_total_tasks, 0 # 0 offset
+    )
+
+def ilu0_numba_csr_syncfree_persistent_graph(data, indices, indptr, n, 
+                                             wavefronts, wave_start, diag_pos, band_width=64):
+    key = (indptr.device_ctypes_pointer.value, band_width)
+    if key not in _ANALYSIS_CACHE:
+        _ANALYSIS_CACHE[key] = ilu0_h_level_analyze(
+            indptr, indices, wavefronts, wave_start, band_width
+        )
+    ilu0_numba_csr_syncfree_persistent_solve(data, indices, indptr, n, _ANALYSIS_CACHE[key], diag_pos)

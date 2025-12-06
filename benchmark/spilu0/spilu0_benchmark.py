@@ -31,7 +31,13 @@ from kernels.spilu0_unrolled import (
     ilu0_csr_numba_sync_free_unrolling_16, ilu0_csr_numba_sync_free_unrolling_32,
     ilu0_csr_numba_sync_free_unrolling_64,
 )
-from kernels.spilu0_hlevel import ilu0_numba_csr_h_level_graph_auto, ilu0_h_level_analyze, ilu0_numba_csr_h_level_graph
+from kernels.spilu0_hlevel import (
+    ilu0_numba_csr_h_level_graph_auto,
+    ilu0_h_level_analyze,
+    ilu0_numba_csr_h_level_graph,
+    ilu0_numba_csr_syncfree_h_level_graph,
+    ilu0_numba_csr_syncfree_persistent_graph,
+)
 
 warnings.filterwarnings('ignore', category=NumbaPerformanceWarning)
 
@@ -160,7 +166,7 @@ mtx_list = [
 
 unroll_factors = [4, 8, 16, 32, 64]
 thread_counts = [32, 64, 128, 256]
-h_bandwidths = [8, 16, 32, 64]
+h_bandwidths = [1, 2, 4, 8, 16]
 
 # Baselines
 method_list = [
@@ -188,6 +194,8 @@ for unroll in unroll_factors:
 # H-Level
 for bw in h_bandwidths:
     method_list.append(f"csr-h-bw{bw}")
+    method_list.append(f"csr-h-sf-bw{bw}")
+    method_list.append(f"csr-h-sf-persist-bw{bw}")
 
 def validate_ilu0_factorization(A_result, A_original, tol=1e-3):
     # Validate ILU0 by checking if L@U matches A at original nonzero positions
@@ -699,6 +707,56 @@ def correctness_test():
                     print(f"Warning: {method_name} incorrect")
             except Exception as e:
                 print(f"{method_name} failed: {e}")
+
+            method_name = f'csr-h-sf-bw{bw}'
+            try:
+                A_copy = A_test.copy()
+                wavefronts = compute_ilu_wavefront_csr(A_copy)
+                wave_start_loc, waves = compact_2d_list(wavefronts)
+                diag_pos = find_diagonal_positions(A_copy)
+                d_diag_pos = cuda.to_device(diag_pos)
+                
+                d_data = cuda.to_device(A_copy.data)
+                d_indices = cuda.to_device(A_copy.indices)
+                d_indptr = cuda.to_device(A_copy.indptr)
+                
+                ilu0_numba_csr_syncfree_h_level_graph(d_data, d_indices, d_indptr, n, waves, wave_start_loc, d_diag_pos, band_width=bw)
+                
+                result_data = d_data.copy_to_host()
+                A_result = csr_matrix((result_data, A_copy.indices, A_copy.indptr), shape=A.shape)
+                
+                if validate_ilu0_factorization(A_result, A_test):
+                    print(f"{method_name}: correct")
+                    method_correctness[mat_name][method_name] = 1
+                else:
+                    print(f"Warning: {method_name} incorrect")
+            except Exception as e:
+                print(f"{method_name} failed: {e}")
+
+            method_name = f'csr-h-sf-persist-bw{bw}'
+            try:
+                A_copy = A_test.copy()
+                wavefronts = compute_ilu_wavefront_csr(A_copy)
+                wave_start_loc, waves = compact_2d_list(wavefronts)
+                diag_pos = find_diagonal_positions(A_copy)
+                d_diag_pos = cuda.to_device(diag_pos)
+                
+                d_data = cuda.to_device(A_copy.data)
+                d_indices = cuda.to_device(A_copy.indices)
+                d_indptr = cuda.to_device(A_copy.indptr)
+                
+                ilu0_numba_csr_syncfree_persistent_graph(d_data, d_indices, d_indptr, n, waves, wave_start_loc, d_diag_pos, band_width=bw)
+                
+                result_data = d_data.copy_to_host()
+                A_result = csr_matrix((result_data, A_copy.indices, A_copy.indptr), shape=A.shape)
+                
+                if validate_ilu0_factorization(A_result, A_test):
+                    print(f"{method_name}: correct")
+                    method_correctness[mat_name][method_name] = 1
+                else:
+                    print(f"Warning: {method_name} incorrect")
+            except Exception as e:
+                print(f"{method_name} failed: {e}")
     
     return matrix_signatures, method_correctness
 
@@ -733,6 +791,10 @@ for _ in unroll_factors:
 # H-Level styles
 for _ in h_bandwidths:
     styles.append(("orange", "-"))
+for _ in h_bandwidths:
+    styles.append(("orange", "--"))
+for _ in h_bandwidths:
+    styles.append(("black", "-"))
 
 configs = []
 configs.append(
@@ -1053,6 +1115,44 @@ def benchmark(matrices, provider):
             ilu0_numba_csr_h_level_graph(d_data, d_indices, d_indptr, n, analysis_data, d_diag_pos)
         
         ms, min_ms, max_ms = triton.testing.do_bench(run_numba_csr_h, quantiles=quantiles, warmup=warmup, rep=rep)
+
+    elif provider.startswith('csr-h-sf-bw'):
+        band_width = int(provider.replace('csr-h-sf-bw', ''))
+        
+        wavefronts = compute_ilu_wavefront_csr(A)
+        wave_start_loc, waves = compact_2d_list(wavefronts)
+        diag_pos = find_diagonal_positions(A)
+        d_diag_pos = cuda.to_device(diag_pos)
+        
+        d_indices = cuda.to_device(A.indices)
+        d_indptr = cuda.to_device(A.indptr)
+        d_data = cuda.device_array_like(A.data)
+        d_original_data = cuda.to_device(A.data.copy())
+        
+        def run_numba_csr_h_sf():
+            d_data.copy_to_device(d_original_data)
+            ilu0_numba_csr_syncfree_h_level_graph(d_data, d_indices, d_indptr, n, waves, wave_start_loc, d_diag_pos, band_width=band_width)
+        
+        ms, min_ms, max_ms = triton.testing.do_bench(run_numba_csr_h_sf, quantiles=quantiles, warmup=warmup, rep=rep)
+
+    elif provider.startswith('csr-h-sf-persist-bw'):
+        band_width = int(provider.replace('csr-h-sf-persist-bw', ''))
+        
+        wavefronts = compute_ilu_wavefront_csr(A)
+        wave_start_loc, waves = compact_2d_list(wavefronts)
+        diag_pos = find_diagonal_positions(A)
+        d_diag_pos = cuda.to_device(diag_pos)
+        
+        d_indices = cuda.to_device(A.indices)
+        d_indptr = cuda.to_device(A.indptr)
+        d_data = cuda.device_array_like(A.data)
+        d_original_data = cuda.to_device(A.data.copy())
+        
+        def run_numba_csr_h_sf_persist():
+            d_data.copy_to_device(d_original_data)
+            ilu0_numba_csr_syncfree_persistent_graph(d_data, d_indices, d_indptr, n, waves, wave_start_loc, d_diag_pos, band_width=band_width)
+        
+        ms, min_ms, max_ms = triton.testing.do_bench(run_numba_csr_h_sf_persist, quantiles=quantiles, warmup=warmup, rep=rep)
 
     else:
         print(f"Unknown provider: {provider}, skipping...")
