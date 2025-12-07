@@ -28,26 +28,38 @@ print(f"Benchmarking {FACTOR_TYPE} factor from ILU0 decomposition")
 
 from kernels.sptrsv_baseline import *
 from kernels.sptrsv_unrolled import (
+    sptrsv_numba_csc_wavefront_unrolling_4, sptrsv_numba_csc_wavefront_unrolling_8,
+    sptrsv_numba_csc_wavefront_unrolling_16, sptrsv_numba_csc_wavefront_unrolling_32,
+    sptrsv_numba_csc_wavefront_unrolling_64,
+    sptrsv_numba_csc_sync_free_unrolling_4, sptrsv_numba_csc_sync_free_unrolling_8,
+    sptrsv_numba_csc_sync_free_unrolling_16, sptrsv_numba_csc_sync_free_unrolling_32,
+    sptrsv_numba_csc_sync_free_unrolling_64,
     sptrsv_numba_csr_wavefront_unrolling_4, sptrsv_numba_csr_wavefront_unrolling_8,
     sptrsv_numba_csr_wavefront_unrolling_16, sptrsv_numba_csr_wavefront_unrolling_32,
     sptrsv_numba_csr_wavefront_unrolling_64,
     sptrsv_numba_csr_sync_free_unrolling_4, sptrsv_numba_csr_sync_free_unrolling_8,
     sptrsv_numba_csr_sync_free_unrolling_16, sptrsv_numba_csr_sync_free_unrolling_32,
     sptrsv_numba_csr_sync_free_unrolling_64,
+    sptrsv_numba_csc_wavefront_mapping, sptrsv_numba_csc_sync_free_mapping,
     sptrsv_numba_csr_wavefront_mapping, sptrsv_numba_csr_sync_free_mapping,
 )
 from kernels.sptrsv_coarsened import (
     compute_coarsened_wavefronts, compact_2d_list, compact_coarsened_wavefronts,
-    sptrsv_numba_csr_coarsened_mapping,
-    sptrsv_numba_csr_wavefront_block_coarsening,
-    sptrsv_numba_csr_wavefront_thread_coarsening,
-    sptrsv_numba_csr_sync_free_block_coarsening,
-    sptrsv_numba_csr_sync_free_thread_coarsening,
+    sptrsv_numba_csc_coarsened_mapping, sptrsv_numba_csr_coarsened_mapping,
+    sptrsv_numba_csc_wavefront_block_coarsening, sptrsv_numba_csr_wavefront_block_coarsening,
+    sptrsv_numba_csc_wavefront_thread_coarsening, sptrsv_numba_csr_wavefront_thread_coarsening,
+    sptrsv_numba_csc_sync_free_block_coarsening, sptrsv_numba_csr_sync_free_block_coarsening,
+    sptrsv_numba_csc_sync_free_thread_coarsening, sptrsv_numba_csr_sync_free_thread_coarsening,
 )
 from kernels.sptrsv_hlevel import (
     sptrsv_h_level_analyze,
+    sptrsv_numba_csc_h_level_solve, sptrsv_numba_csc_h_level_graph,
     sptrsv_numba_csr_h_level_solve,
     sptrsv_numba_csr_h_level_graph,
+    sptrsv_numba_csr_syncfree_h_level_graph,
+    sptrsv_numba_csr_syncfree_h_level_solve,
+    sptrsv_numba_csr_syncfree_persistent_graph,
+    sptrsv_numba_csr_syncfree_persistent_solve,
 )
 
 import warnings
@@ -204,6 +216,11 @@ mtx_list = [
 mtx_override = os.environ.get("SPTRSV_MATRIX")
 if mtx_override:
     mtx_list = [mtx_override]
+
+def matrix_basename(path: str) -> str:
+    base = os.path.basename(path)
+    stem, _ = os.path.splitext(base)
+    return stem.replace(" ", "_")
 # ============================================================================
 # Benchmark Configuration
 # ============================================================================
@@ -214,7 +231,7 @@ block_coarsening_factors = [2, 4, 8, 16]
 sync_free_block_factors = [1, 2, 4]
 thread_coarsening_factors = [1, 2, 4]
 wavefront_coarsening_factors = [1, 2, 4, 8]
-band_widths = [2, 4, 8, 16]
+band_widths = [1, 2, 4, 8, 16]
 
 # ============================================================================
 # Method List Construction
@@ -308,6 +325,8 @@ for threads in thread_counts:
 for bw in band_widths:
     method_list.extend([
         f"csr-h-bw{bw}",
+        f"csr-h-sf-bw{bw}",
+        f"csr-h-sf-persist-bw{bw}",
     ])
 
 def correctness_test():
@@ -571,6 +590,38 @@ def correctness_test():
                     print(f"\nWarning: {method_name} Solutions do not match!")
             except Exception as e:
                 print(f"\n{method_name} failed: {e}")
+
+            # Test CSR Sync-Free H-Level
+            method_name = f'csr-h-sf-bw{bw}'
+            try:
+                y_h_level_sf = sptrsv_numba_csr_syncfree_h_level_graph(
+                    d_data, d_indices, d_indptr, d_b, n, n, A.nnz,
+                    waves_csr, wave_start_loc_csr, band_width=bw)
+                y_h_level_sf_cpu = y_h_level_sf.copy_to_host()
+                
+                if np.allclose(x_cpu, y_h_level_sf_cpu, atol=1e-5):
+                    print(f"\n{method_name} Solutions match within tolerance!")
+                    method_correctness[mat_name][method_name] = 1
+                else:
+                    print(f"\nWarning: {method_name} Solutions do not match!")
+            except Exception as e:
+                print(f"\n{method_name} failed: {e}")
+
+            # Test CSR Sync-Free H-Level (Persistent)
+            method_name = f'csr-h-sf-persist-bw{bw}'
+            try:
+                y_h_level_sf_persist = sptrsv_numba_csr_syncfree_persistent_graph(
+                    d_data, d_indices, d_indptr, d_b, n, n, A.nnz,
+                    waves_csr, wave_start_loc_csr, band_width=bw)
+                y_h_level_sf_persist_cpu = y_h_level_sf_persist.copy_to_host()
+                
+                if np.allclose(x_cpu, y_h_level_sf_persist_cpu, atol=1e-5):
+                    print(f"\n{method_name} Solutions match within tolerance!")
+                    method_correctness[mat_name][method_name] = 1
+                else:
+                    print(f"\nWarning: {method_name} Solutions do not match!")
+            except Exception as e:
+                print(f"\n{method_name} failed: {e}")
         
         # Test 3-level coarsening variants (CSR only)
         print("\nTesting 3-level coarsening (wavefront + warp + thread)...")
@@ -602,11 +653,14 @@ def correctness_test():
 mat_signatures, method_correctness = correctness_test()
 # convert to df and save as csv
 import pandas as pd
+plot_suffix = ""
+if mtx_override:
+    plot_suffix = f"-{matrix_basename(mtx_override)}"
 df = pd.DataFrame(mat_signatures)
-df.to_csv("matrix_signatures.csv")
+df.to_csv(f"matrix_signatures{plot_suffix}.csv")
 
 df = pd.DataFrame(method_correctness)
-df.to_csv("method_correctness.csv")
+df.to_csv(f"method_correctness{plot_suffix}.csv")
 
 configs = []
 
@@ -618,7 +672,7 @@ configs.append(
         line_vals=method_list,
         line_names=method_list,
         ylabel="GFLOP/S",
-        plot_name="sptrsv-performance",
+        plot_name=f"sptrsv-performance{plot_suffix}",
         args={}
     ))
 
@@ -826,6 +880,33 @@ def benchmark(matrices, provider):
         h_level_data = sptrsv_h_level_analyze(d_indptr, d_indices, waves_gpu, wave_start_loc, band_width=band_width)
         ms, min_ms, max_ms = triton.testing.do_bench(lambda: sptrsv_numba_csr_h_level_solve(d_data, d_indices, d_indptr, d_x, A.shape[0], A.shape[1], A.nnz, h_level_data), quantiles=quantiles, warmup=warmpup, rep=rep)
     
+    if provider.startswith('csr-h-sf-bw'):
+        band_width = int(provider.replace('csr-h-sf-bw', ''))
+        d_data = cuda.to_device(A.data)
+        d_indices = cuda.to_device(A.indices)
+        d_indptr = cuda.to_device(A.indptr)
+        d_x = cuda.to_device(np.zeros(n))
+        # Note: compute_wavefront expects CSC format
+        A_csc_for_waves = A.tocsc()
+        wavefronts = compute_wavefront(A_csc_for_waves)
+        wave_start_loc, waves = compact_2d_list(wavefronts)
+        waves_gpu = cuda.to_device(waves)
+        h_level_data = sptrsv_h_level_analyze(d_indptr, d_indices, waves_gpu, wave_start_loc, band_width=band_width)
+        ms, min_ms, max_ms = triton.testing.do_bench(lambda: sptrsv_numba_csr_syncfree_h_level_solve(d_data, d_indices, d_indptr, d_x, A.shape[0], A.shape[1], A.nnz, h_level_data), quantiles=quantiles, warmup=warmpup, rep=rep)
+    
+    if provider.startswith('csr-h-sf-persist-bw'):
+        band_width = int(provider.replace('csr-h-sf-persist-bw', ''))
+        d_data = cuda.to_device(A.data)
+        d_indices = cuda.to_device(A.indices)
+        d_indptr = cuda.to_device(A.indptr)
+        d_x = cuda.to_device(np.zeros(n))
+        # Note: compute_wavefront expects CSC format
+        A_csc_for_waves = A.tocsc()
+        wavefronts = compute_wavefront(A_csc_for_waves)
+        wave_start_loc, waves = compact_2d_list(wavefronts)
+        waves_gpu = cuda.to_device(waves)
+        h_level_data = sptrsv_h_level_analyze(d_indptr, d_indices, waves_gpu, wave_start_loc, band_width=band_width)
+        ms, min_ms, max_ms = triton.testing.do_bench(lambda: sptrsv_numba_csr_syncfree_persistent_solve(d_data, d_indices, d_indptr, d_x, A.shape[0], A.shape[1], A.nnz, h_level_data), quantiles=quantiles, warmup=warmpup, rep=rep)
     # Keep old providers for backwards compatibility (if needed for testing)
     if provider == 'triton':
         A_csr = A.tocsr()

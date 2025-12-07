@@ -14,9 +14,9 @@ module load cuda
 
 set -euo pipefail
 
-ROOT=${ROOT:-$PWD}
+ROOT=${ROOT:-${SLURM_SUBMIT_DIR:-$PWD}}
 PYTHON_BIN=/scratch/dama/venv/bin/python
-MATRIX_LIST_FILE=${MATRIX_LIST_FILE:-$(dirname "$0")/matrix_list.txt}
+MATRIX_LIST_FILE=${MATRIX_LIST_FILE:-$ROOT/matrix_list.txt}
 
 readarray -t MATRICES < <(grep -v '^\s*#' "$MATRIX_LIST_FILE" | sed '/^\s*$/d')
 
@@ -40,6 +40,10 @@ export SPTRSV_SKIP_CORRECTNESS=${SPTRSV_SKIP_CORRECTNESS:-1}
 export SPTRSV_QUICK=${SPTRSV_QUICK:-1}
 echo "Benchmarking ${SPTRSV_MATRIX} (task ${SLURM_ARRAY_TASK_ID}/${#MATRICES[@]})"
 
+export CUPY_CACHE_DIR=/scratch/dama/cupy_cache
+mkdir -p /scratch/dama/cupy_cache
+
 cd "$ROOT"
+source /scratch/dama/venv/bin/activate
 $PYTHON_BIN slurm_sptrsv_benchmark.py
 

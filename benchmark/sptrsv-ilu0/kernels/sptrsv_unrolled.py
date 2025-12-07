@@ -651,7 +651,7 @@ def sptrsv_numba_csr_wavefront_unrolling_kernel_4(data, indices, indptr, b, y, w
     row = wavefronts[wave_offset + block_id]
     row_start = indptr[row]
     row_end = indptr[row + 1]
-    shared_sum = cuda.shared.array(128, dtype=numba.float64)
+    shared_sum = cuda.shared.array(1024, dtype=numba.float64)
     partial_sum = 0.0
     j = row_start + tid
 
@@ -692,7 +692,7 @@ def sptrsv_numba_csr_wavefront_unrolling_kernel_8(data, indices, indptr, b, y, w
     row = wavefronts[wave_offset + block_id]
     row_start = indptr[row]
     row_end = indptr[row + 1]
-    shared_sum = cuda.shared.array(128, dtype=numba.float64)
+    shared_sum = cuda.shared.array(1024, dtype=numba.float64)
     partial_sum = 0.0
     j = row_start + tid
 
@@ -733,7 +733,7 @@ def sptrsv_numba_csr_wavefront_unrolling_kernel_16(data, indices, indptr, b, y, 
     row = wavefronts[wave_offset + block_id]
     row_start = indptr[row]
     row_end = indptr[row + 1]
-    shared_sum = cuda.shared.array(128, dtype=numba.float64)
+    shared_sum = cuda.shared.array(1024, dtype=numba.float64)
     partial_sum = 0.0
     j = row_start + tid
 
@@ -774,7 +774,7 @@ def sptrsv_numba_csr_wavefront_unrolling_kernel_32(data, indices, indptr, b, y, 
     row = wavefronts[wave_offset + block_id]
     row_start = indptr[row]
     row_end = indptr[row + 1]
-    shared_sum = cuda.shared.array(128, dtype=numba.float64)
+    shared_sum = cuda.shared.array(1024, dtype=numba.float64)
     partial_sum = 0.0
     j = row_start + tid
 
@@ -815,7 +815,7 @@ def sptrsv_numba_csr_wavefront_unrolling_kernel_64(data, indices, indptr, b, y, 
     row = wavefronts[wave_offset + block_id]
     row_start = indptr[row]
     row_end = indptr[row + 1]
-    shared_sum = cuda.shared.array(128, dtype=numba.float64)
+    shared_sum = cuda.shared.array(1024, dtype=numba.float64)
     partial_sum = 0.0
     j = row_start + tid
 
@@ -1018,7 +1018,7 @@ def sptrsv_numba_csr_sync_free_unrolling_kernel_4(data, indices, indptr, b, y, M
     
     row_start = indptr[row]
     row_end = indptr[row + 1]
-    shared_sum = cuda.shared.array(128, dtype=numba.float64)
+    shared_sum = cuda.shared.array(1024, dtype=numba.float64)
     partial_sum = 0.0
     j = row_start + tid
     
@@ -1071,7 +1071,7 @@ def sptrsv_numba_csr_sync_free_unrolling_kernel_8(data, indices, indptr, b, y, M
     
     row_start = indptr[row]
     row_end = indptr[row + 1]
-    shared_sum = cuda.shared.array(128, dtype=numba.float64)
+    shared_sum = cuda.shared.array(1024, dtype=numba.float64)
     partial_sum = 0.0
     j = row_start + tid
     
@@ -1124,7 +1124,7 @@ def sptrsv_numba_csr_sync_free_unrolling_kernel_16(data, indices, indptr, b, y, 
     
     row_start = indptr[row]
     row_end = indptr[row + 1]
-    shared_sum = cuda.shared.array(128, dtype=numba.float64)
+    shared_sum = cuda.shared.array(1024, dtype=numba.float64)
     partial_sum = 0.0
     j = row_start + tid
     
@@ -1177,7 +1177,7 @@ def sptrsv_numba_csr_sync_free_unrolling_kernel_32(data, indices, indptr, b, y, 
     
     row_start = indptr[row]
     row_end = indptr[row + 1]
-    shared_sum = cuda.shared.array(128, dtype=numba.float64)
+    shared_sum = cuda.shared.array(1024, dtype=numba.float64)
     partial_sum = 0.0
     j = row_start + tid
     
@@ -1230,7 +1230,7 @@ def sptrsv_numba_csr_sync_free_unrolling_kernel_64(data, indices, indptr, b, y, 
     
     row_start = indptr[row]
     row_end = indptr[row + 1]
-    shared_sum = cuda.shared.array(128, dtype=numba.float64)
+    shared_sum = cuda.shared.array(1024, dtype=numba.float64)
     partial_sum = 0.0
     j = row_start + tid
     
@@ -1465,7 +1465,7 @@ def sptrsv_numba_csr_wavefront_mapping_kernel(data, indices, indptr, b, y, wavef
     row_start = indptr[row]
     row_end = indptr[row + 1]
     
-    shared_sum = cuda.shared.array(128, dtype=numba.float64)
+    shared_sum = cuda.shared.array(1024, dtype=numba.float64)
     
     partial_sum = 0.0
     for j in range(row_start + tid, row_end - 1, block_size):
@@ -1536,7 +1536,7 @@ def sptrsv_numba_csr_sync_free_mapping_kernel(data, indices, indptr, b, y, M, de
     
     row_start = indptr[row]
     row_end = indptr[row + 1]
-    shared_sum = cuda.shared.array(128, dtype=numba.float64)
+    shared_sum = cuda.shared.array(1024, dtype=numba.float64)
     partial_sum = 0.0
     for j in range(row_start + tid, row_end - 1, block_size):
         partial_sum += data[j] * y[indices[j]]
