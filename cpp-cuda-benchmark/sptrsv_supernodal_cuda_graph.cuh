@@ -180,17 +180,19 @@ cudaGraph_t sptrsv_csc_supernodal_wavefront_cudagraph(
     return g;
 }
 
-cudaGraph_t create_cuda_graph_from_super_nodes(const int* sn_begin,
-                       const int* Lip,
-                       const int* Li,
-                       const int* Lp,
-                       const float* d_Lx,
-                       const float* d_b,
-                       float* d_x,
-                       int n,
-                       std::vector<std::vector<int>> deps,
-                       int n_super,
-                       int nnz){
+cudaGraph_t create_cuda_graph_from_super_nodes(
+        const int* sn_begin,
+        const int* Lip,
+        const int* Li,
+        const int* d_Li,
+        const int* Lp,
+        const float* d_Lx,
+        const float* d_b,
+        float* d_x,
+        int n,
+        std::vector<std::vector<int>> deps,
+        int n_super,
+        int nnz){
     std::map<int,int> sn_to_node_id;
     CudaDagBuilder builder;
     cublasHandle_t cublas;
@@ -202,17 +204,18 @@ cudaGraph_t create_cuda_graph_from_super_nodes(const int* sn_begin,
         int sup_len = Lip[sn_id + 1] - Lip[sn_id];
         int val_beg = Lp[col_b];
 
-        // 1. FIX: Correct Loop Bound calculation
-        // It should be Lip[sn_id + 1], not Lip[sn_id] + 1
         int row_idx_start = Lip[sn_id] + sup_width;
         int row_idx_end   = Lip[sn_id + 1]; 
         int n_scatter     = row_idx_end - row_idx_start;
 
-        const float* diag_block_ptr = d_Lx + val_beg; // column-major block with lda = sup_len
-        float* x_block_ptr = d_x + col_b;             // pointer to x[col_b]
+        const float* diag_block_ptr = d_Lx + val_beg;
+        float* x_block_ptr = d_x + col_b;
+        // Pointer to the specific indices for this supernode ALREADY ON DEVICE
+        const int* d_current_row_indices = d_Li + row_idx_start;
 
         auto supernode_op = [=](cudaStream_t s) {
             cublasSetStream(cublas, s);
+            // 1. Solve Diagonal Block
             if (sup_width > 0) {
                 CUBLAS_CHECK(cublasStrsv(
                         cublas,
@@ -220,67 +223,47 @@ cudaGraph_t create_cuda_graph_from_super_nodes(const int* sn_begin,
                         CUBLAS_OP_N,
                         CUBLAS_DIAG_NON_UNIT,
                         sup_width,
-                        diag_block_ptr,    // points to (0,0) of block
-                        sup_len,           // lda: number of rows in full block (sup_len)
-                        x_block_ptr,       // vector to be overwritten in-place
+                        diag_block_ptr,
+                        sup_len,
+                        x_block_ptr,
                         1));
             }
 
-
+            // 2. Off-diagonal Update & Scatter
             if (sup_len > sup_width && n_scatter > 0) {
-
-                const float *off_diag_ptr = diag_block_ptr + sup_width; // element (row=sup_width, col=0)
-
-
+                const float *off_diag_ptr = diag_block_ptr + sup_width;
                 float *d_update = nullptr;
                 CUDA_CHECK(cudaMallocAsync(&d_update, sizeof(float) * n_scatter, s));
 
-                // 3. FIX: Math Logic
-                // We calculate: update = A * x. 
-                // We need to SUBTRACT this from the target rows.
-                // scatter_kernel does `x += update`. So we make update negative.
                 const float alpha = -1.0f; 
                 const float beta = 0.0f;
 
-
-                int m = n_scatter;
-                int n = sup_width;
+                // A * x_diag
                 CUBLAS_CHECK(cublasSgemv(
                         cublas,
                         CUBLAS_OP_N,
-                        m,        // rows of A
-                        n,        // cols of A
+                        n_scatter, // m
+                        sup_width, // n
                         &alpha,
                         off_diag_ptr,
-                        sup_len,  // lda
+                        sup_len,   // lda
                         x_block_ptr,
                         1,
                         &beta,
                         d_update,
                         1));
 
-                int *d_row_idx = nullptr;
-                if (n_scatter > 0) {
-                    CUDA_CHECK(cudaMallocAsync(&d_row_idx, sizeof(int) * n_scatter, s));
-                    CUDA_CHECK(cudaMemcpyAsync(d_row_idx,
-                                               &Li[row_idx_start],
-                                               sizeof(int) * n_scatter,
-                                               cudaMemcpyHostToDevice,
-                                               s));
-                }
-
-
                 const int threads_per_block = 256;
                 const int blocks = (n_scatter + threads_per_block - 1) / threads_per_block;
-                if (n_scatter > 0) {
-                    scatter_kernel<<<blocks, threads_per_block, 0, s>>>(d_update, d_row_idx, d_x, n_scatter);
-                }
-                if (d_row_idx) CUDA_CHECK(cudaFreeAsync(d_row_idx, s));
-                if (d_update) CUDA_CHECK(cudaFreeAsync(d_update, s));
+                
+                // NO MEMCPY HERE. We use d_current_row_indices directly.
+                scatter_kernel<<<blocks, threads_per_block, 0, s>>>(d_update, d_current_row_indices, d_x, n_scatter);
+                
+                CUDA_CHECK(cudaFreeAsync(d_update, s));
             }
         };
         int cuda_graph_node = builder.addNode("SuperNode_" + std::to_string(sn_id), supernode_op, {});
-        sn_to_node_id[sn_id] = cuda_graph_node;
+        sn_to_node_id[sn_id] = cuda_graph_node; 
     }
     for (int sn_id = 0; sn_id < n_super; sn_id++){
         std::vector<int>  deps_cg_ids;

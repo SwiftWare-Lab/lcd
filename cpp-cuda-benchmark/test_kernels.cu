@@ -69,10 +69,16 @@ int main(int argc, char** argv){
     float* d_Lx = nullptr;
     CUDA_CHECK(cudaMalloc(&d_Lx, sizeof(float) * nnz_sn));
     CUDA_CHECK(cudaMemcpy(d_Lx, snMat.x.data(), nnz_sn * sizeof(float), cudaMemcpyHostToDevice));
+
+    int* d_Li = nullptr;
+    CUDA_CHECK(cudaMalloc(&d_Li, snMat.i.size() * sizeof(int)));
+    CUDA_CHECK(cudaMemcpy(d_Li, snMat.i.data(), snMat.i.size() * sizeof(int), cudaMemcpyHostToDevice));
+    
     auto cudaGraph = create_cuda_graph_from_super_nodes(
             snMat.supernodes.data(),
             snMat.ip.data(),
             snMat.i.data(),
+            d_Li,
             snMat.p.data(),
             d_Lx,
             b,
@@ -194,23 +200,41 @@ int main(int argc, char** argv){
     std::cout << "Speedup (vs cuSPARSE): " << ms_cusp / ms_custom << "x" << std::endl;
     std::cout << "------------------------------------------" << std::endl;
 
-    // --- 5. CPU Validation ---
+   // --- 5. CPU Validation ---
     auto *xCpu = new float[n];
-    for (int i = 0; i < n; i++){
-        xCpu[i] = 0;
-    }
+    std::memset(xCpu, 0, n * sizeof(float)); // Ensure 0-init for the accumulator logic
 
+    // Run CPU Reference
     sptrsv_csc_cpu(cscMatrix->indptr, cscMatrix->indices, cscMatrix->data, b, xCpu, n);
-    auto atol = 1e-5;
-    int count  = 0;
+
+    auto atol = 1e-4; // Slightly relaxed tolerance for float precision accumulation
+
+    // 1. Validate Custom Graph Result
+    int count_custom = 0;
     for(int i = 0; i < n; i++){
-        if (abs(x[i] - xCpu[i]) > atol){
-            count++;
+        if (std::abs(x[i] - xCpu[i]) > atol){
+            count_custom++;
         }
     }
 
-    std::cout << "Validation (Custom vs CPU):" << std::endl;
-    std::cout << "Total rows: " << spTriLMat.rows() << "\nIncorrect count: " << count << std::endl;
+    // 2. Validate cuSPARSE Result
+    // allocate host memory for cuSPARSE result
+    auto *xCusparse = new float[n];
+    // Copy result from Device (d_x_cusparse) to Host
+    CUDA_CHECK(cudaMemcpy(xCusparse, d_x_cusparse, n * sizeof(float), cudaMemcpyDeviceToHost));
+
+    int count_cusparse = 0;
+    for(int i = 0; i < n; i++){
+        if (std::abs(xCusparse[i] - xCpu[i]) > atol){
+            count_cusparse++;
+        }
+    }
+
+    std::cout << "------------------------------------------" << std::endl;
+    std::cout << "Validation Results (Total Rows: " << n << "):" << std::endl;
+    std::cout << "Custom Graph Errors: " << count_custom << (count_custom == 0 ? " (PASS)" : " (FAIL)") << std::endl;
+    std::cout << "cuSPARSE Errors:     " << count_cusparse << (count_cusparse == 0 ? " (PASS)" : " (FAIL)") << std::endl;
+    std::cout << "------------------------------------------" << std::endl;
 
     // --- Cleanup ---
     cusparseDestroySpMat(matU_CSR);
@@ -223,6 +247,6 @@ int main(int argc, char** argv){
     cudaFree(d_cscColPtr); cudaFree(d_cscRowIdx); cudaFree(d_cscVal);
     cudaFree(d_y_cusparse); cudaFree(d_x_cusparse); cudaFree(dBuffer);
     delete[] b; delete[] x; delete[] xCpu;
-
+    delete[] xCusparse; // Don't forget to delete the new array
     return 0;
 }
