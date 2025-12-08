@@ -7,6 +7,8 @@
 #include "sptrsv_supernodal_cuda_graph.cuh"
 #include <cusparse.h>
 #include <cuda_runtime.h>
+#include <iostream>
+#include <cstring>
 
 // Macro for checking cuSPARSE errors
 #define CUSPARSE_CHECK(func)                                                   \
@@ -38,7 +40,7 @@ int main(int argc, char** argv){
     // --- 1. Load and Prepare Matrix (Host) ---
     Eigen::SparseMatrix<float> spMat = load_matrix_market(file_name);
     auto triLMat = spMat.triangularView<Eigen::Lower>();
-    Eigen::SparseMatrix<float, Eigen::ColMajor> spTriLMat= triLMat;
+    Eigen::SparseMatrix<float, Eigen::ColMajor> spTriLMat = triLMat;
     spTriLMat.makeCompressed();
 
     auto rowPtr = const_cast<int*>(spTriLMat.innerIndexPtr()); // Row indices
@@ -48,20 +50,22 @@ int main(int argc, char** argv){
     int nnz_total = spTriLMat.nonZeros();
 
     auto* cscMatrix =  new CSCMatrix<float>();
-    cscMatrix->n = n;
+    cscMatrix->n      = n;
     cscMatrix->indptr = colInd;
-    cscMatrix->indices = rowPtr;
-    cscMatrix->data = values;
+    cscMatrix->indices= rowPtr;
+    cscMatrix->data   = values;
     
     auto *b = new float[n];
     auto *x = new float[n];
     for (int i = 0; i < n; i++){
-        b[i] = 1;
-        x[i] = 1;
+        b[i] = 1.0f;
+        x[i] = 1.0f;
     }
+
     auto snMat = convert_csc_to_supernodal<float>(*cscMatrix);
-    auto deps = build_dependency_graph(snMat);
+    auto deps  = build_dependency_graph(snMat);
     int nnz_sn = snMat.x.size();
+
     float* d_x = nullptr;
     CUDA_CHECK(cudaMalloc(&d_x, sizeof(float) * n));
     CUDA_CHECK(cudaMemcpy(d_x, x, n * sizeof(float), cudaMemcpyHostToDevice));
@@ -114,67 +118,83 @@ int main(int argc, char** argv){
     std::cout << "Preparing cuSPARSE..." << std::endl;
     
     cusparseHandle_t handle = NULL;
-    cusparseSpMatDescr_t matU_CSR; // We treat it as Upper CSR
+    cusparseSpMatDescr_t matU_CSR;
     cusparseDnVecDescr_t vecX, vecY;
     void* dBuffer = NULL;
     size_t bufferSize = 0;
     
     CUSPARSE_CHECK(cusparseCreate(&handle));
 
-    // Allocate Device Memory (Standard Arrays)
-    int *d_cscColPtr, *d_cscRowIdx;
+    // Allocate Device Memory for matrix + vectors
+    int   *d_cscColPtr, *d_cscRowIdx;
     float *d_cscVal, *d_y_cusparse, *d_x_cusparse;
 
     CUDA_CHECK(cudaMalloc((void**)&d_cscColPtr, (n + 1) * sizeof(int)));
     CUDA_CHECK(cudaMalloc((void**)&d_cscRowIdx, nnz_total * sizeof(int)));
-    CUDA_CHECK(cudaMalloc((void**)&d_cscVal, nnz_total * sizeof(float)));
-    CUDA_CHECK(cudaMalloc((void**)&d_y_cusparse, n * sizeof(float))); 
-    CUDA_CHECK(cudaMalloc((void**)&d_x_cusparse, n * sizeof(float))); 
+    CUDA_CHECK(cudaMalloc((void**)&d_cscVal,    nnz_total * sizeof(float)));
+    CUDA_CHECK(cudaMalloc((void**)&d_y_cusparse, n * sizeof(float))); // will be solution or RHS depending on mapping
+    CUDA_CHECK(cudaMalloc((void**)&d_x_cusparse, n * sizeof(float))); // will be solution (by our choice)
 
-    CUDA_CHECK(cudaMemcpy(d_cscColPtr, colInd, (n + 1) * sizeof(int), cudaMemcpyHostToDevice));
-    CUDA_CHECK(cudaMemcpy(d_cscRowIdx, rowPtr, nnz_total * sizeof(int), cudaMemcpyHostToDevice));
-    CUDA_CHECK(cudaMemcpy(d_cscVal, values, nnz_total * sizeof(float), cudaMemcpyHostToDevice));
+    CUDA_CHECK(cudaMemcpy(d_cscColPtr, colInd,  (n + 1) * sizeof(int), cudaMemcpyHostToDevice));
+    CUDA_CHECK(cudaMemcpy(d_cscRowIdx, rowPtr,  nnz_total * sizeof(int), cudaMemcpyHostToDevice));
+    CUDA_CHECK(cudaMemcpy(d_cscVal,    values,  nnz_total * sizeof(float), cudaMemcpyHostToDevice));
     CUDA_CHECK(cudaMemcpy(d_y_cusparse, b, n * sizeof(float), cudaMemcpyHostToDevice));
     CUDA_CHECK(cudaMemset(d_x_cusparse, 0, n * sizeof(float))); 
 
-    // We create a CSR descriptor using the CSC arrays.
-    // L (Lower, CSC) is structurally identical to U (Upper, CSR).
-    CUSPARSE_CHECK(cusparseCreateCsr(&matU_CSR, n, n, nnz_total,
-                                     d_cscColPtr,  // Treat ColPtr as RowOffsets
-                                     d_cscRowIdx,  // Treat RowIdx as ColInd
+    CUSPARSE_CHECK(cusparseCreateCsr(&matU_CSR,
+                                     n,              // rows
+                                     n,              // cols
+                                     nnz_total,      // nnz
+                                     d_cscColPtr,    // rowOffsets (CSC colPtr)
+                                     d_cscRowIdx,    // colIndices (CSC rowIdx)
                                      d_cscVal,
-                                     CUSPARSE_INDEX_32I, CUSPARSE_INDEX_32I,
-                                     CUSPARSE_INDEX_BASE_ZERO, CUDA_R_32F));
+                                     CUSPARSE_INDEX_32I,
+                                     CUSPARSE_INDEX_32I,
+                                     CUSPARSE_INDEX_BASE_ZERO,
+                                     CUDA_R_32F));
 
-    // We MUST tell cuSPARSE this is now UPPER triangular
-    cusparseFillMode_t fill_upper = CUSPARSE_FILL_MODE_UPPER;
-    cusparseDiagType_t diag_non_unit = CUSPARSE_DIAG_TYPE_NON_UNIT;
+    // Tell cuSPARSE that this is structurally UPPER (since L^T = U)
+    cusparseFillMode_t fill_upper   = CUSPARSE_FILL_MODE_UPPER;
+    cusparseDiagType_t diag_non_unit= CUSPARSE_DIAG_TYPE_NON_UNIT;
     
-    CUSPARSE_CHECK(cusparseSpMatSetAttribute(matU_CSR, CUSPARSE_SPMAT_FILL_MODE, &fill_upper, sizeof(fill_upper)));
-    CUSPARSE_CHECK(cusparseSpMatSetAttribute(matU_CSR, CUSPARSE_SPMAT_DIAG_TYPE, &diag_non_unit, sizeof(diag_non_unit)));
-    CUSPARSE_CHECK(cusparseCreateDnVec(&vecY, n, d_y_cusparse, CUDA_R_32F)); 
-    CUSPARSE_CHECK(cusparseCreateDnVec(&vecX, n, d_x_cusparse, CUDA_R_32F)); 
+    CUSPARSE_CHECK(cusparseSpMatSetAttribute(
+        matU_CSR, CUSPARSE_SPMAT_FILL_MODE,
+        &fill_upper, sizeof(fill_upper)));
+    CUSPARSE_CHECK(cusparseSpMatSetAttribute(
+        matU_CSR, CUSPARSE_SPMAT_DIAG_TYPE,
+        &diag_non_unit, sizeof(diag_non_unit)));
 
     float alpha = 1.0f;
     cusparseSpSVDescr_t spsvDescr;
     CUSPARSE_CHECK(cusparseSpSV_createDescr(&spsvDescr));
 
-    // We solve U^T * x = y  (which is L * x = y)
+    // We solve L x = b by solving U^T x = b  (U = L^T).
+    // SpSV semantics: op(A) * y = alpha * x
+    // We want op(A)=U^T, y = solution x, x = RHS b.
     cusparseOperation_t op = CUSPARSE_OPERATION_TRANSPOSE;
+
+    CUSPARSE_CHECK(cusparseCreateDnVec(&vecX, n, d_y_cusparse, CUDA_R_32F)); // x = RHS = b
+    CUSPARSE_CHECK(cusparseCreateDnVec(&vecY, n, d_x_cusparse, CUDA_R_32F)); // y = solution
 
     // Get Buffer Size
     CUSPARSE_CHECK(cusparseSpSV_bufferSize(
         handle, op,
-        &alpha, matU_CSR, vecX, vecY, CUDA_R_32F,
-        CUSPARSE_SPSV_ALG_DEFAULT, spsvDescr, &bufferSize));
+        &alpha, matU_CSR, vecX, vecY,
+        CUDA_R_32F,
+        CUSPARSE_SPSV_ALG_DEFAULT,
+        spsvDescr,
+        &bufferSize));
 
     CUDA_CHECK(cudaMalloc(&dBuffer, bufferSize));
 
     // Analysis
     CUSPARSE_CHECK(cusparseSpSV_analysis(
         handle, op,
-        &alpha, matU_CSR, vecX, vecY, CUDA_R_32F,
-        CUSPARSE_SPSV_ALG_DEFAULT, spsvDescr, dBuffer));
+        &alpha, matU_CSR, vecX, vecY,
+        CUDA_R_32F,
+        CUSPARSE_SPSV_ALG_DEFAULT,
+        spsvDescr,
+        dBuffer));
 
     // Solve
     cudaEvent_t start_cusp, stop_cusp;
@@ -185,8 +205,10 @@ int main(int argc, char** argv){
     CUDA_CHECK(cudaEventRecord(start_cusp));
     CUSPARSE_CHECK(cusparseSpSV_solve(
         handle, op,
-        &alpha, matU_CSR, vecX, vecY, CUDA_R_32F,
-        CUSPARSE_SPSV_ALG_DEFAULT, spsvDescr));
+        &alpha, matU_CSR, vecX, vecY,
+        CUDA_R_32F,
+        CUSPARSE_SPSV_ALG_DEFAULT,
+        spsvDescr));
     CUDA_CHECK(cudaEventRecord(stop_cusp));
     CUDA_CHECK(cudaEventSynchronize(stop_cusp));
 
@@ -196,18 +218,19 @@ int main(int argc, char** argv){
     std::cout << "------------------------------------------" << std::endl;
     std::cout << "Performance Results:" << std::endl;
     std::cout << "Custom Graph Time: " << ms_custom << " ms" << std::endl;
-    std::cout << "cuSPARSE Time:     " << ms_cusp << " ms" << std::endl;
+    std::cout << "cuSPARSE Time:     " << ms_cusp   << " ms" << std::endl;
     std::cout << "Speedup (vs cuSPARSE): " << ms_cusp / ms_custom << "x" << std::endl;
     std::cout << "------------------------------------------" << std::endl;
 
-   // --- 5. CPU Validation ---
+    // --- 5. CPU Validation ---
     auto *xCpu = new float[n];
-    std::memset(xCpu, 0, n * sizeof(float)); // Ensure 0-init for the accumulator logic
+    std::memset(xCpu, 0, n * sizeof(float)); // Ensure 0-init for accumulator logic
 
     // Run CPU Reference
-    sptrsv_csc_cpu(cscMatrix->indptr, cscMatrix->indices, cscMatrix->data, b, xCpu, n);
+    sptrsv_csc_cpu(cscMatrix->indptr, cscMatrix->indices,
+                   cscMatrix->data, b, xCpu, n);
 
-    auto atol = 1e-4; // Slightly relaxed tolerance for float precision accumulation
+    auto atol = 1e-4f; // tolerance for float precision
 
     // 1. Validate Custom Graph Result
     int count_custom = 0;
@@ -218,10 +241,12 @@ int main(int argc, char** argv){
     }
 
     // 2. Validate cuSPARSE Result
-    // allocate host memory for cuSPARSE result
     auto *xCusparse = new float[n];
-    // Copy result from Device (d_x_cusparse) to Host
-    CUDA_CHECK(cudaMemcpy(xCusparse, d_x_cusparse, n * sizeof(float), cudaMemcpyDeviceToHost));
+
+    // *** IMPORTANT: solution is now in d_x_cusparse ***
+    CUDA_CHECK(cudaMemcpy(xCusparse, d_x_cusparse,
+                          n * sizeof(float),
+                          cudaMemcpyDeviceToHost));
 
     int count_cusparse = 0;
     for(int i = 0; i < n; i++){
@@ -232,8 +257,10 @@ int main(int argc, char** argv){
 
     std::cout << "------------------------------------------" << std::endl;
     std::cout << "Validation Results (Total Rows: " << n << "):" << std::endl;
-    std::cout << "Custom Graph Errors: " << count_custom << (count_custom == 0 ? " (PASS)" : " (FAIL)") << std::endl;
-    std::cout << "cuSPARSE Errors:     " << count_cusparse << (count_cusparse == 0 ? " (PASS)" : " (FAIL)") << std::endl;
+    std::cout << "Custom Graph Errors: " << count_custom
+              << (count_custom == 0 ? " (PASS)" : " (FAIL)") << std::endl;
+    std::cout << "cuSPARSE Errors:     " << count_cusparse
+              << (count_cusparse == 0 ? " (PASS)" : " (FAIL)") << std::endl;
     std::cout << "------------------------------------------" << std::endl;
 
     // --- Cleanup ---
@@ -241,12 +268,22 @@ int main(int argc, char** argv){
     cusparseDestroyDnVec(vecX);
     cusparseDestroyDnVec(vecY);
     cusparseSpSV_destroyDescr(spsvDescr);
-    
     cusparseDestroy(handle);
-    cudaFree(d_x); cudaFree(d_Lx);
-    cudaFree(d_cscColPtr); cudaFree(d_cscRowIdx); cudaFree(d_cscVal);
-    cudaFree(d_y_cusparse); cudaFree(d_x_cusparse); cudaFree(dBuffer);
-    delete[] b; delete[] x; delete[] xCpu;
-    delete[] xCusparse; // Don't forget to delete the new array
+
+    cudaFree(d_x);
+    cudaFree(d_Lx);
+    cudaFree(d_Li);
+    cudaFree(d_cscColPtr);
+    cudaFree(d_cscRowIdx);
+    cudaFree(d_cscVal);
+    cudaFree(d_y_cusparse);
+    cudaFree(d_x_cusparse);
+    cudaFree(dBuffer);
+
+    delete[] b;
+    delete[] x;
+    delete[] xCpu;
+    delete[] xCusparse;
+
     return 0;
 }
