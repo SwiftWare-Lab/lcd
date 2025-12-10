@@ -3,25 +3,64 @@ import scipy.io as sio
 import os
 
 # compute wavefronts of sparse matrix L (CSC)
-def compute_wavefront(L):
+# For lower triangular: forward substitution (process columns 0 -> n-1)
+# For upper triangular: backward substitution (process columns n-1 -> 0)
+def compute_wavefront(L, upper_triangular=False):
     wavefront_list = []
-    incoming_edges = np.zeros(L.shape[0], dtype=int)
-    # compute incoming edges
-    for i in range(L.shape[0]):
-        for j in range(L.indptr[i], L.indptr[i + 1]):
-            incoming_edges[L.indices[j]] += 1
-    # compute wavefronts
-    wavefront = np.where(incoming_edges == 1)[0]
-    while wavefront.size > 0:
-        wavefront_list.append(wavefront)
-        new_wavefront = np.array([], dtype=int)
-        for i in wavefront:
-            for j in range(L.indptr[i]+1, L.indptr[i + 1]):
-                incoming_edges[L.indices[j]] -= 1
-                if incoming_edges[L.indices[j]] == 1:
-                    new_wavefront = np.append(new_wavefront, L.indices[j])
-        wavefront = new_wavefront
-
+    
+    if not upper_triangular:
+        # Lower triangular: original algorithm
+        incoming_edges = np.zeros(L.shape[0], dtype=int)
+        # compute incoming edges
+        for i in range(L.shape[0]):
+            for j in range(L.indptr[i], L.indptr[i + 1]):
+                incoming_edges[L.indices[j]] += 1
+        # compute wavefronts
+        wavefront = np.where(incoming_edges == 1)[0]
+        while wavefront.size > 0:
+            wavefront_list.append(wavefront)
+            new_wavefront = np.array([], dtype=int)
+            for i in wavefront:
+                for j in range(L.indptr[i]+1, L.indptr[i + 1]):
+                    incoming_edges[L.indices[j]] -= 1
+                    if incoming_edges[L.indices[j]] == 1:
+                        new_wavefront = np.append(new_wavefront, L.indices[j])
+            wavefront = new_wavefront
+    else:
+        # Upper triangular: count outgoing dependencies (columns that this column depends on)
+        outgoing_edges = np.zeros(L.shape[0], dtype=int)
+        # For column i, count how many columns j > i where U[i,j] != 0
+        # Column i depends on columns j > i where U[i,j] != 0
+        # In CSC upper triangular, column j contains U[row,j] where row <= j
+        # So for column i, we need to count: in how many columns j > i does row i appear?
+        for j in range(L.shape[0]):  # for each column j
+            for idx in range(L.indptr[j], L.indptr[j + 1]):
+                row_i = L.indices[idx]
+                if row_i < j:  # U[row_i, j] != 0 where row_i < j
+                    outgoing_edges[row_i] += 1
+        
+        # Start with columns that have no outgoing dependencies
+        wavefront = np.where(outgoing_edges == 0)[0]
+        processed = np.zeros(L.shape[0], dtype=bool)
+        
+        while wavefront.size > 0:
+            wavefront_list.append(wavefront)
+            processed[wavefront] = True
+            new_wavefront = []
+            
+            # For each processed column j, decrement dependencies of columns i < j that depend on j
+            for j in wavefront:
+                # Check column j: which rows i < j appear in it (meaning U[i,j] != 0)?
+                for idx in range(L.indptr[j], L.indptr[j + 1]):
+                    i = L.indices[idx]
+                    if i < j:  # U[i,j] != 0, so column i depends on column j
+                        outgoing_edges[i] -= 1
+                        if outgoing_edges[i] == 0 and not processed[i]:
+                            new_wavefront.append(i)
+                            processed[i] = True
+            
+            wavefront = np.array(new_wavefront, dtype=int)
+    
     return wavefront_list
 
 
@@ -37,22 +76,51 @@ def compact_2d_list(wavefront_list):
 
 
 # count incoming edges of each node
-def incoming_edge(L):
+# For CSC format:
+# - Lower triangular (forward sub): column i depends on columns j < i where L[i,j] != 0
+# - Upper triangular (backward sub): column i depends on columns j > i where L[i,j] != 0
+def incoming_edge(L, upper_triangular=False):
     incoming_edges = np.zeros(L.shape[0], dtype=np.int32)
-    # compute incoming edges
-    for i in range(L.shape[0]):
-        for j in range(L.indptr[i], L.indptr[i + 1]): # excluding diagonal
-            incoming_edges[L.indices[j]] += 1
+    
+    if not upper_triangular:
+        # Lower triangular: original algorithm
+        # Column i receives updates from columns < i
+        for i in range(L.shape[0]):
+            for j in range(L.indptr[i], L.indptr[i + 1]):
+                incoming_edges[L.indices[j]] += 1
+    else:
+        # Upper triangular: count dependencies from columns > i
+        # For column i, count how many columns j > i contain row i
+        # (meaning A[i,j] != 0, so column i depends on column j)
+        for j in range(L.shape[0]):  # for each column j
+            for idx in range(L.indptr[j], L.indptr[j + 1]):
+                row_i = L.indices[idx]
+                if row_i < j:  # A[row_i, j] where row_i < j (upper triangular off-diagonal)
+                    incoming_edges[row_i] += 1
+    
     return incoming_edges
 
 
-def incoming_edge_csr(L):
+def incoming_edge_csr(L, upper_triangular=False):
+    # Build map of column -> rows that contain that column
+    # outgoing_edges[i] = number of columns in row i
+    # For sync-free algorithms: outgoing_edges is the initial dependency count
     incoming_edges = [[] for _ in range(L.shape[1])]
     outgoing_edges = np.zeros(L.shape[0], dtype=np.int32)
-    for i  in range(L.shape[0]):
+    
+    for i in range(L.shape[0]):
         for j in range(L.indptr[i], L.indptr[i + 1]):
             incoming_edges[L.indices[j]].append(i)
-        outgoing_edges[i] = L.indptr[i + 1] - L.indptr[i]
+        # For dependency counting:
+        # Lower triangular: row i depends on off-diagonal elements (exclude last element - diagonal)
+        # Upper triangular: row i depends on off-diagonal elements (exclude last element - diagonal)
+        # In both cases, subtract 1 for diagonal
+        row_len = L.indptr[i + 1] - L.indptr[i]
+        if row_len > 0:
+            outgoing_edges[i] = row_len - 1  # Exclude diagonal
+        else:
+            outgoing_edges[i] = 0
+    
     map_ptr = np.zeros(L.shape[1] + 1, dtype=np.int32)
     map_vals = np.zeros(L.nnz, dtype=np.int32)
     for i in range(L.shape[1]):
@@ -103,9 +171,9 @@ def get_L_signature(L, Ls, name):
     dict['max lnnz per col'] = max(L.getnnz(axis=0))
     dict['ldensity'] = L.nnz / (L.shape[0] * L.shape[1])
     dict["lwavefronts"] = len(compute_wavefront(L))
-    dict['num supernodes'] = len(Ls['supernodes'])
+    dict['num supernodes'] = len(Ls['supernodes']) - 1
     dict['max supernode width'] = Ls['max_width']
-    dict['average supernode width'] = L.shape[0] / len(Ls['supernodes'])
+    dict['average supernode width'] = L.shape[0] / (len(Ls['supernodes']) - 1)
     return dict
 
 
