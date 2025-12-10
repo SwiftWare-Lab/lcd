@@ -562,7 +562,7 @@ def correctness_test():
     
     return matrix_signatures, method_correctness
 
-# mat_signatures, method_correctness = correctness_test()
+mat_signatures, method_correctness = correctness_test()
 # import pandas as pd
 # df = pd.DataFrame(mat_signatures)
 # df.to_csv("gs_matrix_signatures.csv")
