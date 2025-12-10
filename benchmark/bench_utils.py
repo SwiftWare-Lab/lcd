@@ -103,9 +103,9 @@ def get_L_signature(L, Ls, name):
     dict['max lnnz per col'] = max(L.getnnz(axis=0))
     dict['ldensity'] = L.nnz / (L.shape[0] * L.shape[1])
     dict["lwavefronts"] = len(compute_wavefront(L))
-    dict['num supernodes'] = len(Ls['supernodes'])
+    dict['num supernodes'] = len(Ls['supernodes']) - 1
     dict['max supernode width'] = Ls['max_width']
-    dict['average supernode width'] = L.shape[0] / len(Ls['supernodes'])
+    dict['average supernode width'] = L.shape[0] / (len(Ls['supernodes']) - 1)
     return dict
 
 

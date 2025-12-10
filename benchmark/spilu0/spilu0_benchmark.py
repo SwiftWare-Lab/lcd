@@ -17,6 +17,7 @@ from cupyx.scipy.sparse import csr_matrix as cp_csr_matrix
 from cupyx.scipy.sparse.linalg import spilu as cp_spilu
 
 from bench_utils import get_matrix_signature, compact_2d_list
+from kernels.sptrsv_coarsened import compact_coarsened_wavefronts
 from kernels.spilu0_baseline import (
     ilu0_csr_numba_wavefront, ilu0_csr_numba_sync_free, cusparse_ilu0,
     compute_ilu_dependency_counts_csr, build_successors_from_csr,
@@ -37,6 +38,13 @@ from kernels.spilu0_hlevel import (
     ilu0_numba_csr_h_level_graph,
     ilu0_numba_csr_syncfree_h_level_graph,
     ilu0_numba_csr_syncfree_persistent_graph,
+)
+from kernels.spilu0_coarsened import (
+    spilu0_numba_csr_wavefront_register_tiled,
+    spilu0_numba_csr_wavefront_block_tiled,
+    spilu0_numba_csr_wavefront_all_tiled,
+    spilu0_numba_csr_sync_free_block_tiled,
+    spilu0_numba_csr_sync_free_register_tiled,
 )
 
 warnings.filterwarnings('ignore', category=NumbaPerformanceWarning)
@@ -190,6 +198,15 @@ for threads in thread_counts:
 for unroll in unroll_factors:
     for threads in thread_counts:
         method_list.append(f"csr-sf-u{unroll}-t{threads}")
+
+# Coarsened/Tiled variants
+method_list.extend([
+    "csr-wf-reg-tiled",
+    "csr-wf-block-tiled",
+    "csr-wf-all-tiled",
+    "csr-sf-block-tiled",
+    "csr-sf-reg-tiled",
+])
 
 # H-Level
 for bw in h_bandwidths:
@@ -677,6 +694,63 @@ def correctness_test():
             except Exception as e:
                 print(f"{method_name} failed: {e}")
 
+        # Tiled/Coarsened Wavefront Variants
+        for method_name, launcher in [
+            ("csr-wf-reg-tiled", spilu0_numba_csr_wavefront_register_tiled),
+            ("csr-wf-block-tiled", spilu0_numba_csr_wavefront_block_tiled),
+            ("csr-wf-all-tiled", spilu0_numba_csr_wavefront_all_tiled),
+        ]:
+            try:
+                A_copy = A_test.copy()
+                wavefronts = compute_ilu_wavefront_csr(A_copy)
+                wave_start_loc, waves = compact_2d_list(wavefronts)
+                _, _, level_boundaries = compact_coarsened_wavefronts(wavefronts, 1)
+                diag_pos = find_diagonal_positions(A_copy)
+                result_dev = launcher(
+                    A_copy.data, A_copy.indices, A_copy.indptr, diag_pos, n, A_copy.nnz,
+                    wave_start_loc, waves, level_boundaries
+                )
+                result_data = result_dev.copy_to_host()
+                A_result = csr_matrix((result_data, A_copy.indices, A_copy.indptr), shape=A.shape)
+                if validate_ilu0_factorization(A_result, A_test):
+                    print(f"{method_name}: correct")
+                    method_correctness[mat_name][method_name] = 1
+                else:
+                    print(f"Warning: {method_name} incorrect")
+            except Exception as e:
+                print(f"{method_name} failed: {e}")
+
+        # Tiled/Coarsened Sync-Free Variants
+        sf_tiled_variants = [
+            ("csr-sf-block-tiled", spilu0_numba_csr_sync_free_block_tiled),
+            ("csr-sf-reg-tiled", spilu0_numba_csr_sync_free_register_tiled),
+        ]
+        for method_name, launcher in sf_tiled_variants:
+            try:
+                A_copy = A_test.copy()
+                dep_counts = compute_ilu_dependency_counts_csr(A_copy)
+                succ_offsets, succ_indices = build_successors_from_csr(A_copy)
+                diag_pos = find_diagonal_positions(A_copy)
+                if method_name == "csr-sf-block-tiled":
+                    result_dev = launcher(
+                        A_copy.data, A_copy.indices, A_copy.indptr, diag_pos, n,
+                        dep_counts, succ_offsets, succ_indices
+                    )
+                else:
+                    result_dev = launcher(
+                        A_copy.data, A_copy.indices, A_copy.indptr, diag_pos, n,
+                        dep_counts, succ_offsets, succ_indices
+                    )
+                result_data = result_dev.copy_to_host()
+                A_result = csr_matrix((result_data, A_copy.indices, A_copy.indptr), shape=A.shape)
+                if validate_ilu0_factorization(A_result, A_test):
+                    print(f"{method_name}: correct")
+                    method_correctness[mat_name][method_name] = 1
+                else:
+                    print(f"Warning: {method_name} incorrect")
+            except Exception as e:
+                print(f"{method_name} failed: {e}")
+
         # Test all H-Level bandwidths
         for bw in h_bandwidths:
             method_name = f'csr-h-bw{bw}'
@@ -787,6 +861,15 @@ for _ in thread_counts:
 for _ in unroll_factors:
     for _ in thread_counts:
         styles.append(("blue", "--"))  # SF unrolling
+
+# Tiled/Coarsened styles
+styles.extend([
+    ("brown", "-"),   # wf reg tiled
+    ("brown", "--"),  # wf block tiled
+    ("brown", ":"),   # wf all tiled
+    ("olive", "-"),   # sf block tiled
+    ("olive", "--"),  # sf reg tiled
+])
 
 # H-Level styles
 for _ in h_bandwidths:
@@ -1153,6 +1236,74 @@ def benchmark(matrices, provider):
             ilu0_numba_csr_syncfree_persistent_graph(d_data, d_indices, d_indptr, n, waves, wave_start_loc, d_diag_pos, band_width=band_width)
         
         ms, min_ms, max_ms = triton.testing.do_bench(run_numba_csr_h_sf_persist, quantiles=quantiles, warmup=warmup, rep=rep)
+
+    elif provider == 'csr-wf-reg-tiled':
+        wavefronts = compute_ilu_wavefront_csr(A)
+        wave_start_loc, waves = compact_2d_list(wavefronts)
+        _, _, level_boundaries = compact_coarsened_wavefronts(wavefronts, 1)
+        diag_pos = find_diagonal_positions(A)
+
+        def run_numba_csr_wf_reg_tiled():
+            spilu0_numba_csr_wavefront_register_tiled(
+                A.data, A.indices, A.indptr, diag_pos, n, A.nnz,
+                wave_start_loc, waves, level_boundaries
+            )
+
+        ms, min_ms, max_ms = triton.testing.do_bench(run_numba_csr_wf_reg_tiled, quantiles=quantiles, warmup=warmup, rep=rep)
+
+    elif provider == 'csr-wf-block-tiled':
+        wavefronts = compute_ilu_wavefront_csr(A)
+        wave_start_loc, waves = compact_2d_list(wavefronts)
+        _, _, level_boundaries = compact_coarsened_wavefronts(wavefronts, 1)
+        diag_pos = find_diagonal_positions(A)
+
+        def run_numba_csr_wf_block_tiled():
+            spilu0_numba_csr_wavefront_block_tiled(
+                A.data, A.indices, A.indptr, diag_pos, n, A.nnz,
+                wave_start_loc, waves, level_boundaries
+            )
+
+        ms, min_ms, max_ms = triton.testing.do_bench(run_numba_csr_wf_block_tiled, quantiles=quantiles, warmup=warmup, rep=rep)
+
+    elif provider == 'csr-wf-all-tiled':
+        wavefronts = compute_ilu_wavefront_csr(A)
+        wave_start_loc, waves = compact_2d_list(wavefronts)
+        _, _, level_boundaries = compact_coarsened_wavefronts(wavefronts, 1)
+        diag_pos = find_diagonal_positions(A)
+
+        def run_numba_csr_wf_all_tiled():
+            spilu0_numba_csr_wavefront_all_tiled(
+                A.data, A.indices, A.indptr, diag_pos, n, A.nnz,
+                wave_start_loc, waves, level_boundaries
+            )
+
+        ms, min_ms, max_ms = triton.testing.do_bench(run_numba_csr_wf_all_tiled, quantiles=quantiles, warmup=warmup, rep=rep)
+
+    elif provider == 'csr-sf-block-tiled':
+        dep_counts = compute_ilu_dependency_counts_csr(A)
+        succ_offsets, succ_indices = build_successors_from_csr(A)
+        diag_pos = find_diagonal_positions(A)
+
+        def run_numba_csr_sf_block_tiled():
+            spilu0_numba_csr_sync_free_block_tiled(
+                A.data, A.indices, A.indptr, diag_pos, n,
+                dep_counts, succ_offsets, succ_indices
+            )
+
+        ms, min_ms, max_ms = triton.testing.do_bench(run_numba_csr_sf_block_tiled, quantiles=quantiles, warmup=warmup, rep=rep)
+
+    elif provider == 'csr-sf-reg-tiled':
+        dep_counts = compute_ilu_dependency_counts_csr(A)
+        succ_offsets, succ_indices = build_successors_from_csr(A)
+        diag_pos = find_diagonal_positions(A)
+
+        def run_numba_csr_sf_reg_tiled():
+            spilu0_numba_csr_sync_free_register_tiled(
+                A.data, A.indices, A.indptr, diag_pos, n,
+                dep_counts, succ_offsets, succ_indices
+            )
+
+        ms, min_ms, max_ms = triton.testing.do_bench(run_numba_csr_sf_reg_tiled, quantiles=quantiles, warmup=warmup, rep=rep)
 
     else:
         print(f"Unknown provider: {provider}, skipping...")

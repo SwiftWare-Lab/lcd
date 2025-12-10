@@ -3,7 +3,7 @@ from numba import cuda
 
 try:
     import pyamgx
-    PYAMGX_AVAILABLE = True
+    PYAMGX_AVAILABLE = False
     # pyamgx.initialize()
 except ImportError:
     PYAMGX_AVAILABLE = False
@@ -297,7 +297,7 @@ class AMGXGaussSeidelSolver:
 try:
     import sys
     from petsc4py import PETSc
-    PETSC_AVAILABLE = True
+    PETSC_AVAILABLE = False
 except ImportError:
     PETSC_AVAILABLE = False
 

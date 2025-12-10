@@ -166,3 +166,14 @@ cython_debug/
 # datasets
 code_gen/cfmtx_matrices/
 code_gen/mtx_matrices/
+
+# results
+*.png
+*.csv
+*.html
+*.txt
+
+# local helpers
+generate_testlist.py
+
+local_playground/

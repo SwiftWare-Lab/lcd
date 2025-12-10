@@ -9,7 +9,7 @@ from cupyx.scipy.sparse.linalg import spsolve_triangular as cp_spsolve  # GPU sp
 import cupyx.scipy.sparse.linalg as cpx_linalg
 import time
 import scipy.io as scio
-from scipy.sparse import csc_matrix, tril
+from scipy.sparse import csc_matrix, tril, triu
 import cupyx.scipy.sparse as cusparse
 import torch
 

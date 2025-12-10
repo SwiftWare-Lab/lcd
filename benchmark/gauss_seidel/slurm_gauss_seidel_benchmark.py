@@ -4,6 +4,7 @@ import os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 import warnings
+import time
 import numpy as np
 import scipy.io as spio
 import scipy.sparse as sp
@@ -11,17 +12,30 @@ import triton
 from numba import cuda
 from numba.core.errors import NumbaPerformanceWarning
 
+try:
+    import cupy as cp
+    CUPY_AVAILABLE = True
+except ImportError:
+    CUPY_AVAILABLE = False
+
 from kernels.gauss_seidel_baseline import (
     gauss_seidel_csr,
     gauss_seidel_diag_csr,
     gs_numba_wavefront,
     gs_numba_syncfree,
     PYAMGX_AVAILABLE,
-    AMGXGaussSeidelSolver
+    PETSC_AVAILABLE,
+    AMGXGaussSeidelSolver,
+    PETScGaussSeidelSolver
 )
+
+if PETSC_AVAILABLE:
+    from petsc4py import PETSc
 from kernels.gauss_seidel_hlevel import (
     gs_numba_hlevel_solve,
-    gs_h_level_analyze
+    gs_h_level_analyze,
+    gs_numba_hlevel_syncfree_banded_solve,
+    gs_numba_hlevel_syncfree_persistent_solve,
 )
 from kernels.gauss_seidel_unrolled import (
     gs_numba_wavefront_mapping,
@@ -47,9 +61,12 @@ from kernels.gauss_seidel_unrolled_diag import (
 )
 from kernels.gauss_seidel_hlevel_diag import (
     gs_numba_hlevel_solve_diag,
-    gs_h_level_analyze_diag
+    gs_h_level_analyze_diag,
+    gs_numba_hlevel_syncfree_banded_solve_diag,
+    gs_numba_hlevel_syncfree_persistent_solve_diag,
 )
 from kernels.gauss_seidel_utils import extract_diagonal_info_gpu
+from kernels.gauss_seidel_cupy import CuPyGaussSeidelSolver
 from bench_utils import get_matrix_signature
 
 warnings.filterwarnings('ignore', category=NumbaPerformanceWarning)
@@ -74,12 +91,17 @@ mtx_override = os.environ.get("SPTRSV_MATRIX")
 if mtx_override:
     mtx_list = [mtx_override]
 
+def matrix_basename(path: str) -> str:
+    base = os.path.basename(path)
+    stem, _ = os.path.splitext(base)
+    return stem.replace(" ", "_")
+
 # ============================================================================
 # Benchmark Configuration
 # ============================================================================
 unroll_factors = [4, 8, 16, 32, 64]
 thread_counts = [32, 64, 128, 256]
-band_widths = [2, 4, 8, 16]
+band_widths = [1, 2, 4, 8, 16]
 num_iterations = 10
 
 # ============================================================================
@@ -96,9 +118,14 @@ method_list.extend([
     "cpu-sequential-diag",
 ])
 
-# Add AMGX if available
 # if PYAMGX_AVAILABLE:
-    # method_list.append("amgx-gauss-seidel")
+#     method_list.append("amgx-gauss-seidel")
+
+# if 'PETSC_AVAILABLE' in globals() and PETSC_AVAILABLE:
+#     method_list.append("petsc-gauss-seidel")
+
+if 'CUPY_AVAILABLE' in globals() and CUPY_AVAILABLE:
+    method_list.append("cupy-gauss-seidel")
 
 method_list.extend([
     "gs-wf-base",
@@ -154,6 +181,10 @@ for bw in band_widths:
     method_list.extend([
         f"gs-h-bw{bw}",
         f"gs-h-bw{bw}-diag",
+        f"gs-h-sf-bw{bw}",
+        f"gs-h-sf-bw{bw}-diag",
+        f"gs-h-sf-persist-bw{bw}",
+        f"gs-h-sf-persist-bw{bw}-diag",
     ])
 
 def compute_wavefront_gs(A):
@@ -288,6 +319,10 @@ def correctness_test():
         'gs-sf-u4-t128-diag',     # Sync-free diag
         'gs-h-bw8',               # H-level
         'gs-h-bw8-diag',          # H-level diag
+        'gs-h-sf-bw8',            # Sync-free H-level
+        'gs-h-sf-bw8-diag',       # Sync-free H-level diag
+        'gs-h-sf-persist-bw8',    # Persistent Sync-free H-level
+        'gs-h-sf-persist-bw8-diag',# Persistent Sync-free H-level diag
     ]
     
     if PYAMGX_AVAILABLE:
@@ -442,19 +477,49 @@ def correctness_test():
                     wave_start, waves = compact_wavefronts(wavefronts)
                     d_waves = cuda.to_device(waves)
                     
-                    bw = int(method.replace('gs-h-bw', '').replace('-diag', ''))
-                    
-                    if 'diag' in method:
-                        d_diag_pos, d_diag_vals = extract_diagonal_info_gpu(A)
-                        analysis_data = gs_h_level_analyze_diag(d_indptr, d_indices, d_waves, 
+                    if 'gs-h-sf-persist' in method:
+                        bw = int(method.replace('gs-h-sf-persist-bw', '').replace('-diag', ''))
+                        if 'diag' in method:
+                            d_diag_pos, d_diag_vals = extract_diagonal_info_gpu(A)
+                            analysis_data = gs_h_level_analyze_diag(d_indptr, d_indices, d_waves, 
+                                                                    wave_start, band_width=bw)
+                            gs_numba_hlevel_syncfree_persistent_solve_diag(
+                                d_data, d_indices, d_indptr, d_diag_pos, d_diag_vals,
+                                d_b, d_x, analysis_data, max_iter=num_iterations, sub_warp_size=8)
+                        else:
+                            analysis_data = gs_h_level_analyze(d_indptr, d_indices, d_waves, 
                                                                wave_start, band_width=bw)
-                        gs_numba_hlevel_solve_diag(d_data, d_indices, d_indptr, d_diag_pos, d_diag_vals,
-                                                  d_b, d_x, analysis_data, max_iter=num_iterations, sub_warp_size=8)
+                            gs_numba_hlevel_syncfree_persistent_solve(
+                                d_data, d_indices, d_indptr, d_b, d_x,
+                                analysis_data, max_iter=num_iterations, sub_warp_size=8)
+                    elif 'gs-h-sf' in method:
+                        bw = int(method.replace('gs-h-sf-bw', '').replace('-diag', ''))
+                        if 'diag' in method:
+                            d_diag_pos, d_diag_vals = extract_diagonal_info_gpu(A)
+                            analysis_data = gs_h_level_analyze_diag(d_indptr, d_indices, d_waves, 
+                                                                    wave_start, band_width=bw)
+                            gs_numba_hlevel_syncfree_banded_solve_diag(
+                                d_data, d_indices, d_indptr, d_diag_pos, d_diag_vals,
+                                d_b, d_x, analysis_data, max_iter=num_iterations, sub_warp_size=8)
+                        else:
+                            analysis_data = gs_h_level_analyze(d_indptr, d_indices, d_waves, 
+                                                               wave_start, band_width=bw)
+                            gs_numba_hlevel_syncfree_banded_solve(
+                                d_data, d_indices, d_indptr, d_b, d_x, 
+                                analysis_data, max_iter=num_iterations, sub_warp_size=8)
                     else:
-                        analysis_data = gs_h_level_analyze(d_indptr, d_indices, d_waves, 
-                                                          wave_start, band_width=bw)
-                        gs_numba_hlevel_solve(d_data, d_indices, d_indptr, d_b, d_x, 
-                                            analysis_data, max_iter=num_iterations, sub_warp_size=8)
+                        bw = int(method.replace('gs-h-bw', '').replace('-diag', ''))
+                        if 'diag' in method:
+                            d_diag_pos, d_diag_vals = extract_diagonal_info_gpu(A)
+                            analysis_data = gs_h_level_analyze_diag(d_indptr, d_indices, d_waves, 
+                                                                    wave_start, band_width=bw)
+                            gs_numba_hlevel_solve_diag(d_data, d_indices, d_indptr, d_diag_pos, d_diag_vals,
+                                                      d_b, d_x, analysis_data, max_iter=num_iterations, sub_warp_size=8)
+                        else:
+                            analysis_data = gs_h_level_analyze(d_indptr, d_indices, d_waves, 
+                                                              wave_start, band_width=bw)
+                            gs_numba_hlevel_solve(d_data, d_indices, d_indptr, d_b, d_x, 
+                                                analysis_data, max_iter=num_iterations, sub_warp_size=8)
                     
                     x_test = d_x.copy_to_host()
                 
@@ -498,6 +563,9 @@ for i, method in enumerate(method_list):
     styles.append((color, style))
 
 configs = []
+plot_suffix = ""
+if mtx_override:
+    plot_suffix = f"-{matrix_basename(mtx_override)}"
 configs.append(
     triton.testing.Benchmark(
         x_names=["matrices"],
@@ -507,7 +575,7 @@ configs.append(
         line_names=line_names,
         styles=styles,
         ylabel="GFLOP/S",
-        plot_name="gauss-seidel-performance",
+        plot_name=f"gauss-seidel-performance{plot_suffix}",
         args={}
     ))
 
@@ -550,24 +618,72 @@ def benchmark(matrices, provider):
         ms, min_ms, max_ms = triton.testing.do_bench(run_cpu_diag, quantiles=quantiles, 
                                                       warmup=warmup, rep=rep)
     
-    # ========================================================================
-    # AMGX BASELINE
-    # ========================================================================
     elif provider == 'amgx-gauss-seidel':
-        if not PYAMGX_AVAILABLE:
-            print(f"AMGX not available, skipping...")
-            return float('nan'), float('nan'), float('nan')
+        # if not PYAMGX_AVAILABLE:
+        print(f"AMGX not available, skipping...")
+        return float('nan'), float('nan'), float('nan')
         
+        # Warmup + manual timing to avoid AMGX/triton capture issues
         amgx_solver = AMGXGaussSeidelSolver(max_iters=num_iterations, tol=1e-6)
-        amgx_solver.setup(A, b, x_init.copy())
-        
-        def run_amgx():
-            amgx_solver.reset_x()
-            amgx_solver.solve()
-        
-        ms, min_ms, max_ms = triton.testing.do_bench(run_amgx, quantiles=quantiles, 
-                                                      warmup=warmup, rep=rep)
-        amgx_solver.destroy()
+        try:
+            amgx_solver.setup(A, b, x_init.copy())
+            
+            for _ in range(warmup):
+                amgx_solver.reset_x()
+                amgx_solver.solve()
+            cuda.synchronize()
+            
+            timings = []
+            for _ in range(rep):
+                amgx_solver.reset_x()
+                cuda.synchronize()
+                t0 = time.perf_counter()
+                amgx_solver.solve()
+                cuda.synchronize()
+                t1 = time.perf_counter()
+                timings.append((t1 - t0) * 1000.0)
+            ms = np.median(timings)
+            min_ms = np.min(timings)
+            max_ms = np.max(timings)
+        except Exception as e:
+            print(f"AMGX Benchmarking failed: {e}")
+            ms, min_ms, max_ms = float('nan'), float('nan'), float('nan')
+        finally:
+            amgx_solver.destroy()
+
+    elif provider == 'petsc-gauss-seidel':
+        if not ('PETSC_AVAILABLE' in globals() and PETSC_AVAILABLE):
+            return float('nan'), float('nan'), float('nan')
+        try:
+            PETSc.Sys.popErrorHandler()
+        except:
+            pass
+        solver = PETScGaussSeidelSolver(max_iters=num_iterations)
+        try:
+            try:
+                solver.setup(A, b, x_init)
+            except Exception as e:
+                print(f"PETSc setup failed: {e}")
+                return float('nan'), float('nan'), float('nan')
+            def run_petsc():
+                solver.reset_x()
+                solver.solve()
+            ms, min_ms, max_ms = triton.testing.do_bench(run_petsc, quantiles=quantiles, warmup=warmup, rep=rep)
+        except Exception as e:
+            print(f"PETSc benchmark runtime error: {e}")
+            return float('nan'), float('nan'), float('nan')
+        finally:
+            solver.destroy()
+
+    elif provider == 'cupy-gauss-seidel':
+        if not ('CUPY_AVAILABLE' in globals() and CUPY_AVAILABLE):
+            return float('nan'), float('nan'), float('nan')
+        solver = CuPyGaussSeidelSolver(max_iters=num_iterations)
+        solver.setup(A, b, x_init.copy())
+        def run_cupy():
+            solver.reset_x()
+            solver.solve()
+        ms, min_ms, max_ms = triton.testing.do_bench(run_cupy, quantiles=quantiles, warmup=warmup, rep=rep)
     
     # ========================================================================
     # GPU BASELINES - REGULAR
@@ -843,6 +959,54 @@ def benchmark(matrices, provider):
                                  analysis_data, max_iter=num_iterations, sub_warp_size=8)
         ms, min_ms, max_ms = triton.testing.do_bench(run, quantiles=quantiles, 
                                                       warmup=warmup, rep=rep)
+
+    elif provider.startswith('gs-h-sf-bw') and not provider.endswith('-diag'):
+        band_width = int(provider.replace('gs-h-sf-bw', '').replace('-diag', ''))
+        
+        d_data = cuda.to_device(A.data)
+        d_indices = cuda.to_device(A.indices.astype(np.int32))
+        d_indptr = cuda.to_device(A.indptr.astype(np.int32))
+        d_b = cuda.to_device(b)
+        d_x = cuda.device_array(n, dtype=np.float64)
+        d_x_init = cuda.to_device(x_init.copy())
+        
+        wavefronts = compute_wavefront_gs(A)
+        wave_start, waves = compact_wavefronts(wavefronts)
+        d_waves = cuda.to_device(waves)
+        
+        analysis_data = gs_h_level_analyze(d_indptr, d_indices, d_waves, 
+                                           wave_start, band_width=band_width)
+        
+        def run():
+            d_x.copy_to_device(d_x_init)
+            gs_numba_hlevel_syncfree_banded_solve(d_data, d_indices, d_indptr, d_b, d_x, 
+                                                 analysis_data, max_iter=num_iterations, sub_warp_size=8)
+        ms, min_ms, max_ms = triton.testing.do_bench(run, quantiles=quantiles, 
+                                                      warmup=warmup, rep=rep)
+
+    elif provider.startswith('gs-h-sf-persist-bw') and not provider.endswith('-diag'):
+        band_width = int(provider.replace('gs-h-sf-persist-bw', '').replace('-diag', ''))
+        
+        d_data = cuda.to_device(A.data)
+        d_indices = cuda.to_device(A.indices.astype(np.int32))
+        d_indptr = cuda.to_device(A.indptr.astype(np.int32))
+        d_b = cuda.to_device(b)
+        d_x = cuda.device_array(n, dtype=np.float64)
+        d_x_init = cuda.to_device(x_init.copy())
+        
+        wavefronts = compute_wavefront_gs(A)
+        wave_start, waves = compact_wavefronts(wavefronts)
+        d_waves = cuda.to_device(waves)
+        
+        analysis_data = gs_h_level_analyze(d_indptr, d_indices, d_waves, 
+                                           wave_start, band_width=band_width)
+        
+        def run():
+            d_x.copy_to_device(d_x_init)
+            gs_numba_hlevel_syncfree_persistent_solve(d_data, d_indices, d_indptr, d_b, d_x, 
+                                                     analysis_data, max_iter=num_iterations, sub_warp_size=8)
+        ms, min_ms, max_ms = triton.testing.do_bench(run, quantiles=quantiles, 
+                                                      warmup=warmup, rep=rep)
     
     # ========================================================================
     # H-LEVEL - DIAGONAL-OPTIMIZED
@@ -871,6 +1035,56 @@ def benchmark(matrices, provider):
                                       d_b, d_x, analysis_data, max_iter=num_iterations, sub_warp_size=8)
         ms, min_ms, max_ms = triton.testing.do_bench(run, quantiles=quantiles, 
                                                       warmup=warmup, rep=rep)
+
+    elif provider.startswith('gs-h-sf-bw') and provider.endswith('-diag'):
+        band_width = int(provider.replace('gs-h-sf-bw', '').replace('-diag', ''))
+        
+        d_data = cuda.to_device(A.data)
+        d_indices = cuda.to_device(A.indices.astype(np.int32))
+        d_indptr = cuda.to_device(A.indptr.astype(np.int32))
+        d_diag_pos, d_diag_vals = extract_diagonal_info_gpu(A)
+        d_b = cuda.to_device(b)
+        d_x = cuda.device_array(n, dtype=np.float64)
+        d_x_init = cuda.to_device(x_init.copy())
+        
+        wavefronts = compute_wavefront_gs(A)
+        wave_start, waves = compact_wavefronts(wavefronts)
+        d_waves = cuda.to_device(waves)
+        
+        analysis_data = gs_h_level_analyze_diag(d_indptr, d_indices, d_waves, 
+                                                wave_start, band_width=band_width)
+        
+        def run():
+            d_x.copy_to_device(d_x_init)
+            gs_numba_hlevel_syncfree_banded_solve_diag(d_data, d_indices, d_indptr, d_diag_pos, d_diag_vals,
+                                                      d_b, d_x, analysis_data, max_iter=num_iterations, sub_warp_size=8)
+        ms, min_ms, max_ms = triton.testing.do_bench(run, quantiles=quantiles, 
+                                                      warmup=warmup, rep=rep)
+
+    elif provider.startswith('gs-h-sf-persist-bw') and provider.endswith('-diag'):
+        band_width = int(provider.replace('gs-h-sf-persist-bw', '').replace('-diag', ''))
+        
+        d_data = cuda.to_device(A.data)
+        d_indices = cuda.to_device(A.indices.astype(np.int32))
+        d_indptr = cuda.to_device(A.indptr.astype(np.int32))
+        d_diag_pos, d_diag_vals = extract_diagonal_info_gpu(A)
+        d_b = cuda.to_device(b)
+        d_x = cuda.device_array(n, dtype=np.float64)
+        d_x_init = cuda.to_device(x_init.copy())
+        
+        wavefronts = compute_wavefront_gs(A)
+        wave_start, waves = compact_wavefronts(wavefronts)
+        d_waves = cuda.to_device(waves)
+        
+        analysis_data = gs_h_level_analyze_diag(d_indptr, d_indices, d_waves, 
+                                                wave_start, band_width=band_width)
+        
+        def run():
+            d_x.copy_to_device(d_x_init)
+            gs_numba_hlevel_syncfree_persistent_solve_diag(d_data, d_indices, d_indptr, d_diag_pos, d_diag_vals,
+                                                           d_b, d_x, analysis_data, max_iter=num_iterations, sub_warp_size=8)
+        ms, min_ms, max_ms = triton.testing.do_bench(run, quantiles=quantiles, 
+                                                      warmup=warmup, rep=rep)
     
     else:
         print(f"Unknown provider: {provider}, skipping...")
@@ -882,13 +1096,26 @@ def benchmark(matrices, provider):
     return perf(ms), perf(min_ms), perf(max_ms)
 
 if __name__ == "__main__":
-    benchmark.run(print_data=True, save_path=".", show_plots=False)
-    
-    # Finalize AMGX at the very end
-    if PYAMGX_AVAILABLE:
-        try:
-            import pyamgx
-            pyamgx.finalize()
-        except:
-            pass  # Already finalized or failed
+    # # Initialize AMGX if available
+    # if PYAMGX_AVAILABLE:
+    #     try:
+    #         import pyamgx
+    #         pyamgx.initialize()
+    #     except pyamgx.AMGXError as e:
+    #         if "already registered" not in str(e):
+    #             print(f"AMGX Critical Init Error: {e}")
+    #     except Exception as e:
+    #         print(f"AMGX General Init Error: {e}")
+
+    benchmark.run(print_data=True, save_path=".", show_plots=True)
+
+    # try:
+    #     benchmark.run(print_data=True, save_path=".", show_plots=False)
+    # finally:
+    #     if PYAMGX_AVAILABLE:
+    #         try:
+    #             import pyamgx
+    #             pyamgx.finalize()
+    #         except:
+    #             pass
 

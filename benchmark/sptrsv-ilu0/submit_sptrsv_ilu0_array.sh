@@ -1,21 +1,21 @@
 #!/bin/bash
-#SBATCH -J sptrsv-ilu0-bench
-#SBATCH -o sptrsv-ilu0-%A-%a.out
-#SBATCH -e sptrsv-ilu0-%A-%a.err
-#SBATCH -p gpu
-#SBATCH --gres=gpu:1
-#SBATCH -N 1
-#SBATCH --ntasks=1
-#SBATCH --cpus-per-task=8
-#SBATCH --mem=32G
-#SBATCH -t 04:00:00
+#SBATCH --export=ALL
+#SBATCH --job-name="sptrsv-ilu0"
+#SBATCH --nodes=1
+#SBATCH --gpus-per-node=1
+#SBATCH --output="sptrsv-ilu0.%A-%a.out"
+#SBATCH -t 05:59:00
 #SBATCH --array=0-1
 
+module load StdEnv/2023
+module load python
+module load gcc
+module load cuda
 set -euo pipefail
 
-ROOT=${ROOT:-$PWD}
-PYTHON_BIN=${PYTHON_BIN:-python}
-MATRIX_LIST_FILE=${MATRIX_LIST_FILE:-$(dirname "$0")/matrix_list.txt}
+ROOT=${ROOT:-${SLURM_SUBMIT_DIR:-$PWD}}
+PYTHON_BIN=/scratch/dama/venv/bin/python
+MATRIX_LIST_FILE=${MATRIX_LIST_FILE:-$ROOT/matrix_list.txt}
 
 readarray -t MATRICES < <(grep -v '^\s*#' "$MATRIX_LIST_FILE" | sed '/^\s*$/d')
 
@@ -37,6 +37,10 @@ fi
 export SPTRSV_MATRIX=${MATRICES[$SLURM_ARRAY_TASK_ID]}
 echo "Benchmarking ${SPTRSV_MATRIX} (task ${SLURM_ARRAY_TASK_ID}/${#MATRICES[@]})"
 
+export CUPY_CACHE_DIR=/scratch/dama/cupy_cache
+mkdir -p /scratch/dama/cupy_cache
+
 cd "$ROOT"
+source /scratch/dama/venv/bin/activate
 $PYTHON_BIN slurm_sptrsv_ilu0_benchmark.py
 

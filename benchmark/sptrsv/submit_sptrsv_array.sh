@@ -14,9 +14,9 @@ module load cuda
 
 set -euo pipefail
 
-ROOT=${ROOT:-$PWD}
+ROOT=${ROOT:-${SLURM_SUBMIT_DIR:-$PWD}}
 PYTHON_BIN=/scratch/dama/venv/bin/python
-MATRIX_LIST_FILE=${MATRIX_LIST_FILE:-$(dirname "$0")/matrix_list.txt}
+MATRIX_LIST_FILE=${MATRIX_LIST_FILE:-$ROOT/matrix_list.txt}
 
 readarray -t MATRICES < <(grep -v '^\s*#' "$MATRIX_LIST_FILE" | sed '/^\s*$/d')
 

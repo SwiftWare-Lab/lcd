@@ -167,6 +167,11 @@ mtx_override = os.environ.get("SPTRSV_MATRIX")
 if mtx_override:
     mtx_list = [mtx_override]
 
+def matrix_basename(path: str) -> str:
+    base = os.path.basename(path)
+    stem, _ = os.path.splitext(base)
+    return stem.replace(" ", "_")
+
 unroll_factors = [4, 8, 16, 32, 64]
 thread_counts = [32, 64, 128, 256]
 h_bandwidths = [1, 2, 4, 8, 16]
@@ -270,9 +275,9 @@ def correctness_test():
         matrix = scio.mmread(mtx_matrix_path)
         n = matrix.shape[0]
         
-        if n > 50000:
-            print(f"Skipping matrix with dimension {n} > 50000")
-            continue
+        # if n > 50000:
+        #     print(f"Skipping matrix with dimension {n} > 50000")
+        #     continue
         
         A = matrix.tocsr()
         
@@ -766,10 +771,13 @@ def correctness_test():
 mat_signatures, method_correctness = correctness_test()
 
 df = pd.DataFrame(mat_signatures)
-df.to_csv("ilu0_matrix_signatures.csv")
+plot_suffix = ""
+if mtx_override:
+    plot_suffix = f"-{matrix_basename(mtx_override)}"
+df.to_csv(f"ilu0_matrix_signatures{plot_suffix}.csv")
 
 df = pd.DataFrame(method_correctness)
-df.to_csv("ilu0_method_correctness.csv")
+df.to_csv(f"ilu0_method_correctness{plot_suffix}.csv")
 
 # Use method_list directly for both line_vals and line_names (shorthand style)
 line_names = method_list.copy()
@@ -809,7 +817,7 @@ configs.append(
         line_names=line_names,
         styles=styles,
         ylabel="GFLOP/S",
-        plot_name="ilu0-performance-data",
+        plot_name=f"ilu0-performance-data{plot_suffix}",
         args={}
     )
 )
@@ -827,10 +835,10 @@ def benchmark(matrices, provider):
     A.setdiag(A.diagonal() + 1e-12)
     A = prepare_for_ilu0(A)
     
-    if n > 50000:
-        print(f"Skipping matrix with dimension {n} > 50000")
-        # Return NaN in the same format as successful benchmarks (GFLOP/s)
-        return float('nan'), float('nan'), float('nan')
+    # if n > 50000:
+    #     print(f"Skipping matrix with dimension {n} > 50000")
+    #     # Return NaN in the same format as successful benchmarks (GFLOP/s)
+    #     return float('nan'), float('nan'), float('nan')
     
     quantiles = [0.5, 0.2, 0.8]
     rep, warmup = 10, 5
