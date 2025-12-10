@@ -1,4 +1,4 @@
-"""SpTRSV with Coarsening: Thread, Block, and Wavefront Coarsening Strategies"""
+"""SpTRSV with Coarsening: Thread, Block, and Wavefront Coarsening Strategies (Upper Triangular)"""
 
 import numpy as np
 import numba
@@ -91,8 +91,7 @@ def compact_coarsened_wavefronts(original_wavefront_list, coarsening_factor):
     return wave_start_loc, waves, level_boundaries
 
 
-# CSC Wavefront Combined Coarsening Kernel - Single Level
-# 3-level hierarchy: Grid (blocks parallel) -> Block (warps parallel) -> Warp (threads parallel)
+# CSC wavefront combined coarsening kernel for upper triangular matrices.
 @cuda.jit
 def sptrsv_numba_csc_wavefront_coarsening_single_level_kernel(
     data, indices, indptr, b, y, M, wavefronts, level_offset, level_size, 
@@ -100,11 +99,9 @@ def sptrsv_numba_csc_wavefront_coarsening_single_level_kernel(
 ):
     block_id = cuda.blockIdx.x
     tid = cuda.threadIdx.x
-    warp_id = tid // 32  # Warp ID within block (0 to warps_per_block-1)
-    lane_id = tid % 32   # Thread ID within warp (0 to 31)
+    warp_id = tid // 32
+    lane_id = tid % 32
     
-    # Calculate global column index
-    # Each warp processes one column
     col_idx = block_id * warps_per_block + warp_id
     
     if col_idx >= level_size:
@@ -118,7 +115,8 @@ def sptrsv_numba_csc_wavefront_coarsening_single_level_kernel(
     col_end = indptr[col + 1]
     
     if lane_id == 0:
-        y[col] = (b[col] - y[col]) / data[col_end-1]
+        diag = data[col_end - 1]
+        y[col] = (b[col] - y[col]) / diag
     
     y_col = y[col]
     
@@ -130,14 +128,10 @@ def sptrsv_numba_csc_wavefront_coarsening_single_level_kernel(
                 break
             row_idx = indices[j]
             val = data[j]
-            cuda.atomic.add(y, row_idx, -val * y_col)
+            cuda.atomic.add(y, row_idx, val * y_col)
 
 
-# Note: Thread coarsening kernel removed - use combined kernel with block_coarsening_factor=1
-
-
-# CSR Wavefront Combined Coarsening Kernel - Single Level  
-# 3-level hierarchy: Grid (blocks parallel) -> Block (warps parallel) -> Warp (threads parallel)
+# CSR wavefront combined coarsening kernel for upper triangular matrices.
 @cuda.jit
 def sptrsv_numba_csr_wavefront_coarsening_single_level_kernel(
     data, indices, indptr, b, y, M, wavefronts, level_offset, level_size, 
@@ -145,11 +139,9 @@ def sptrsv_numba_csr_wavefront_coarsening_single_level_kernel(
 ):
     block_id = cuda.blockIdx.x
     tid = cuda.threadIdx.x
-    warp_id = tid // 32  # Warp ID within block (0 to warps_per_block-1)
-    lane_id = tid % 32   # Thread ID within warp (0 to 31)
+    warp_id = tid // 32
+    lane_id = tid % 32
     
-    # Calculate global row index
-    # Each warp processes one row
     row_idx = block_id * warps_per_block + warp_id
     
     if row_idx >= level_size:
@@ -179,23 +171,16 @@ def sptrsv_numba_csr_wavefront_coarsening_single_level_kernel(
         y[row] = (b[row] - partial_sum) / diag
 
 
-# Note: Thread coarsening kernel removed - use combined kernel with block_coarsening_factor=1
-
-
-# CSC Wavefront Combined Coarsening
-# 3-level hierarchy: Wavefront coarsening + Block coarsening (warps) + Thread coarsening
+# CSC wavefront combined coarsening for upper triangular matrices.
 def sptrsv_numba_csc_wavefront_block_coarsening(
     data, indices, indptr, b, M, N, nnz, wave_start, wavefronts, level_boundaries,
     block_coarsening_factor=1, thread_coarsening_factor=1, threads_per_block=128
 ):
     _validate_threads(threads_per_block)
     
-    # Ensure threads_per_block is a multiple of 32 (warp size)
     if threads_per_block % 32 != 0:
         threads_per_block = ((threads_per_block + 31) // 32) * 32
     
-    # Calculate warps per block
-    # Each warp handles one row, so warps_per_block = rows processed per block
     warps_per_block = threads_per_block // 32
     
     d_y = cuda.to_device(np.zeros(M, dtype=np.float64))
@@ -231,8 +216,7 @@ def sptrsv_numba_csc_wavefront_block_coarsening(
     return d_y
 
 
-# CSC Wavefront Thread Coarsening (wrapper for backward compatibility)
-# Now uses combined kernel with block_coarsening_factor=1
+# CSC wavefront thread coarsening wrapper.
 def sptrsv_numba_csc_wavefront_thread_coarsening(
     data, indices, indptr, b, M, N, nnz, wave_start, wavefronts, 
     thread_coarsening_factor=1, threads_per_block=128
@@ -241,7 +225,7 @@ def sptrsv_numba_csc_wavefront_thread_coarsening(
     wave_start_arr = np.asarray(wave_start, dtype=np.int32)
     num_waves = len(wave_start_arr) - 1
     level_boundaries = [np.array([0, wave_start_arr[i+1] - wave_start_arr[i]], dtype=np.int32) 
-                       for i in range(num_waves)]
+                        for i in range(num_waves)]
     
     return sptrsv_numba_csc_wavefront_block_coarsening(
         data, indices, indptr, b, M, N, nnz, wave_start, wavefronts, level_boundaries,
@@ -250,8 +234,7 @@ def sptrsv_numba_csc_wavefront_thread_coarsening(
     )
 
 
-# CSR Wavefront Combined Coarsening
-# 3-level hierarchy: Wavefront coarsening + Block coarsening (warps) + Thread coarsening
+# CSR wavefront combined coarsening for upper triangular matrices.
 def sptrsv_numba_csr_wavefront_block_coarsening(
     data, indices, indptr, b, M, N, nnz, wave_start, wavefronts, level_boundaries,
     block_coarsening_factor=1, thread_coarsening_factor=1, threads_per_block=128
@@ -299,9 +282,7 @@ def sptrsv_numba_csr_wavefront_block_coarsening(
     return d_y
 
 
-# CSR Wavefront Thread Coarsening
-# CSR Wavefront Thread Coarsening (wrapper for backward compatibility)
-# Now uses combined kernel with block_coarsening_factor=1
+# CSR wavefront thread coarsening wrapper.
 def sptrsv_numba_csr_wavefront_thread_coarsening(
     data, indices, indptr, b, M, N, nnz, wave_start, wavefronts, 
     thread_coarsening_factor=1, threads_per_block=128
@@ -310,7 +291,7 @@ def sptrsv_numba_csr_wavefront_thread_coarsening(
     wave_start_arr = np.asarray(wave_start, dtype=np.int32)
     num_waves = len(wave_start_arr) - 1
     level_boundaries = [np.array([0, wave_start_arr[i+1] - wave_start_arr[i]], dtype=np.int32) 
-                       for i in range(num_waves)]
+                        for i in range(num_waves)]
     
     return sptrsv_numba_csr_wavefront_block_coarsening(
         data, indices, indptr, b, M, N, nnz, wave_start, wavefronts, level_boundaries,
@@ -319,7 +300,7 @@ def sptrsv_numba_csr_wavefront_thread_coarsening(
     )
 
 
-# CSC Sync-Free Block Coarsening Kernel
+# CSC sync-free block coarsening kernel for upper triangular matrices.
 @cuda.jit
 def sptrsv_numba_csc_sync_free_block_coarsening_kernel(
     data, indices, indptr, b, y, M, dep_counts, block_coarsening_factor
@@ -327,13 +308,15 @@ def sptrsv_numba_csc_sync_free_block_coarsening_kernel(
     block_id = cuda.blockIdx.x
     base_col = block_id * block_coarsening_factor
     
-    for local_idx in range(block_coarsening_factor):
+    # Upper triangular: process columns from right to left within block
+    # E.g., if bcf=2 and base_col=0, process columns 1, 0 (higher first)
+    for local_idx in range(block_coarsening_factor - 1, -1, -1):
         col = base_col + local_idx
         if col >= M:
-            break
+            continue
         
-        # Wait until all dependencies are satisfied (dep_count == 1)
-        while cuda.atomic.add(dep_counts, col, 0) != 1:
+        # Wait until all dependencies are satisfied
+        while cuda.atomic.add(dep_counts, col, 0) > 0:
             pass
 
         cuda.threadfence()
@@ -341,20 +324,23 @@ def sptrsv_numba_csc_sync_free_block_coarsening_kernel(
         col_start = indptr[col]
         col_end = indptr[col + 1]
         
-        y[col] = (b[col] - y[col]) / data[col_end-1]
+        # Upper CSC: Diagonal at col_end - 1
+        y[col] = (b[col] - y[col]) / data[col_end - 1]
         
+        # Scatter: start to col_end - 1
         for j in range(col_start, col_end - 1):
             row_idx = indices[j]
             val = data[j]
-            cuda.atomic.add(y, row_idx, -val * y[col])
+            cuda.atomic.add(y, row_idx, val * y[col])
         
         cuda.threadfence()
+        # Decrement dependencies for upstream rows
         for j in range(col_start, col_end - 1):
             row_idx = indices[j]
             cuda.atomic.add(dep_counts, row_idx, -1)
 
 
-# CSC Sync-Free Thread Coarsening Kernel
+# CSC sync-free thread coarsening kernel for upper triangular matrices.
 @cuda.jit
 def sptrsv_numba_csc_sync_free_thread_coarsening_kernel(
     data, indices, indptr, b, y, M, dep_counts, thread_coarsening_factor
@@ -370,7 +356,7 @@ def sptrsv_numba_csc_sync_free_thread_coarsening_kernel(
     
     # Thread 0 checks dependency
     if tid == 0:
-        while cuda.atomic.add(dep_counts, col, 0) != 1:
+        while cuda.atomic.add(dep_counts, col, 0) > 0:
             pass
     cuda.syncthreads()
 
@@ -379,11 +365,14 @@ def sptrsv_numba_csc_sync_free_thread_coarsening_kernel(
     col_start = indptr[col]
     col_end = indptr[col + 1]
     
+    # Upper CSC: Diagonal at col_end - 1
     if tid == 0:
-        y[col] = (b[col] - y[col]) / data[col_end-1]
+        y[col] = (b[col] - y[col]) / data[col_end - 1]
     cuda.syncthreads()
     
     y_col = y[col]
+    # Use strided loop to handle columns with more elements than block_size*thread_coarsening_factor
+    # Scatter: start to col_end - 1 (exclude diagonal)
     stride = block_size * thread_coarsening_factor
     for chunk_start in range(col_start + tid * thread_coarsening_factor, col_end - 1, stride):
         for local_j in range(thread_coarsening_factor):
@@ -392,7 +381,7 @@ def sptrsv_numba_csc_sync_free_thread_coarsening_kernel(
                 break
             row_idx = indices[j]
             val = data[j]
-            cuda.atomic.add(y, row_idx, -val * y_col)
+            cuda.atomic.add(y, row_idx, val * y_col)
 
     cuda.syncthreads()
     if tid == 0:
@@ -402,7 +391,7 @@ def sptrsv_numba_csc_sync_free_thread_coarsening_kernel(
             cuda.atomic.add(dep_counts, row_idx, -1)
 
 
-# CSR Sync-Free Block Coarsening Kernel
+# CSR sync-free block coarsening kernel for upper triangular matrices.
 @cuda.jit
 def sptrsv_numba_csr_sync_free_block_coarsening_kernel(
     data, indices, indptr, b, y, M, dep_counts, succ_offsets, succ_indices, block_coarsening_factor
@@ -410,10 +399,12 @@ def sptrsv_numba_csr_sync_free_block_coarsening_kernel(
     block_id = cuda.blockIdx.x
     base_row = block_id * block_coarsening_factor
     
-    for local_idx in range(block_coarsening_factor):
+    # Upper triangular: process rows from right to left within block
+    # Row n-1 processed first, row 0 last
+    for local_idx in range(block_coarsening_factor - 1, -1, -1):
         row = base_row + local_idx
         if row >= M:
-            break
+            continue
         
         while cuda.atomic.add(dep_counts, row, 0) > 0:
             pass
@@ -422,6 +413,7 @@ def sptrsv_numba_csr_sync_free_block_coarsening_kernel(
         row_end = indptr[row + 1]
         
         y_val = b[row]
+        # Upper CSR: Diagonal at start. Off-diagonals start+1 to end
         for j in range(row_start + 1, row_end):
             y_val -= data[j] * y[indices[j]]
         
@@ -434,7 +426,7 @@ def sptrsv_numba_csr_sync_free_block_coarsening_kernel(
             cuda.atomic.add(dep_counts, succ_row, -1)
 
 
-# CSR Sync-Free Thread Coarsening Kernel
+# CSR sync-free thread coarsening kernel for upper triangular matrices.
 @cuda.jit
 def sptrsv_numba_csr_sync_free_thread_coarsening_kernel(
     data, indices, indptr, b, y, M, dep_counts, succ_offsets, succ_indices, thread_coarsening_factor
@@ -454,8 +446,11 @@ def sptrsv_numba_csr_sync_free_thread_coarsening_kernel(
     row_start = indptr[row]
     row_end = indptr[row + 1]
     
+    # Use dynamic shared memory allocation based on actual block size
     shared_sum = cuda.shared.array(shape=0, dtype=numba.float64)
     partial_sum = 0.0
+    # Use strided loop to handle rows with more elements than block_size*thread_coarsening_factor
+    # Upper CSR: Start from row_start + 1
     stride = block_size * thread_coarsening_factor
     for chunk_start in range(row_start + 1 + tid * thread_coarsening_factor, row_end, stride):
         for local_j in range(thread_coarsening_factor):
@@ -467,6 +462,7 @@ def sptrsv_numba_csr_sync_free_thread_coarsening_kernel(
     shared_sum[tid] = partial_sum
     cuda.syncthreads()
 
+    # Reduction
     s = block_size // 2
     while s > 0:
         if tid < s:
@@ -556,8 +552,6 @@ def sptrsv_numba_csr_sync_free_thread_coarsening(
     return d_y
 
 
-
-
 def sptrsv_numba_csc_coarsened_mapping(data, indices, indptr, b, M, N, nnz, wave_start, wavefronts, coarsening_factor, threads_per_block, thread_coarsening_factor=1, level_boundaries=None):
     # Combined 3-level coarsening: wavefront + warp + thread
     wave_start_arr = np.asarray(wave_start, dtype=np.int32)
@@ -570,7 +564,7 @@ def sptrsv_numba_csc_coarsened_mapping(data, indices, indptr, b, M, N, nnz, wave
                 "Use compact_coarsened_wavefronts() to get proper level boundaries."
             )
         level_boundaries = [np.array([0, wave_start_arr[i+1] - wave_start_arr[i]], dtype=np.int32) 
-                           for i in range(num_waves)]
+                            for i in range(num_waves)]
     
     return sptrsv_numba_csc_wavefront_block_coarsening(
         data, indices, indptr, b, M, N, nnz, wave_start, wavefronts, level_boundaries,
@@ -590,11 +584,9 @@ def sptrsv_numba_csr_coarsened_mapping(data, indices, indptr, b, M, N, nnz, wave
                 "Use compact_coarsened_wavefronts() to get proper level boundaries."
             )
         level_boundaries = [np.array([0, wave_start_arr[i+1] - wave_start_arr[i]], dtype=np.int32) 
-                           for i in range(num_waves)]
+                            for i in range(num_waves)]
     
     return sptrsv_numba_csr_wavefront_block_coarsening(
         data, indices, indptr, b, M, N, nnz, wave_start, wavefronts, level_boundaries,
         block_coarsening_factor=1, thread_coarsening_factor=thread_coarsening_factor, threads_per_block=threads_per_block
     )
-
-

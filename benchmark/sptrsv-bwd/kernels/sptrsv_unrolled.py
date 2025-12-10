@@ -1,5 +1,5 @@
 """
-Code-generated SpTRSV kernels with different unroll factors.
+Code-generated SpTRSV kernels with different unroll factors (Upper Triangular).
 This file contains:
 - Specialized kernels for unroll factors: 4, 8, 16, 32, 64
 - Mapping kernels (unroll factor 1) for wavefront and sync-free variants
@@ -38,9 +38,7 @@ def _select_block_threads(work_items, *, min_threads=32, max_threads=128):
 _SMALL_WORK_THRESHOLD = 8
 
 
-# ============================================================================
-# CSC Wavefront Unrolling Kernels (5 variants)
-# ============================================================================
+# CSC wavefront unrolling kernels for upper triangular matrices.
 
 @cuda.jit
 def sptrsv_numba_csc_wavefront_unrolling_kernel_4(data, indices, indptr, b, y, wavefronts, wave_offset, wave_len):
@@ -56,20 +54,21 @@ def sptrsv_numba_csc_wavefront_unrolling_kernel_4(data, indices, indptr, b, y, w
     col_end = indptr[col + 1]
     
     if tid == 0:
-        y[col] = (b[col] - y[col]) / data[col_end-1]
+        y[col] = (b[col] - y[col]) / data[col_end - 1]
     cuda.syncthreads()
     
     y_col = y[col]
+    
     j = col_start + tid
     
     while j + 3 * block_size < col_end - 1:
         for k in range(4):
             idx = j + k * block_size
-            cuda.atomic.add(y, indices[idx], -data[idx] * y_col)
+            cuda.atomic.add(y, indices[idx], data[idx] * y_col)
         j += 4 * block_size
     
     while j < col_end - 1:
-        cuda.atomic.add(y, indices[j], -data[j] * y_col)
+        cuda.atomic.add(y, indices[j], data[j] * y_col)
         j += block_size
 
 
@@ -87,7 +86,7 @@ def sptrsv_numba_csc_wavefront_unrolling_kernel_8(data, indices, indptr, b, y, w
     col_end = indptr[col + 1]
     
     if tid == 0:
-        y[col] = (b[col] - y[col]) / data[col_end-1]
+        y[col] = (b[col] - y[col]) / data[col_end - 1]
     cuda.syncthreads()
     
     y_col = y[col]
@@ -96,11 +95,11 @@ def sptrsv_numba_csc_wavefront_unrolling_kernel_8(data, indices, indptr, b, y, w
     while j + 7 * block_size < col_end - 1:
         for k in range(8):
             idx = j + k * block_size
-            cuda.atomic.add(y, indices[idx], -data[idx] * y_col)
+            cuda.atomic.add(y, indices[idx], data[idx] * y_col)
         j += 8 * block_size
     
     while j < col_end - 1:
-        cuda.atomic.add(y, indices[j], -data[j] * y_col)
+        cuda.atomic.add(y, indices[j], data[j] * y_col)
         j += block_size
 
 
@@ -118,7 +117,7 @@ def sptrsv_numba_csc_wavefront_unrolling_kernel_16(data, indices, indptr, b, y, 
     col_end = indptr[col + 1]
     
     if tid == 0:
-        y[col] = (b[col] - y[col]) / data[col_end-1]
+        y[col] = (b[col] - y[col]) / data[col_end - 1]
     cuda.syncthreads()
     
     y_col = y[col]
@@ -127,11 +126,11 @@ def sptrsv_numba_csc_wavefront_unrolling_kernel_16(data, indices, indptr, b, y, 
     while j + 15 * block_size < col_end - 1:
         for k in range(16):
             idx = j + k * block_size
-            cuda.atomic.add(y, indices[idx], -data[idx] * y_col)
+            cuda.atomic.add(y, indices[idx], data[idx] * y_col)
         j += 16 * block_size
     
     while j < col_end - 1:
-        cuda.atomic.add(y, indices[j], -data[j] * y_col)
+        cuda.atomic.add(y, indices[j], data[j] * y_col)
         j += block_size
 
 
@@ -149,7 +148,7 @@ def sptrsv_numba_csc_wavefront_unrolling_kernel_32(data, indices, indptr, b, y, 
     col_end = indptr[col + 1]
     
     if tid == 0:
-        y[col] = (b[col] - y[col]) / data[col_end-1]
+        y[col] = (b[col] - y[col]) / data[col_end - 1]
     cuda.syncthreads()
     
     y_col = y[col]
@@ -158,11 +157,11 @@ def sptrsv_numba_csc_wavefront_unrolling_kernel_32(data, indices, indptr, b, y, 
     while j + 31 * block_size < col_end - 1:
         for k in range(32):
             idx = j + k * block_size
-            cuda.atomic.add(y, indices[idx], -data[idx] * y_col)
+            cuda.atomic.add(y, indices[idx], data[idx] * y_col)
         j += 32 * block_size
     
     while j < col_end - 1:
-        cuda.atomic.add(y, indices[j], -data[j] * y_col)
+        cuda.atomic.add(y, indices[j], data[j] * y_col)
         j += block_size
 
 
@@ -180,7 +179,7 @@ def sptrsv_numba_csc_wavefront_unrolling_kernel_64(data, indices, indptr, b, y, 
     col_end = indptr[col + 1]
     
     if tid == 0:
-        y[col] = (b[col] - y[col]) / data[col_end-1]
+        y[col] = (b[col] - y[col]) / data[col_end - 1]
     cuda.syncthreads()
     
     y_col = y[col]
@@ -189,15 +188,14 @@ def sptrsv_numba_csc_wavefront_unrolling_kernel_64(data, indices, indptr, b, y, 
     while j + 63 * block_size < col_end - 1:
         for k in range(64):
             idx = j + k * block_size
-            cuda.atomic.add(y, indices[idx], -data[idx] * y_col)
+            cuda.atomic.add(y, indices[idx], data[idx] * y_col)
         j += 64 * block_size
     
     while j < col_end - 1:
-        cuda.atomic.add(y, indices[j], -data[j] * y_col)
+        cuda.atomic.add(y, indices[j], data[j] * y_col)
         j += block_size
 
 
-# CSC Wavefront Launch Functions
 
 def sptrsv_numba_csc_wavefront_unrolling_4(data, indices, indptr, b, M, N, nnz, wave_start, wavefronts, threads_per_block=128):
     d_y = cuda.to_device(np.zeros(M, dtype=np.float64))
@@ -349,9 +347,7 @@ def sptrsv_numba_csc_wavefront_unrolling_64(data, indices, indptr, b, M, N, nnz,
     return d_y
 
 
-# ============================================================================
-# CSC Sync-Free Unrolling Kernels (5 variants)
-# ============================================================================
+# CSC sync-free unrolling kernels for upper triangular matrices.
 
 @cuda.jit
 def sptrsv_numba_csc_sync_free_unrolling_kernel_4(data, indices, indptr, b, y, M, dep_counts):
@@ -364,7 +360,7 @@ def sptrsv_numba_csc_sync_free_unrolling_kernel_4(data, indices, indptr, b, y, M
     
     col = block_id
     if tid == 0:
-        while cuda.atomic.add(dep_counts, col, 0) != 1:
+        while cuda.atomic.add(dep_counts, col, 0) > 0:
             pass
     cuda.syncthreads()
 
@@ -374,26 +370,29 @@ def sptrsv_numba_csc_sync_free_unrolling_kernel_4(data, indices, indptr, b, y, M
     col_end = indptr[col + 1]
     
     if tid == 0:
-        y[col] = (b[col] - y[col]) / data[col_end-1]
+        y[col] = (b[col] - y[col]) / data[col_end - 1]
     cuda.syncthreads()
     
     y_col = y[col]
+    
+    # Scatter to upstream rows: col_start to col_end - 1
     j = col_start + tid
     
     while j + 3 * block_size < col_end - 1:
         for k in range(4):
             idx = j + k * block_size
-            cuda.atomic.add(y, indices[idx], -data[idx] * y_col)
+            cuda.atomic.add(y, indices[idx], data[idx] * y_col)
         j += 4 * block_size
     
     while j < col_end - 1:
-        cuda.atomic.add(y, indices[j], -data[j] * y_col)
+        cuda.atomic.add(y, indices[j], data[j] * y_col)
         j += block_size
     
     cuda.syncthreads()
     
     if tid == 0:
         cuda.threadfence()
+        # Signal dependencies for upstream rows
         for j in range(col_start, col_end - 1):
             row_idx = indices[j]
             cuda.atomic.add(dep_counts, row_idx, -1)
@@ -410,7 +409,7 @@ def sptrsv_numba_csc_sync_free_unrolling_kernel_8(data, indices, indptr, b, y, M
     
     col = block_id
     if tid == 0:
-        while cuda.atomic.add(dep_counts, col, 0) != 1:
+        while cuda.atomic.add(dep_counts, col, 0) > 0:
             pass
     cuda.syncthreads()
 
@@ -420,7 +419,7 @@ def sptrsv_numba_csc_sync_free_unrolling_kernel_8(data, indices, indptr, b, y, M
     col_end = indptr[col + 1]
     
     if tid == 0:
-        y[col] = (b[col] - y[col]) / data[col_end-1]
+        y[col] = (b[col] - y[col]) / data[col_end - 1]
     cuda.syncthreads()
     
     y_col = y[col]
@@ -429,11 +428,11 @@ def sptrsv_numba_csc_sync_free_unrolling_kernel_8(data, indices, indptr, b, y, M
     while j + 7 * block_size < col_end - 1:
         for k in range(8):
             idx = j + k * block_size
-            cuda.atomic.add(y, indices[idx], -data[idx] * y_col)
+            cuda.atomic.add(y, indices[idx], data[idx] * y_col)
         j += 8 * block_size
     
     while j < col_end - 1:
-        cuda.atomic.add(y, indices[j], -data[j] * y_col)
+        cuda.atomic.add(y, indices[j], data[j] * y_col)
         j += block_size
     
     cuda.syncthreads()
@@ -456,7 +455,7 @@ def sptrsv_numba_csc_sync_free_unrolling_kernel_16(data, indices, indptr, b, y, 
     
     col = block_id
     if tid == 0:
-        while cuda.atomic.add(dep_counts, col, 0) != 1:
+        while cuda.atomic.add(dep_counts, col, 0) > 0:
             pass
     cuda.syncthreads()
 
@@ -466,7 +465,7 @@ def sptrsv_numba_csc_sync_free_unrolling_kernel_16(data, indices, indptr, b, y, 
     col_end = indptr[col + 1]
     
     if tid == 0:
-        y[col] = (b[col] - y[col]) / data[col_end-1]
+        y[col] = (b[col] - y[col]) / data[col_end - 1]
     cuda.syncthreads()
     
     y_col = y[col]
@@ -475,11 +474,11 @@ def sptrsv_numba_csc_sync_free_unrolling_kernel_16(data, indices, indptr, b, y, 
     while j + 15 * block_size < col_end - 1:
         for k in range(16):
             idx = j + k * block_size
-            cuda.atomic.add(y, indices[idx], -data[idx] * y_col)
+            cuda.atomic.add(y, indices[idx], data[idx] * y_col)
         j += 16 * block_size
     
     while j < col_end - 1:
-        cuda.atomic.add(y, indices[j], -data[j] * y_col)
+        cuda.atomic.add(y, indices[j], data[j] * y_col)
         j += block_size
     
     cuda.syncthreads()
@@ -502,7 +501,7 @@ def sptrsv_numba_csc_sync_free_unrolling_kernel_32(data, indices, indptr, b, y, 
     
     col = block_id
     if tid == 0:
-        while cuda.atomic.add(dep_counts, col, 0) != 1:
+        while cuda.atomic.add(dep_counts, col, 0) > 0:
             pass
     cuda.syncthreads()
 
@@ -512,7 +511,7 @@ def sptrsv_numba_csc_sync_free_unrolling_kernel_32(data, indices, indptr, b, y, 
     col_end = indptr[col + 1]
     
     if tid == 0:
-        y[col] = (b[col] - y[col]) / data[col_end-1]
+        y[col] = (b[col] - y[col]) / data[col_end - 1]
     cuda.syncthreads()
     
     y_col = y[col]
@@ -521,11 +520,11 @@ def sptrsv_numba_csc_sync_free_unrolling_kernel_32(data, indices, indptr, b, y, 
     while j + 31 * block_size < col_end - 1:
         for k in range(32):
             idx = j + k * block_size
-            cuda.atomic.add(y, indices[idx], -data[idx] * y_col)
+            cuda.atomic.add(y, indices[idx], data[idx] * y_col)
         j += 32 * block_size
     
     while j < col_end - 1:
-        cuda.atomic.add(y, indices[j], -data[j] * y_col)
+        cuda.atomic.add(y, indices[j], data[j] * y_col)
         j += block_size
     
     cuda.syncthreads()
@@ -548,7 +547,7 @@ def sptrsv_numba_csc_sync_free_unrolling_kernel_64(data, indices, indptr, b, y, 
     
     col = block_id
     if tid == 0:
-        while cuda.atomic.add(dep_counts, col, 0) != 1:
+        while cuda.atomic.add(dep_counts, col, 0) > 0:
             pass
     cuda.syncthreads()
 
@@ -558,19 +557,19 @@ def sptrsv_numba_csc_sync_free_unrolling_kernel_64(data, indices, indptr, b, y, 
     col_end = indptr[col + 1]
     
     if tid == 0:
-        y[col] = (b[col] - y[col]) / data[col_start]
+        y[col] = (b[col] - y[col]) / data[col_end - 1]
     cuda.syncthreads()
     
     y_col = y[col]
-    j = col_start + 1 + tid
+    j = col_start + tid
     
-    while j + 63 * block_size < col_end:
+    while j + 63 * block_size < col_end - 1:
         for k in range(64):
             idx = j + k * block_size
             cuda.atomic.add(y, indices[idx], data[idx] * y_col)
         j += 64 * block_size
     
-    while j < col_end:
+    while j < col_end - 1:
         cuda.atomic.add(y, indices[j], data[j] * y_col)
         j += block_size
     
@@ -578,12 +577,11 @@ def sptrsv_numba_csc_sync_free_unrolling_kernel_64(data, indices, indptr, b, y, 
     
     if tid == 0:
         cuda.threadfence()
-        for j in range(col_start + 1, col_end):
+        for j in range(col_start, col_end - 1):
             row_idx = indices[j]
             cuda.atomic.add(dep_counts, row_idx, -1)
 
 
-# CSC Sync-Free Launch Functions
 
 def sptrsv_numba_csc_sync_free_unrolling_4(data, indices, indptr, b, M, N, nnz, in_edges, succ_offsets, succ_indices, threads_per_block=128):
     d_y = cuda.to_device(np.zeros(M, dtype=np.float64))
@@ -635,9 +633,7 @@ def sptrsv_numba_csc_sync_free_unrolling_64(data, indices, indptr, b, M, N, nnz,
     return d_y
 
 
-# ============================================================================
-# CSR Wavefront Unrolling Kernels (5 variants)
-# ============================================================================
+# CSR wavefront unrolling kernels for upper triangular matrices.
 
 @cuda.jit
 def sptrsv_numba_csr_wavefront_unrolling_kernel_4(data, indices, indptr, b, y, wavefronts, wave_offset, wave_len):
@@ -651,8 +647,9 @@ def sptrsv_numba_csr_wavefront_unrolling_kernel_4(data, indices, indptr, b, y, w
     row = wavefronts[wave_offset + block_id]
     row_start = indptr[row]
     row_end = indptr[row + 1]
-    shared_sum = cuda.shared.array(128, dtype=numba.float64)
+    shared_sum = cuda.shared.array(1024, dtype=numba.float64)
     partial_sum = 0.0
+    
     j = row_start + 1 + tid
 
     while j + 3 * block_size < row_end:
@@ -692,7 +689,7 @@ def sptrsv_numba_csr_wavefront_unrolling_kernel_8(data, indices, indptr, b, y, w
     row = wavefronts[wave_offset + block_id]
     row_start = indptr[row]
     row_end = indptr[row + 1]
-    shared_sum = cuda.shared.array(128, dtype=numba.float64)
+    shared_sum = cuda.shared.array(1024, dtype=numba.float64)
     partial_sum = 0.0
     j = row_start + 1 + tid
 
@@ -733,7 +730,7 @@ def sptrsv_numba_csr_wavefront_unrolling_kernel_16(data, indices, indptr, b, y, 
     row = wavefronts[wave_offset + block_id]
     row_start = indptr[row]
     row_end = indptr[row + 1]
-    shared_sum = cuda.shared.array(128, dtype=numba.float64)
+    shared_sum = cuda.shared.array(1024, dtype=numba.float64)
     partial_sum = 0.0
     j = row_start + 1 + tid
 
@@ -774,7 +771,7 @@ def sptrsv_numba_csr_wavefront_unrolling_kernel_32(data, indices, indptr, b, y, 
     row = wavefronts[wave_offset + block_id]
     row_start = indptr[row]
     row_end = indptr[row + 1]
-    shared_sum = cuda.shared.array(128, dtype=numba.float64)
+    shared_sum = cuda.shared.array(1024, dtype=numba.float64)
     partial_sum = 0.0
     j = row_start + 1 + tid
 
@@ -815,17 +812,17 @@ def sptrsv_numba_csr_wavefront_unrolling_kernel_64(data, indices, indptr, b, y, 
     row = wavefronts[wave_offset + block_id]
     row_start = indptr[row]
     row_end = indptr[row + 1]
-    shared_sum = cuda.shared.array(128, dtype=numba.float64)
+    shared_sum = cuda.shared.array(1024, dtype=numba.float64)
     partial_sum = 0.0
-    j = row_start + tid
+    j = row_start + 1 + tid
 
-    while j + 63 * block_size < row_end - 1:
+    while j + 63 * block_size < row_end:
         for k in range(64):
             idx = j + k * block_size
             partial_sum += data[idx] * y[indices[idx]]
         j += 64 * block_size
 
-    while j < row_end - 1:
+    while j < row_end:
         partial_sum += data[j] * y[indices[j]]
         j += block_size
     
@@ -840,11 +837,10 @@ def sptrsv_numba_csr_wavefront_unrolling_kernel_64(data, indices, indptr, b, y, 
         s //= 2
         
     if tid == 0:
-        diag = data[row_end - 1]
+        diag = data[row_start]
         y[row] = (b[row] - shared_sum[0]) / diag
 
 
-# CSR Wavefront Launch Functions
 
 def sptrsv_numba_csr_wavefront_unrolling_4(data, indices, indptr, b, M, N, nnz, wave_start, wavefronts, threads_per_block=128):
     d_y = cuda.to_device(np.zeros(M, dtype=np.float64))
@@ -996,9 +992,7 @@ def sptrsv_numba_csr_wavefront_unrolling_64(data, indices, indptr, b, M, N, nnz,
     return d_y
 
 
-# ============================================================================
-# CSR Sync-Free Unrolling Kernels (5 variants)
-# ============================================================================
+# CSR sync-free unrolling kernels for upper triangular matrices.
 
 @cuda.jit
 def sptrsv_numba_csr_sync_free_unrolling_kernel_4(data, indices, indptr, b, y, M, dep_counts, succ_offsets, succ_indices):
@@ -1018,8 +1012,9 @@ def sptrsv_numba_csr_sync_free_unrolling_kernel_4(data, indices, indptr, b, y, M
     
     row_start = indptr[row]
     row_end = indptr[row + 1]
-    shared_sum = cuda.shared.array(128, dtype=numba.float64)
+    shared_sum = cuda.shared.array(1024, dtype=numba.float64)
     partial_sum = 0.0
+    
     j = row_start + 1 + tid
     
     while j + 3 * block_size < row_end:
@@ -1071,7 +1066,7 @@ def sptrsv_numba_csr_sync_free_unrolling_kernel_8(data, indices, indptr, b, y, M
     
     row_start = indptr[row]
     row_end = indptr[row + 1]
-    shared_sum = cuda.shared.array(128, dtype=numba.float64)
+    shared_sum = cuda.shared.array(1024, dtype=numba.float64)
     partial_sum = 0.0
     j = row_start + 1 + tid
     
@@ -1124,7 +1119,7 @@ def sptrsv_numba_csr_sync_free_unrolling_kernel_16(data, indices, indptr, b, y, 
     
     row_start = indptr[row]
     row_end = indptr[row + 1]
-    shared_sum = cuda.shared.array(128, dtype=numba.float64)
+    shared_sum = cuda.shared.array(1024, dtype=numba.float64)
     partial_sum = 0.0
     j = row_start + 1 + tid
     
@@ -1177,7 +1172,7 @@ def sptrsv_numba_csr_sync_free_unrolling_kernel_32(data, indices, indptr, b, y, 
     
     row_start = indptr[row]
     row_end = indptr[row + 1]
-    shared_sum = cuda.shared.array(128, dtype=numba.float64)
+    shared_sum = cuda.shared.array(1024, dtype=numba.float64)
     partial_sum = 0.0
     j = row_start + 1 + tid
     
@@ -1230,17 +1225,17 @@ def sptrsv_numba_csr_sync_free_unrolling_kernel_64(data, indices, indptr, b, y, 
     
     row_start = indptr[row]
     row_end = indptr[row + 1]
-    shared_sum = cuda.shared.array(128, dtype=numba.float64)
+    shared_sum = cuda.shared.array(1024, dtype=numba.float64)
     partial_sum = 0.0
-    j = row_start + tid
+    j = row_start + 1 + tid
     
-    while j + 63 * block_size < row_end - 1:
+    while j + 63 * block_size < row_end:
         for k in range(64):
             idx = j + k * block_size
             partial_sum += data[idx] * y[indices[idx]]
         j += 64 * block_size
 
-    while j < row_end - 1:
+    while j < row_end:
         partial_sum += data[j] * y[indices[j]]
         j += block_size
     
@@ -1254,7 +1249,7 @@ def sptrsv_numba_csr_sync_free_unrolling_kernel_64(data, indices, indptr, b, y, 
         s //= 2
 
     if tid == 0:
-        diag = data[row_end - 1]
+        diag = data[row_start]
         y[row] = (b[row] - shared_sum[0]) / diag
         cuda.threadfence()
 
@@ -1265,7 +1260,6 @@ def sptrsv_numba_csr_sync_free_unrolling_kernel_64(data, indices, indptr, b, y, 
             cuda.atomic.add(dep_counts, succ_row, -1)
 
 
-# CSR Sync-Free Launch Functions
 
 def sptrsv_numba_csr_sync_free_unrolling_4(data, indices, indptr, b, M, N, nnz, in_edges, succ_offsets, succ_indices, threads_per_block=128):
     d_y = cuda.to_device(np.zeros(M, dtype=np.float64))
@@ -1318,7 +1312,7 @@ def sptrsv_numba_csr_sync_free_unrolling_64(data, indices, indptr, b, M, N, nnz,
 
 
 # ============================================================================
-# Mapping Kernels (Unroll Factor 1) - CSC Wavefront
+# Mapping Kernels (Unroll Factor 1) - CSC Wavefront - Upper Triangular
 # ============================================================================
 
 @cuda.jit
@@ -1338,16 +1332,19 @@ def sptrsv_numba_csc_wavefront_mapping_kernel(data, indices, indptr, b, y, wavef
     col_start = indptr[col]
     col_end = indptr[col + 1]
     
+    # Thread 0 computes y[col]
     if tid == 0:
-        y[col] = (b[col] - y[col]) / data[col_end-1]
+        y[col] = (b[col] - y[col]) / data[col_end - 1]
     cuda.syncthreads()
     
     y_col = y[col]
     
+    # All threads cooperate on updating upstream rows
+    # Scatter: col_start to col_end - 1 (exclude diagonal)
     for j in range(col_start + tid, col_end - 1, block_size):
         row_idx = indices[j]
         val = data[j]
-        cuda.atomic.add(y, row_idx, -val * y_col)
+        cuda.atomic.add(y, row_idx, val * y_col)
 
 
 def sptrsv_numba_csc_wavefront_mapping(data, indices, indptr, b, M, N, nnz, wave_start, wavefronts, threads_per_block=128):
@@ -1381,7 +1378,7 @@ def sptrsv_numba_csc_wavefront_mapping(data, indices, indptr, b, M, N, nnz, wave
 
 
 # ============================================================================
-# Mapping Kernels (Unroll Factor 1) - CSC Sync-Free
+# Mapping Kernels (Unroll Factor 1) - CSC Sync-Free - Upper Triangular
 # ============================================================================
 
 @cuda.jit
@@ -1401,7 +1398,7 @@ def sptrsv_numba_csc_sync_free_mapping_kernel(data, indices, indptr, b, y, M, de
     
     # Thread 0 checks dependencies
     if tid == 0:
-        while cuda.atomic.add(dep_counts, col, 0) != 1:
+        while cuda.atomic.add(dep_counts, col, 0) > 0:
             pass
     cuda.syncthreads()
 
@@ -1410,25 +1407,34 @@ def sptrsv_numba_csc_sync_free_mapping_kernel(data, indices, indptr, b, y, M, de
     col_start = indptr[col]
     col_end = indptr[col + 1]
     
+    # Thread 0 computes y[col]
     if tid == 0:
-        y[col] = (b[col] - y[col]) / data[col_end-1]
+        y[col] = (b[col] - y[col]) / data[col_end - 1]
     cuda.syncthreads()
     
     y_col = y[col]
     
+    # All threads cooperate on scatter phase
+    # Scatter: col_start to col_end - 1 (exclude diagonal)
     for j in range(col_start + tid, col_end - 1, block_size):
         row_idx = indices[j]
         val = data[j]
-        cuda.atomic.add(y, row_idx, -val * y_col)
+        cuda.atomic.add(y, row_idx, val * y_col)
     
+    # Ensure all threads complete scatter operations before signaling
     cuda.syncthreads()
     
+    # Thread 0 signals rows
     if tid == 0:
         cuda.threadfence()
         
+        # Signal each row that was updated
         for j in range(col_start, col_end - 1):
             row_idx = indices[j]
             cuda.atomic.add(dep_counts, row_idx, -1)
+    
+    # Ensure thread 0 completes signaling before block exits
+    cuda.syncthreads()
 
 
 def sptrsv_numba_csc_sync_free_mapping(data, indices, indptr, b, M, N, nnz, in_edges, succ_offsets, succ_indices, threads_per_block=128):
@@ -1442,7 +1448,7 @@ def sptrsv_numba_csc_sync_free_mapping(data, indices, indptr, b, M, N, nnz, in_e
 
 
 # ============================================================================
-# Mapping Kernels (Unroll Factor 1) - CSR Wavefront
+# Mapping Kernels (Unroll Factor 1) - CSR Wavefront - Upper Triangular
 # ============================================================================
 
 @cuda.jit
@@ -1458,7 +1464,7 @@ def sptrsv_numba_csr_wavefront_mapping_kernel(data, indices, indptr, b, y, wavef
     row_start = indptr[row]
     row_end = indptr[row + 1]
     
-    shared_sum = cuda.shared.array(128, dtype=numba.float64)
+    shared_sum = cuda.shared.array(1024, dtype=numba.float64)
     
     partial_sum = 0.0
     for j in range(row_start + 1 + tid, row_end, block_size):
@@ -1510,7 +1516,7 @@ def sptrsv_numba_csr_wavefront_mapping(data, indices, indptr, b, M, N, nnz, wave
 
 
 # ============================================================================
-# Mapping Kernels (Unroll Factor 1) - CSR Sync-Free
+# Mapping Kernels (Unroll Factor 1) - CSR Sync-Free - Upper Triangular
 # ============================================================================
 
 @cuda.jit
@@ -1529,7 +1535,7 @@ def sptrsv_numba_csr_sync_free_mapping_kernel(data, indices, indptr, b, y, M, de
     
     row_start = indptr[row]
     row_end = indptr[row + 1]
-    shared_sum = cuda.shared.array(128, dtype=numba.float64)
+    shared_sum = cuda.shared.array(1024, dtype=numba.float64)
     partial_sum = 0.0
     for j in range(row_start + 1 + tid, row_end, block_size):
         partial_sum += data[j] * y[indices[j]]
@@ -1563,4 +1569,3 @@ def sptrsv_numba_csr_sync_free_mapping(data, indices, indptr, b, M, N, nnz, in_e
         data, indices, indptr, b, d_y, M, d_dep_counts, succ_offsets, succ_indices
     )
     return d_y
-
