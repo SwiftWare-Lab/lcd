@@ -17,13 +17,13 @@ set(CMAKE_CUDA_ARCHITECTURES 50 61 75 80 86)
 # FetchContent NVBench
 include(FetchContent)
 
-FetchContent_Declare(
-        nvbench
-        GIT_REPOSITORY https://github.com/NVIDIA/nvbench.git
-        GIT_TAG main
-)
-
-FetchContent_MakeAvailable(nvbench)
+#FetchContent_Declare(
+#        nvbench
+#        GIT_REPOSITORY https://github.com/NVIDIA/nvbench.git
+#        GIT_TAG main
+#)
+#
+#FetchContent_MakeAvailable(nvbench)
 
 
 FetchContent_Declare(
@@ -38,11 +38,12 @@ FetchContent_MakeAvailable(eigen)
 add_executable(bench main.cu)
 target_include_directories(bench PRIVATE ${eigen_SOURCE_DIR})
 target_link_libraries(bench PRIVATE
-        nvbench::main
+#        nvbench::main
         CUDA::cudart
         CUDA::cublas          # 🟩 required
         CUDA::cublasLt        # optional but recommended
-        CUDA::cuda_driver)
+        CUDA::cuda_driver
+        CUDA::cusparse)
 
 
 
