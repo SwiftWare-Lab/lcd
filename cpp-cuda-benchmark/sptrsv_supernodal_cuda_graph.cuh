@@ -274,12 +274,12 @@ cudaGraph_t create_cuda_graph_from_super_nodes(
         }
         builder.addDependencies(sn_to_node_id[sn_id], deps_cg_ids);
     }
-    std::cout << "Capturing Graph..." << std::endl;
+//    std::cout << "Capturing Graph..." << std::endl;
     cudaGraph_t graph = builder.captureGraph();
-    std::cout << "Capture Complete." << std::endl;
+//    std::cout << "Capture Complete." << std::endl;
     std::ofstream out("graph.dot");
     out << builder.exportDot();
     out.close();
-    std::cout << "DOT file generated as 'graph.dot'.\n" << std::endl;
+//    std::cout << "DOT file generated as 'graph.dot'.\n" << std::endl;
     return graph;
 }

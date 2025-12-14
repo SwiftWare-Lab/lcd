@@ -104,7 +104,7 @@ public:
     cudaGraph_t captureGraph() {
         if (streamPool.empty()) resizeResources(16);
 
-        std::cout << "[DEBUG] Starting capture setup..." << std::endl;
+//        std::cout << "[DEBUG] Starting capture setup..." << std::endl;
         CHECK_CUDA(cudaDeviceSynchronize());
 
         // 1. Event Refresh
@@ -153,7 +153,7 @@ public:
         int streamPoolIdx = 0; 
 
         // A. Start Capture on DEDICATED stream
-        std::cout << "[DEBUG] Begin Capture on Dedicated Stream: " << captureStream << std::endl;
+//        std::cout << "[DEBUG] Begin Capture on Dedicated Stream: " << captureStream << std::endl;
         CHECK_CUDA(cudaStreamBeginCapture(captureStream, cudaStreamCaptureModeGlobal));
 
         // B. Fork: Record event on CaptureStream and make ALL workers wait.
@@ -229,11 +229,11 @@ public:
         }
         
         
-        std::cout << "[DEBUG] Ending Capture..." << std::endl;
+//        std::cout << "[DEBUG] Ending Capture..." << std::endl;
         cudaGraph_t graph;
         CHECK_CUDA(cudaStreamEndCapture(captureStream, &graph));
         
-        std::cout << "[DEBUG] Capture Successful." << std::endl;
+//        std::cout << "[DEBUG] Capture Successful." << std::endl;
         return graph;
     }
 

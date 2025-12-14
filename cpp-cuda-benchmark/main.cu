@@ -1,4 +1,4 @@
-//
+Launching Custom Graph...//
 // Created by salehm32 on 2025-11-18.
 //
 
@@ -120,7 +120,7 @@ int main(int argc, char** argv){
     CUDA_CHECK(cudaEventCreate(&start_custom));
     CUDA_CHECK(cudaEventCreate(&stop_custom));
 
-    std::cout << "Launching Custom Graph..." << std::endl;
+//    std::cout << "Launching Custom Graph..." << std::endl;
 
     auto avg_cudagraph = 0.f;
     RUN_BENCHMARK_AVG(
