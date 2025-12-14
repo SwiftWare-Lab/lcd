@@ -69,144 +69,6 @@ maybe_print(f"Compute Capability: {device.compute_capability}")
 
 DEFAULT_MTX_LIST = [
 "/home/mad29/projects/testdata/matrices/1138_bus.mtx",
-# "/home/mad29/projects/testdata/matrices/2cubes_sphere.mtx",
-# "/home/mad29/projects/testdata/matrices/Chem97ZtZ.mtx",
-# "/home/mad29/projects/testdata/matrices/Dubcova1.mtx",
-# "/home/mad29/projects/testdata/matrices/Dubcova2.mtx",
-# "/home/mad29/projects/testdata/matrices/Dubcova3.mtx",
-# "/home/mad29/projects/testdata/matrices/Emilia_923.mtx",
-# "/home/mad29/projects/testdata/matrices/Fault_639.mtx",
-# "/home/mad29/projects/testdata/matrices/Flan_1565.mtx",
-# "/home/mad29/projects/testdata/matrices/G2_circuit.mtx",
-# "/home/mad29/projects/testdata/matrices/G3_circuit.mtx",
-# "/home/mad29/projects/testdata/matrices/Geo_1438.mtx",
-# "/home/mad29/projects/testdata/matrices/Hook_1498.mtx",
-# "/home/mad29/projects/testdata/matrices/Kuu.mtx",
-# "/home/mad29/projects/testdata/matrices/LF10000.mtx",
-# "/home/mad29/projects/testdata/matrices/Muu.mtx",
-# "/home/mad29/projects/testdata/matrices/PFlow_742.mtx",
-# "/home/mad29/projects/testdata/matrices/Pres_Poisson.mtx",
-# "/home/mad29/projects/testdata/matrices/Serena.mtx",
-# "/home/mad29/projects/testdata/matrices/StocF-1465.mtx",
-# "/home/mad29/projects/testdata/matrices/Trefethen_2000.mtx",
-# "/home/mad29/projects/testdata/matrices/Trefethen_20000.mtx",
-# "/home/mad29/projects/testdata/matrices/bcsstk08.mtx",
-# "/home/mad29/projects/testdata/matrices/bcsstk09.mtx",
-# "/home/mad29/projects/testdata/matrices/bcsstk10.mtx",
-# "/home/mad29/projects/testdata/matrices/bcsstk11.mtx",
-# "/home/mad29/projects/testdata/matrices/bcsstk12.mtx",
-# "/home/mad29/projects/testdata/matrices/bcsstk13.mtx",
-# "/home/mad29/projects/testdata/matrices/bcsstk14.mtx",
-# "/home/mad29/projects/testdata/matrices/bcsstk15.mtx",
-# "/home/mad29/projects/testdata/matrices/bcsstk16.mtx",
-# "/home/mad29/projects/testdata/matrices/bcsstk17.mtx",
-# "/home/mad29/projects/testdata/matrices/bcsstk18.mtx",
-# "/home/mad29/projects/testdata/matrices/bcsstk21.mtx",
-# "/home/mad29/projects/testdata/matrices/bcsstk23.mtx",
-# "/home/mad29/projects/testdata/matrices/bcsstk24.mtx",
-# "/home/mad29/projects/testdata/matrices/bcsstk25.mtx",
-# "/home/mad29/projects/testdata/matrices/bcsstk26.mtx",
-# "/home/mad29/projects/testdata/matrices/bcsstk27.mtx",
-# "/home/mad29/projects/testdata/matrices/bcsstk28.mtx",
-# "/home/mad29/projects/testdata/matrices/bcsstk36.mtx",
-# "/home/mad29/projects/testdata/matrices/bcsstk38.mtx",
-# "/home/mad29/projects/testdata/matrices/bcsstm08.mtx",
-# "/home/mad29/projects/testdata/matrices/bcsstm09.mtx",
-# "/home/mad29/projects/testdata/matrices/bcsstm11.mtx",
-# "/home/mad29/projects/testdata/matrices/bcsstm12.mtx",
-# "/home/mad29/projects/testdata/matrices/bcsstm21.mtx",
-# "/home/mad29/projects/testdata/matrices/bcsstm23.mtx",
-# "/home/mad29/projects/testdata/matrices/bcsstm24.mtx",
-# "/home/mad29/projects/testdata/matrices/bcsstm25.mtx",
-# "/home/mad29/projects/testdata/matrices/bcsstm26.mtx",
-# "/home/mad29/projects/testdata/matrices/bcsstm39.mtx",
-# "/home/mad29/projects/testdata/matrices/bibd_81_2.mtx",
-# "/home/mad29/projects/testdata/matrices/bmw7st_1.mtx",
-# "/home/mad29/projects/testdata/matrices/bmwcra_1.mtx",
-# "/home/mad29/projects/testdata/matrices/bodyy4.mtx",
-# "/home/mad29/projects/testdata/matrices/bodyy5.mtx",
-# "/home/mad29/projects/testdata/matrices/bodyy6.mtx",
-# "/home/mad29/projects/testdata/matrices/bone010.mtx",
-# "/home/mad29/projects/testdata/matrices/boneS01.mtx",
-# "/home/mad29/projects/testdata/matrices/cbuckle.mtx",
-# "/home/mad29/projects/testdata/matrices/cfd1.mtx",
-# "/home/mad29/projects/testdata/matrices/cfd2.mtx",
-# "/home/mad29/projects/testdata/matrices/crystm01.mtx",
-# "/home/mad29/projects/testdata/matrices/crystm02.mtx",
-# "/home/mad29/projects/testdata/matrices/crystm03.mtx",
-# "/home/mad29/projects/testdata/matrices/ct20stif.mtx",
-# "/home/mad29/projects/testdata/matrices/cvxbqp1.mtx",
-# "/home/mad29/projects/testdata/matrices/denormal.mtx",
-# "/home/mad29/projects/testdata/matrices/ecology2.mtx",
-# "/home/mad29/projects/testdata/matrices/ex10.mtx",
-# "/home/mad29/projects/testdata/matrices/ex10hs.mtx",
-# "/home/mad29/projects/testdata/matrices/ex13.mtx",
-# "/home/mad29/projects/testdata/matrices/ex15.mtx",
-# "/home/mad29/projects/testdata/matrices/ex3.mtx",
-# "/home/mad29/projects/testdata/matrices/ex33.mtx",
-# "/home/mad29/projects/testdata/matrices/ex9.mtx",
-# "/home/mad29/projects/testdata/matrices/finan512.mtx",
-# "/home/mad29/projects/testdata/matrices/fv1.mtx",
-# "/home/mad29/projects/testdata/matrices/fv2.mtx",
-# "/home/mad29/projects/testdata/matrices/fv3.mtx",
-# "/home/mad29/projects/testdata/matrices/gyro.mtx",
-# "/home/mad29/projects/testdata/matrices/inline_1.mtx",
-# "/home/mad29/projects/testdata/matrices/jnlbrng1.mtx",
-# "/home/mad29/projects/testdata/matrices/ldoor.mtx",
-# "/home/mad29/projects/testdata/matrices/msdoor.mtx",
-# "/home/mad29/projects/testdata/matrices/nasa1824.mtx",
-# "/home/mad29/projects/testdata/matrices/nasa2146.mtx",
-# "/home/mad29/projects/testdata/matrices/nasa2910.mtx",
-# "/home/mad29/projects/testdata/matrices/nasa4704.mtx",
-# "/home/mad29/projects/testdata/matrices/nasasrb.mtx",
-# "/home/mad29/projects/testdata/matrices/nd12k.mtx",
-# "/home/mad29/projects/testdata/matrices/nd24k.mtx",
-# "/home/mad29/projects/testdata/matrices/nd3k.mtx",
-# "/home/mad29/projects/testdata/matrices/nd6k.mtx",
-# "/home/mad29/projects/testdata/matrices/obstclae.mtx",
-# "/home/mad29/projects/testdata/matrices/offshore.mtx",
-# "/home/mad29/projects/testdata/matrices/oilpan.mtx",
-# "/home/mad29/projects/testdata/matrices/olafu.mtx",
-# "/home/mad29/projects/testdata/matrices/parabolic_fem.mtx",
-# "/home/mad29/projects/testdata/matrices/pdb1HYS.mtx",
-# "/home/mad29/projects/testdata/matrices/plat1919.mtx",
-# "/home/mad29/projects/testdata/matrices/plbuckle.mtx",
-# "/home/mad29/projects/testdata/matrices/pwtk.mtx",
-# "/home/mad29/projects/testdata/matrices/qa8fm.mtx",
-# "/home/mad29/projects/testdata/matrices/raefsky4.mtx",
-# "/home/mad29/projects/testdata/matrices/s1rmq4m1.mtx",
-# "/home/mad29/projects/testdata/matrices/s1rmt3m1.mtx",
-# "/home/mad29/projects/testdata/matrices/s2rmq4m1.mtx",
-# "/home/mad29/projects/testdata/matrices/s2rmt3m1.mtx",
-# "/home/mad29/projects/testdata/matrices/s3dkq4m2.mtx",
-# "/home/mad29/projects/testdata/matrices/s3dkt3m2.mtx",
-# "/home/mad29/projects/testdata/matrices/s3rmq4m1.mtx",
-# "/home/mad29/projects/testdata/matrices/s3rmt3m1.mtx",
-# "/home/mad29/projects/testdata/matrices/s3rmt3m3.mtx",
-# "/home/mad29/projects/testdata/matrices/shallow_water1.mtx",
-# "/home/mad29/projects/testdata/matrices/shallow_water2.mtx",
-# "/home/mad29/projects/testdata/matrices/ship_001.mtx",
-# "/home/mad29/projects/testdata/matrices/ship_003.mtx",
-# "/home/mad29/projects/testdata/matrices/shipsec1.mtx",
-# "/home/mad29/projects/testdata/matrices/shipsec5.mtx",
-# "/home/mad29/projects/testdata/matrices/shipsec8.mtx",
-# "/home/mad29/projects/testdata/matrices/smt.mtx",
-# "/home/mad29/projects/testdata/matrices/sts4098.mtx",
-# "/home/mad29/projects/testdata/matrices/t2dah_e.mtx",
-# "/home/mad29/projects/testdata/matrices/t2dal_e.mtx",
-# "/home/mad29/projects/testdata/matrices/t3dl_e.mtx",
-# "/home/mad29/projects/testdata/matrices/ted_B.mtx",
-# "/home/mad29/projects/testdata/matrices/thermal1.mtx",
-# "/home/mad29/projects/testdata/matrices/thermal2.mtx",
-# "/home/mad29/projects/testdata/matrices/thermomech_TC.mtx",
-# "/home/mad29/projects/testdata/matrices/thermomech_TK.mtx",
-# "/home/mad29/projects/testdata/matrices/thermomech_dM.mtx",
-# "/home/mad29/projects/testdata/matrices/tmt_sym.mtx",
-# "/home/mad29/projects/testdata/matrices/torsion1.mtx",
-# "/home/mad29/projects/testdata/matrices/vanbody.mtx",
-# "/home/mad29/projects/testdata/matrices/wathen100.mtx",
-# "/home/mad29/projects/testdata/matrices/wathen120.mtx",
-# "/home/mad29/projects/testdata/matrices/x104.mtx"
 ]
 mtx_override = os.environ.get("SPTRSV_MATRIX")
 mtx_list = [mtx_override] if mtx_override else DEFAULT_MTX_LIST
@@ -249,50 +111,50 @@ method_list.extend([
     "csr-sf-base",
 ])
 
-# # ----------------------------------------------------------------------------
-# # TEST CANDIDATES - WAVEFRONT - UNROLLED
-# # ----------------------------------------------------------------------------
-# # Unroll factor 1 (mapping variants)
-# for threads in thread_counts:
-#     method_list.extend([
-#         f"csc-wf-u1-t{threads}",
-#         f"csr-wf-u1-t{threads}",
-#     ])
+# ----------------------------------------------------------------------------
+# TEST CANDIDATES - WAVEFRONT - UNROLLED
+# ----------------------------------------------------------------------------
+# Unroll factor 1 (mapping variants)
+for threads in thread_counts:
+    method_list.extend([
+        f"csc-wf-u1-t{threads}",
+        f"csr-wf-u1-t{threads}",
+    ])
 
-# # Explicit unrolling with factors 4-64
-# for factor in unroll_factors:
-#     for threads in thread_counts:
-#         method_list.extend([
-#             f"csc-wf-u{factor}-t{threads}",
-#             f"csr-wf-u{factor}-t{threads}",
-#         ])
+# Explicit unrolling with factors 4-64
+for factor in unroll_factors:
+    for threads in thread_counts:
+        method_list.extend([
+            f"csc-wf-u{factor}-t{threads}",
+            f"csr-wf-u{factor}-t{threads}",
+        ])
 
-# # ----------------------------------------------------------------------------
-# # TEST CANDIDATES - WAVEFRONT - COARSENED
-# # ----------------------------------------------------------------------------
-# # Block coarsening (merge dependency levels)
-# for cf in block_coarsening_factors:
-#     method_list.extend([
-#         f"csc-wf-coarse-block-wc{cf}",
-#         f"csr-wf-coarse-block-wc{cf}",
-#     ])
+# ----------------------------------------------------------------------------
+# TEST CANDIDATES - WAVEFRONT - COARSENED
+# ----------------------------------------------------------------------------
+# Block coarsening (merge dependency levels)
+for cf in block_coarsening_factors:
+    method_list.extend([
+        f"csc-wf-coarse-block-wc{cf}",
+        f"csr-wf-coarse-block-wc{cf}",
+    ])
 
-# # Thread coarsening
-# for threads in thread_counts:
-#     method_list.extend([
-#         f"csc-wf-coarse-thread-tc{threads}",
-#         f"csr-wf-coarse-thread-tc{threads}",
-#     ])
+# Thread coarsening
+for threads in thread_counts:
+    method_list.extend([
+        f"csc-wf-coarse-thread-tc{threads}",
+        f"csr-wf-coarse-thread-tc{threads}",
+    ])
 
-# # Combined 3-level coarsening (wavefront + warp + thread)
-# for cf in wavefront_coarsening_factors:
-#     for threads in thread_counts:
-#         warps = threads // 32
-#         for tcf in thread_coarsening_factors:
-#             method_list.extend([
-#                 f"csc-wf-coarse-comb-wc{cf}-w{warps}-tc{tcf}",
-#                 f"csr-wf-coarse-comb-wc{cf}-w{warps}-tc{tcf}",
-#             ])
+# Combined 3-level coarsening (wavefront + warp + thread)
+for cf in wavefront_coarsening_factors:
+    for threads in thread_counts:
+        warps = threads // 32
+        for tcf in thread_coarsening_factors:
+            method_list.extend([
+                f"csc-wf-coarse-comb-wc{cf}-w{warps}-tc{tcf}",
+                f"csr-wf-coarse-comb-wc{cf}-w{warps}-tc{tcf}",
+            ])
 
 # ----------------------------------------------------------------------------
 # TEST CANDIDATES - SYNC-FREE - UNROLLED
