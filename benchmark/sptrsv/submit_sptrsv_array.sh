@@ -4,7 +4,7 @@
 #SBATCH --nodes=1
 #SBATCH --gpus-per-node=1
 #SBATCH --output="sptrsv.%A-%a.out"
-#SBATCH -t 03:59:00
+#SBATCH -t 00:59:00
 #SBATCH --array=0-1
 
 module load StdEnv/2023

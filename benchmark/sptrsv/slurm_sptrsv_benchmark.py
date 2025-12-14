@@ -2,6 +2,7 @@ import numpy as np
 import torch
 import sys
 import os
+import time
 
 # Add parent directory to path for imports
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
@@ -68,144 +69,144 @@ maybe_print(f"Compute Capability: {device.compute_capability}")
 
 DEFAULT_MTX_LIST = [
 "/home/mad29/projects/testdata/matrices/1138_bus.mtx",
-"/home/mad29/projects/testdata/matrices/2cubes_sphere.mtx",
-"/home/mad29/projects/testdata/matrices/Chem97ZtZ.mtx",
-"/home/mad29/projects/testdata/matrices/Dubcova1.mtx",
-"/home/mad29/projects/testdata/matrices/Dubcova2.mtx",
-"/home/mad29/projects/testdata/matrices/Dubcova3.mtx",
-"/home/mad29/projects/testdata/matrices/Emilia_923.mtx",
-"/home/mad29/projects/testdata/matrices/Fault_639.mtx",
-"/home/mad29/projects/testdata/matrices/Flan_1565.mtx",
-"/home/mad29/projects/testdata/matrices/G2_circuit.mtx",
-"/home/mad29/projects/testdata/matrices/G3_circuit.mtx",
-"/home/mad29/projects/testdata/matrices/Geo_1438.mtx",
-"/home/mad29/projects/testdata/matrices/Hook_1498.mtx",
-"/home/mad29/projects/testdata/matrices/Kuu.mtx",
-"/home/mad29/projects/testdata/matrices/LF10000.mtx",
-"/home/mad29/projects/testdata/matrices/Muu.mtx",
-"/home/mad29/projects/testdata/matrices/PFlow_742.mtx",
-"/home/mad29/projects/testdata/matrices/Pres_Poisson.mtx",
-"/home/mad29/projects/testdata/matrices/Serena.mtx",
-"/home/mad29/projects/testdata/matrices/StocF-1465.mtx",
-"/home/mad29/projects/testdata/matrices/Trefethen_2000.mtx",
-"/home/mad29/projects/testdata/matrices/Trefethen_20000.mtx",
-"/home/mad29/projects/testdata/matrices/bcsstk08.mtx",
-"/home/mad29/projects/testdata/matrices/bcsstk09.mtx",
-"/home/mad29/projects/testdata/matrices/bcsstk10.mtx",
-"/home/mad29/projects/testdata/matrices/bcsstk11.mtx",
-"/home/mad29/projects/testdata/matrices/bcsstk12.mtx",
-"/home/mad29/projects/testdata/matrices/bcsstk13.mtx",
-"/home/mad29/projects/testdata/matrices/bcsstk14.mtx",
-"/home/mad29/projects/testdata/matrices/bcsstk15.mtx",
-"/home/mad29/projects/testdata/matrices/bcsstk16.mtx",
-"/home/mad29/projects/testdata/matrices/bcsstk17.mtx",
-"/home/mad29/projects/testdata/matrices/bcsstk18.mtx",
-"/home/mad29/projects/testdata/matrices/bcsstk21.mtx",
-"/home/mad29/projects/testdata/matrices/bcsstk23.mtx",
-"/home/mad29/projects/testdata/matrices/bcsstk24.mtx",
-"/home/mad29/projects/testdata/matrices/bcsstk25.mtx",
-"/home/mad29/projects/testdata/matrices/bcsstk26.mtx",
-"/home/mad29/projects/testdata/matrices/bcsstk27.mtx",
-"/home/mad29/projects/testdata/matrices/bcsstk28.mtx",
-"/home/mad29/projects/testdata/matrices/bcsstk36.mtx",
-"/home/mad29/projects/testdata/matrices/bcsstk38.mtx",
-"/home/mad29/projects/testdata/matrices/bcsstm08.mtx",
-"/home/mad29/projects/testdata/matrices/bcsstm09.mtx",
-"/home/mad29/projects/testdata/matrices/bcsstm11.mtx",
-"/home/mad29/projects/testdata/matrices/bcsstm12.mtx",
-"/home/mad29/projects/testdata/matrices/bcsstm21.mtx",
-"/home/mad29/projects/testdata/matrices/bcsstm23.mtx",
-"/home/mad29/projects/testdata/matrices/bcsstm24.mtx",
-"/home/mad29/projects/testdata/matrices/bcsstm25.mtx",
-"/home/mad29/projects/testdata/matrices/bcsstm26.mtx",
-"/home/mad29/projects/testdata/matrices/bcsstm39.mtx",
-"/home/mad29/projects/testdata/matrices/bibd_81_2.mtx",
-"/home/mad29/projects/testdata/matrices/bmw7st_1.mtx",
-"/home/mad29/projects/testdata/matrices/bmwcra_1.mtx",
-"/home/mad29/projects/testdata/matrices/bodyy4.mtx",
-"/home/mad29/projects/testdata/matrices/bodyy5.mtx",
-"/home/mad29/projects/testdata/matrices/bodyy6.mtx",
-"/home/mad29/projects/testdata/matrices/bone010.mtx",
-"/home/mad29/projects/testdata/matrices/boneS01.mtx",
-"/home/mad29/projects/testdata/matrices/cbuckle.mtx",
-"/home/mad29/projects/testdata/matrices/cfd1.mtx",
-"/home/mad29/projects/testdata/matrices/cfd2.mtx",
-"/home/mad29/projects/testdata/matrices/crystm01.mtx",
-"/home/mad29/projects/testdata/matrices/crystm02.mtx",
-"/home/mad29/projects/testdata/matrices/crystm03.mtx",
-"/home/mad29/projects/testdata/matrices/ct20stif.mtx",
-"/home/mad29/projects/testdata/matrices/cvxbqp1.mtx",
-"/home/mad29/projects/testdata/matrices/denormal.mtx",
-"/home/mad29/projects/testdata/matrices/ecology2.mtx",
-"/home/mad29/projects/testdata/matrices/ex10.mtx",
-"/home/mad29/projects/testdata/matrices/ex10hs.mtx",
-"/home/mad29/projects/testdata/matrices/ex13.mtx",
-"/home/mad29/projects/testdata/matrices/ex15.mtx",
-"/home/mad29/projects/testdata/matrices/ex3.mtx",
-"/home/mad29/projects/testdata/matrices/ex33.mtx",
-"/home/mad29/projects/testdata/matrices/ex9.mtx",
-"/home/mad29/projects/testdata/matrices/finan512.mtx",
-"/home/mad29/projects/testdata/matrices/fv1.mtx",
-"/home/mad29/projects/testdata/matrices/fv2.mtx",
-"/home/mad29/projects/testdata/matrices/fv3.mtx",
-"/home/mad29/projects/testdata/matrices/gyro.mtx",
-"/home/mad29/projects/testdata/matrices/inline_1.mtx",
-"/home/mad29/projects/testdata/matrices/jnlbrng1.mtx",
-"/home/mad29/projects/testdata/matrices/ldoor.mtx",
-"/home/mad29/projects/testdata/matrices/msdoor.mtx",
-"/home/mad29/projects/testdata/matrices/nasa1824.mtx",
-"/home/mad29/projects/testdata/matrices/nasa2146.mtx",
-"/home/mad29/projects/testdata/matrices/nasa2910.mtx",
-"/home/mad29/projects/testdata/matrices/nasa4704.mtx",
-"/home/mad29/projects/testdata/matrices/nasasrb.mtx",
-"/home/mad29/projects/testdata/matrices/nd12k.mtx",
-"/home/mad29/projects/testdata/matrices/nd24k.mtx",
-"/home/mad29/projects/testdata/matrices/nd3k.mtx",
-"/home/mad29/projects/testdata/matrices/nd6k.mtx",
-"/home/mad29/projects/testdata/matrices/obstclae.mtx",
-"/home/mad29/projects/testdata/matrices/offshore.mtx",
-"/home/mad29/projects/testdata/matrices/oilpan.mtx",
-"/home/mad29/projects/testdata/matrices/olafu.mtx",
-"/home/mad29/projects/testdata/matrices/parabolic_fem.mtx",
-"/home/mad29/projects/testdata/matrices/pdb1HYS.mtx",
-"/home/mad29/projects/testdata/matrices/plat1919.mtx",
-"/home/mad29/projects/testdata/matrices/plbuckle.mtx",
-"/home/mad29/projects/testdata/matrices/pwtk.mtx",
-"/home/mad29/projects/testdata/matrices/qa8fm.mtx",
-"/home/mad29/projects/testdata/matrices/raefsky4.mtx",
-"/home/mad29/projects/testdata/matrices/s1rmq4m1.mtx",
-"/home/mad29/projects/testdata/matrices/s1rmt3m1.mtx",
-"/home/mad29/projects/testdata/matrices/s2rmq4m1.mtx",
-"/home/mad29/projects/testdata/matrices/s2rmt3m1.mtx",
-"/home/mad29/projects/testdata/matrices/s3dkq4m2.mtx",
-"/home/mad29/projects/testdata/matrices/s3dkt3m2.mtx",
-"/home/mad29/projects/testdata/matrices/s3rmq4m1.mtx",
-"/home/mad29/projects/testdata/matrices/s3rmt3m1.mtx",
-"/home/mad29/projects/testdata/matrices/s3rmt3m3.mtx",
-"/home/mad29/projects/testdata/matrices/shallow_water1.mtx",
-"/home/mad29/projects/testdata/matrices/shallow_water2.mtx",
-"/home/mad29/projects/testdata/matrices/ship_001.mtx",
-"/home/mad29/projects/testdata/matrices/ship_003.mtx",
-"/home/mad29/projects/testdata/matrices/shipsec1.mtx",
-"/home/mad29/projects/testdata/matrices/shipsec5.mtx",
-"/home/mad29/projects/testdata/matrices/shipsec8.mtx",
-"/home/mad29/projects/testdata/matrices/smt.mtx",
-"/home/mad29/projects/testdata/matrices/sts4098.mtx",
-"/home/mad29/projects/testdata/matrices/t2dah_e.mtx",
-"/home/mad29/projects/testdata/matrices/t2dal_e.mtx",
-"/home/mad29/projects/testdata/matrices/t3dl_e.mtx",
-"/home/mad29/projects/testdata/matrices/ted_B.mtx",
-"/home/mad29/projects/testdata/matrices/thermal1.mtx",
-"/home/mad29/projects/testdata/matrices/thermal2.mtx",
-"/home/mad29/projects/testdata/matrices/thermomech_TC.mtx",
-"/home/mad29/projects/testdata/matrices/thermomech_TK.mtx",
-"/home/mad29/projects/testdata/matrices/thermomech_dM.mtx",
-"/home/mad29/projects/testdata/matrices/tmt_sym.mtx",
-"/home/mad29/projects/testdata/matrices/torsion1.mtx",
-"/home/mad29/projects/testdata/matrices/vanbody.mtx",
-"/home/mad29/projects/testdata/matrices/wathen100.mtx",
-"/home/mad29/projects/testdata/matrices/wathen120.mtx",
-"/home/mad29/projects/testdata/matrices/x104.mtx"
+# "/home/mad29/projects/testdata/matrices/2cubes_sphere.mtx",
+# "/home/mad29/projects/testdata/matrices/Chem97ZtZ.mtx",
+# "/home/mad29/projects/testdata/matrices/Dubcova1.mtx",
+# "/home/mad29/projects/testdata/matrices/Dubcova2.mtx",
+# "/home/mad29/projects/testdata/matrices/Dubcova3.mtx",
+# "/home/mad29/projects/testdata/matrices/Emilia_923.mtx",
+# "/home/mad29/projects/testdata/matrices/Fault_639.mtx",
+# "/home/mad29/projects/testdata/matrices/Flan_1565.mtx",
+# "/home/mad29/projects/testdata/matrices/G2_circuit.mtx",
+# "/home/mad29/projects/testdata/matrices/G3_circuit.mtx",
+# "/home/mad29/projects/testdata/matrices/Geo_1438.mtx",
+# "/home/mad29/projects/testdata/matrices/Hook_1498.mtx",
+# "/home/mad29/projects/testdata/matrices/Kuu.mtx",
+# "/home/mad29/projects/testdata/matrices/LF10000.mtx",
+# "/home/mad29/projects/testdata/matrices/Muu.mtx",
+# "/home/mad29/projects/testdata/matrices/PFlow_742.mtx",
+# "/home/mad29/projects/testdata/matrices/Pres_Poisson.mtx",
+# "/home/mad29/projects/testdata/matrices/Serena.mtx",
+# "/home/mad29/projects/testdata/matrices/StocF-1465.mtx",
+# "/home/mad29/projects/testdata/matrices/Trefethen_2000.mtx",
+# "/home/mad29/projects/testdata/matrices/Trefethen_20000.mtx",
+# "/home/mad29/projects/testdata/matrices/bcsstk08.mtx",
+# "/home/mad29/projects/testdata/matrices/bcsstk09.mtx",
+# "/home/mad29/projects/testdata/matrices/bcsstk10.mtx",
+# "/home/mad29/projects/testdata/matrices/bcsstk11.mtx",
+# "/home/mad29/projects/testdata/matrices/bcsstk12.mtx",
+# "/home/mad29/projects/testdata/matrices/bcsstk13.mtx",
+# "/home/mad29/projects/testdata/matrices/bcsstk14.mtx",
+# "/home/mad29/projects/testdata/matrices/bcsstk15.mtx",
+# "/home/mad29/projects/testdata/matrices/bcsstk16.mtx",
+# "/home/mad29/projects/testdata/matrices/bcsstk17.mtx",
+# "/home/mad29/projects/testdata/matrices/bcsstk18.mtx",
+# "/home/mad29/projects/testdata/matrices/bcsstk21.mtx",
+# "/home/mad29/projects/testdata/matrices/bcsstk23.mtx",
+# "/home/mad29/projects/testdata/matrices/bcsstk24.mtx",
+# "/home/mad29/projects/testdata/matrices/bcsstk25.mtx",
+# "/home/mad29/projects/testdata/matrices/bcsstk26.mtx",
+# "/home/mad29/projects/testdata/matrices/bcsstk27.mtx",
+# "/home/mad29/projects/testdata/matrices/bcsstk28.mtx",
+# "/home/mad29/projects/testdata/matrices/bcsstk36.mtx",
+# "/home/mad29/projects/testdata/matrices/bcsstk38.mtx",
+# "/home/mad29/projects/testdata/matrices/bcsstm08.mtx",
+# "/home/mad29/projects/testdata/matrices/bcsstm09.mtx",
+# "/home/mad29/projects/testdata/matrices/bcsstm11.mtx",
+# "/home/mad29/projects/testdata/matrices/bcsstm12.mtx",
+# "/home/mad29/projects/testdata/matrices/bcsstm21.mtx",
+# "/home/mad29/projects/testdata/matrices/bcsstm23.mtx",
+# "/home/mad29/projects/testdata/matrices/bcsstm24.mtx",
+# "/home/mad29/projects/testdata/matrices/bcsstm25.mtx",
+# "/home/mad29/projects/testdata/matrices/bcsstm26.mtx",
+# "/home/mad29/projects/testdata/matrices/bcsstm39.mtx",
+# "/home/mad29/projects/testdata/matrices/bibd_81_2.mtx",
+# "/home/mad29/projects/testdata/matrices/bmw7st_1.mtx",
+# "/home/mad29/projects/testdata/matrices/bmwcra_1.mtx",
+# "/home/mad29/projects/testdata/matrices/bodyy4.mtx",
+# "/home/mad29/projects/testdata/matrices/bodyy5.mtx",
+# "/home/mad29/projects/testdata/matrices/bodyy6.mtx",
+# "/home/mad29/projects/testdata/matrices/bone010.mtx",
+# "/home/mad29/projects/testdata/matrices/boneS01.mtx",
+# "/home/mad29/projects/testdata/matrices/cbuckle.mtx",
+# "/home/mad29/projects/testdata/matrices/cfd1.mtx",
+# "/home/mad29/projects/testdata/matrices/cfd2.mtx",
+# "/home/mad29/projects/testdata/matrices/crystm01.mtx",
+# "/home/mad29/projects/testdata/matrices/crystm02.mtx",
+# "/home/mad29/projects/testdata/matrices/crystm03.mtx",
+# "/home/mad29/projects/testdata/matrices/ct20stif.mtx",
+# "/home/mad29/projects/testdata/matrices/cvxbqp1.mtx",
+# "/home/mad29/projects/testdata/matrices/denormal.mtx",
+# "/home/mad29/projects/testdata/matrices/ecology2.mtx",
+# "/home/mad29/projects/testdata/matrices/ex10.mtx",
+# "/home/mad29/projects/testdata/matrices/ex10hs.mtx",
+# "/home/mad29/projects/testdata/matrices/ex13.mtx",
+# "/home/mad29/projects/testdata/matrices/ex15.mtx",
+# "/home/mad29/projects/testdata/matrices/ex3.mtx",
+# "/home/mad29/projects/testdata/matrices/ex33.mtx",
+# "/home/mad29/projects/testdata/matrices/ex9.mtx",
+# "/home/mad29/projects/testdata/matrices/finan512.mtx",
+# "/home/mad29/projects/testdata/matrices/fv1.mtx",
+# "/home/mad29/projects/testdata/matrices/fv2.mtx",
+# "/home/mad29/projects/testdata/matrices/fv3.mtx",
+# "/home/mad29/projects/testdata/matrices/gyro.mtx",
+# "/home/mad29/projects/testdata/matrices/inline_1.mtx",
+# "/home/mad29/projects/testdata/matrices/jnlbrng1.mtx",
+# "/home/mad29/projects/testdata/matrices/ldoor.mtx",
+# "/home/mad29/projects/testdata/matrices/msdoor.mtx",
+# "/home/mad29/projects/testdata/matrices/nasa1824.mtx",
+# "/home/mad29/projects/testdata/matrices/nasa2146.mtx",
+# "/home/mad29/projects/testdata/matrices/nasa2910.mtx",
+# "/home/mad29/projects/testdata/matrices/nasa4704.mtx",
+# "/home/mad29/projects/testdata/matrices/nasasrb.mtx",
+# "/home/mad29/projects/testdata/matrices/nd12k.mtx",
+# "/home/mad29/projects/testdata/matrices/nd24k.mtx",
+# "/home/mad29/projects/testdata/matrices/nd3k.mtx",
+# "/home/mad29/projects/testdata/matrices/nd6k.mtx",
+# "/home/mad29/projects/testdata/matrices/obstclae.mtx",
+# "/home/mad29/projects/testdata/matrices/offshore.mtx",
+# "/home/mad29/projects/testdata/matrices/oilpan.mtx",
+# "/home/mad29/projects/testdata/matrices/olafu.mtx",
+# "/home/mad29/projects/testdata/matrices/parabolic_fem.mtx",
+# "/home/mad29/projects/testdata/matrices/pdb1HYS.mtx",
+# "/home/mad29/projects/testdata/matrices/plat1919.mtx",
+# "/home/mad29/projects/testdata/matrices/plbuckle.mtx",
+# "/home/mad29/projects/testdata/matrices/pwtk.mtx",
+# "/home/mad29/projects/testdata/matrices/qa8fm.mtx",
+# "/home/mad29/projects/testdata/matrices/raefsky4.mtx",
+# "/home/mad29/projects/testdata/matrices/s1rmq4m1.mtx",
+# "/home/mad29/projects/testdata/matrices/s1rmt3m1.mtx",
+# "/home/mad29/projects/testdata/matrices/s2rmq4m1.mtx",
+# "/home/mad29/projects/testdata/matrices/s2rmt3m1.mtx",
+# "/home/mad29/projects/testdata/matrices/s3dkq4m2.mtx",
+# "/home/mad29/projects/testdata/matrices/s3dkt3m2.mtx",
+# "/home/mad29/projects/testdata/matrices/s3rmq4m1.mtx",
+# "/home/mad29/projects/testdata/matrices/s3rmt3m1.mtx",
+# "/home/mad29/projects/testdata/matrices/s3rmt3m3.mtx",
+# "/home/mad29/projects/testdata/matrices/shallow_water1.mtx",
+# "/home/mad29/projects/testdata/matrices/shallow_water2.mtx",
+# "/home/mad29/projects/testdata/matrices/ship_001.mtx",
+# "/home/mad29/projects/testdata/matrices/ship_003.mtx",
+# "/home/mad29/projects/testdata/matrices/shipsec1.mtx",
+# "/home/mad29/projects/testdata/matrices/shipsec5.mtx",
+# "/home/mad29/projects/testdata/matrices/shipsec8.mtx",
+# "/home/mad29/projects/testdata/matrices/smt.mtx",
+# "/home/mad29/projects/testdata/matrices/sts4098.mtx",
+# "/home/mad29/projects/testdata/matrices/t2dah_e.mtx",
+# "/home/mad29/projects/testdata/matrices/t2dal_e.mtx",
+# "/home/mad29/projects/testdata/matrices/t3dl_e.mtx",
+# "/home/mad29/projects/testdata/matrices/ted_B.mtx",
+# "/home/mad29/projects/testdata/matrices/thermal1.mtx",
+# "/home/mad29/projects/testdata/matrices/thermal2.mtx",
+# "/home/mad29/projects/testdata/matrices/thermomech_TC.mtx",
+# "/home/mad29/projects/testdata/matrices/thermomech_TK.mtx",
+# "/home/mad29/projects/testdata/matrices/thermomech_dM.mtx",
+# "/home/mad29/projects/testdata/matrices/tmt_sym.mtx",
+# "/home/mad29/projects/testdata/matrices/torsion1.mtx",
+# "/home/mad29/projects/testdata/matrices/vanbody.mtx",
+# "/home/mad29/projects/testdata/matrices/wathen100.mtx",
+# "/home/mad29/projects/testdata/matrices/wathen120.mtx",
+# "/home/mad29/projects/testdata/matrices/x104.mtx"
 ]
 mtx_override = os.environ.get("SPTRSV_MATRIX")
 mtx_list = [mtx_override] if mtx_override else DEFAULT_MTX_LIST
@@ -248,50 +249,50 @@ method_list.extend([
     "csr-sf-base",
 ])
 
-# ----------------------------------------------------------------------------
-# TEST CANDIDATES - WAVEFRONT - UNROLLED
-# ----------------------------------------------------------------------------
-# Unroll factor 1 (mapping variants)
-for threads in thread_counts:
-    method_list.extend([
-        f"csc-wf-u1-t{threads}",
-        f"csr-wf-u1-t{threads}",
-    ])
+# # ----------------------------------------------------------------------------
+# # TEST CANDIDATES - WAVEFRONT - UNROLLED
+# # ----------------------------------------------------------------------------
+# # Unroll factor 1 (mapping variants)
+# for threads in thread_counts:
+#     method_list.extend([
+#         f"csc-wf-u1-t{threads}",
+#         f"csr-wf-u1-t{threads}",
+#     ])
 
-# Explicit unrolling with factors 4-64
-for factor in unroll_factors:
-    for threads in thread_counts:
-        method_list.extend([
-            f"csc-wf-u{factor}-t{threads}",
-            f"csr-wf-u{factor}-t{threads}",
-        ])
+# # Explicit unrolling with factors 4-64
+# for factor in unroll_factors:
+#     for threads in thread_counts:
+#         method_list.extend([
+#             f"csc-wf-u{factor}-t{threads}",
+#             f"csr-wf-u{factor}-t{threads}",
+#         ])
 
-# ----------------------------------------------------------------------------
-# TEST CANDIDATES - WAVEFRONT - COARSENED
-# ----------------------------------------------------------------------------
-# Block coarsening (merge dependency levels)
-for cf in block_coarsening_factors:
-    method_list.extend([
-        f"csc-wf-coarse-block-wc{cf}",
-        f"csr-wf-coarse-block-wc{cf}",
-    ])
+# # ----------------------------------------------------------------------------
+# # TEST CANDIDATES - WAVEFRONT - COARSENED
+# # ----------------------------------------------------------------------------
+# # Block coarsening (merge dependency levels)
+# for cf in block_coarsening_factors:
+#     method_list.extend([
+#         f"csc-wf-coarse-block-wc{cf}",
+#         f"csr-wf-coarse-block-wc{cf}",
+#     ])
 
-# Thread coarsening
-for threads in thread_counts:
-    method_list.extend([
-        f"csc-wf-coarse-thread-tc{threads}",
-        f"csr-wf-coarse-thread-tc{threads}",
-    ])
+# # Thread coarsening
+# for threads in thread_counts:
+#     method_list.extend([
+#         f"csc-wf-coarse-thread-tc{threads}",
+#         f"csr-wf-coarse-thread-tc{threads}",
+#     ])
 
-# Combined 3-level coarsening (wavefront + warp + thread)
-for cf in wavefront_coarsening_factors:
-    for threads in thread_counts:
-        warps = threads // 32
-        for tcf in thread_coarsening_factors:
-            method_list.extend([
-                f"csc-wf-coarse-comb-wc{cf}-w{warps}-tc{tcf}",
-                f"csr-wf-coarse-comb-wc{cf}-w{warps}-tc{tcf}",
-            ])
+# # Combined 3-level coarsening (wavefront + warp + thread)
+# for cf in wavefront_coarsening_factors:
+#     for threads in thread_counts:
+#         warps = threads // 32
+#         for tcf in thread_coarsening_factors:
+#             method_list.extend([
+#                 f"csc-wf-coarse-comb-wc{cf}-w{warps}-tc{tcf}",
+#                 f"csr-wf-coarse-comb-wc{cf}-w{warps}-tc{tcf}",
+#             ])
 
 # ----------------------------------------------------------------------------
 # TEST CANDIDATES - SYNC-FREE - UNROLLED
@@ -333,10 +334,10 @@ for threads in thread_counts:
 # ----------------------------------------------------------------------------
 for bw in band_widths:
     method_list.extend([
-        f"csc-h-bw{bw}",
-        f"csr-h-bw{bw}",
-        f"csc-h-sf-bw{bw}",
-        f"csr-h-sf-bw{bw}",
+        # f"csc-h-bw{bw}",
+        # f"csr-h-bw{bw}",
+        # f"csc-h-sf-bw{bw}",
+        # f"csr-h-sf-bw{bw}",
         f"csc-h-sf-persist-bw{bw}",
         f"csr-h-sf-persist-bw{bw}",
         ])
@@ -1056,6 +1057,7 @@ else:
     df.to_csv("method_correctness.csv")
 
 configs = []
+overhead_data = []  # Store runtime overhead measurements
 
 plot_suffix = ""
 if mtx_override:
@@ -1072,6 +1074,16 @@ configs.append(
         plot_name=f"sptrsv-performance{plot_suffix}",
         args={}
     ))
+
+def record_overhead(matrix_name, provider, dag_creation_ms=None, coarsening_ms=None):
+    """Record runtime overhead for a benchmark run"""
+    overhead_data.append({
+        'matrix': matrix_name,
+        'method': provider,
+        'dag_creation_ms': dag_creation_ms if dag_creation_ms is not None else 0.0,
+        'coarsening_ms': coarsening_ms if coarsening_ms is not None else 0.0,
+        'total_overhead_ms': (dag_creation_ms or 0.0) + (coarsening_ms or 0.0)
+    })
 
 # use triton benchmark
 @triton.testing.perf_report(configs)
@@ -1094,6 +1106,11 @@ def benchmark(matrices, provider):
     quantiles = [0.5, 0.2, 0.8]
     rep, warmpup = REP, WARMUP
     
+    # Initialize overhead tracking
+    dag_creation_time = None
+    coarsening_time = None
+    matrix_name = os.path.basename(matrices)
+    
     # ========================================================================
     # BASELINES
     # ========================================================================
@@ -1108,9 +1125,15 @@ def benchmark(matrices, provider):
         d_indices = cuda.to_device(A.indices)
         d_indptr = cuda.to_device(A.indptr)
         d_x = cuda.to_device(np.zeros(n))
+        
+        # Time DAG creation
+        t0 = time.perf_counter()
         wavefronts = compute_wavefront(A)
         wave_start_loc, waves = compact_2d_list(wavefronts)
         waves_gpu = cuda.to_device(waves)
+        dag_creation_time = (time.perf_counter() - t0) * 1000  # Convert to ms
+        cuda.synchronize()  # Ensure GPU is ready before benchmark
+        
         ms, min_ms, max_ms = triton.testing.do_bench(lambda: sptrsv_numba_csc(d_data, d_indices, d_indptr, d_x, A.shape[0], A.shape[1], A.nnz, wave_start_loc, waves_gpu), quantiles=quantiles, warmup=warmpup, rep=rep)
     
     if provider == 'csc-sf-base':
@@ -1119,7 +1142,13 @@ def benchmark(matrices, provider):
         d_indices = cuda.to_device(A.indices)
         d_indptr = cuda.to_device(A.indptr)
         d_x = cuda.to_device(np.zeros(n))
+        
+        # Time DAG creation
+        t0 = time.perf_counter()
         dep_count = incoming_edge(A)
+        dag_creation_time = (time.perf_counter() - t0) * 1000  # Convert to ms
+        cuda.synchronize()  # Ensure GPU is ready before benchmark
+        
         ms, min_ms, max_ms = triton.testing.do_bench(lambda: sptrsv_numba_csc_sync_free(d_data, d_indices, d_indptr, d_x, A.shape[0], A.shape[1], A.nnz, dep_count), quantiles=quantiles, warmup=warmpup, rep=rep)
     
     if provider == 'csr-wf-base':
@@ -1128,9 +1157,15 @@ def benchmark(matrices, provider):
         d_indices = cuda.to_device(A_csr.indices)
         d_indptr = cuda.to_device(A_csr.indptr)
         d_x = cuda.to_device(np.zeros(n))
+        
+        # Time DAG creation
+        t0 = time.perf_counter()
         wavefronts = compute_wavefront(A)
         wave_start_loc, waves = compact_2d_list(wavefronts)
         waves_gpu = cuda.to_device(waves)
+        dag_creation_time = (time.perf_counter() - t0) * 1000  # Convert to ms
+        cuda.synchronize()  # Ensure GPU is ready before benchmark
+        
         ms, min_ms, max_ms = triton.testing.do_bench(lambda: sptrsv_numba_csr_wavefront(d_data, d_indices, d_indptr, d_x, A.shape[0], A.shape[1], A_csr.nnz, wave_start_loc, waves_gpu), quantiles=quantiles, warmup=warmpup, rep=rep)
     
     if provider == 'csr-sf-base':
@@ -1139,8 +1174,14 @@ def benchmark(matrices, provider):
         d_indices = cuda.to_device(A_csr.indices)
         d_indptr = cuda.to_device(A_csr.indptr)
         d_x = cuda.to_device(np.zeros(n))
+        
+        # Time DAG creation
+        t0 = time.perf_counter()
         dep_count = incoming_edge_csr_rows(A_csr)
         succ_offsets, succ_indices = build_csr_successors(A_csr)
+        dag_creation_time = (time.perf_counter() - t0) * 1000  # Convert to ms
+        cuda.synchronize()  # Ensure GPU is ready before benchmark
+        
         ms, min_ms, max_ms = triton.testing.do_bench(lambda: sptrsv_numba_csr_sync_free(d_data, d_indices, d_indptr, d_x, A.shape[0], A.shape[1], A_csr.nnz, dep_count, succ_offsets, succ_indices), quantiles=quantiles, warmup=warmpup, rep=rep)
     
     # ========================================================================
@@ -1154,9 +1195,14 @@ def benchmark(matrices, provider):
         d_indices = cuda.to_device(A.indices)
         d_indptr = cuda.to_device(A.indptr)
         d_x = cuda.to_device(np.zeros(n))
+        
+        # Time DAG creation
+        t0 = time.perf_counter()
         wavefronts = compute_wavefront(A)
         wave_start_loc, waves = compact_2d_list(wavefronts)
         waves_gpu = cuda.to_device(waves)
+        dag_creation_time = (time.perf_counter() - t0) * 1000  # Convert to ms
+        cuda.synchronize()  # Ensure GPU is ready before benchmark
         
         if unroll_factor == 1:
             # Mapping variant
@@ -1182,9 +1228,14 @@ def benchmark(matrices, provider):
         d_indices = cuda.to_device(A_csr.indices)
         d_indptr = cuda.to_device(A_csr.indptr)
         d_x = cuda.to_device(np.zeros(n))
+        
+        # Time DAG creation
+        t0 = time.perf_counter()
         wavefronts = compute_wavefront(A)
         wave_start_loc, waves = compact_2d_list(wavefronts)
         waves_gpu = cuda.to_device(waves)
+        dag_creation_time = (time.perf_counter() - t0) * 1000  # Convert to ms
+        cuda.synchronize()  # Ensure GPU is ready before benchmark
         
         if unroll_factor == 1:
             # Mapping variant
@@ -1210,9 +1261,15 @@ def benchmark(matrices, provider):
         d_indices = cuda.to_device(A.indices)
         d_indptr = cuda.to_device(A.indptr)
         d_x = cuda.to_device(np.zeros(n))
+        
+        # Time DAG creation
+        t0 = time.perf_counter()
         wavefronts = compute_wavefront(A)
         wave_start, waves, level_boundaries = compact_coarsened_wavefronts(wavefronts, coarsening_factor)
         waves_gpu = cuda.to_device(waves)
+        dag_creation_time = (time.perf_counter() - t0) * 1000  # Convert to ms
+        cuda.synchronize()  # Ensure GPU is ready before benchmark
+        
         ms, min_ms, max_ms = triton.testing.do_bench(lambda: sptrsv_numba_csc_wavefront_block_coarsening(d_data, d_indices, d_indptr, d_x, A.shape[0], A.shape[1], A.nnz, wave_start, waves_gpu, level_boundaries, block_coarsening_factor=1), quantiles=quantiles, warmup=warmpup, rep=rep)
     
     if provider.startswith('csr-wf-coarse-block-wc'):
@@ -1222,9 +1279,15 @@ def benchmark(matrices, provider):
         d_indices = cuda.to_device(A_csr.indices)
         d_indptr = cuda.to_device(A_csr.indptr)
         d_x = cuda.to_device(np.zeros(n))
+        
+        # Time DAG creation
+        t0 = time.perf_counter()
         wavefronts = compute_wavefront(A)
         wave_start, waves, level_boundaries = compact_coarsened_wavefronts(wavefronts, coarsening_factor)
         waves_gpu = cuda.to_device(waves)
+        dag_creation_time = (time.perf_counter() - t0) * 1000  # Convert to ms
+        cuda.synchronize()  # Ensure GPU is ready before benchmark
+        
         ms, min_ms, max_ms = triton.testing.do_bench(lambda: sptrsv_numba_csr_wavefront_block_coarsening(d_data, d_indices, d_indptr, d_x, A.shape[0], A.shape[1], A_csr.nnz, wave_start, waves_gpu, level_boundaries, block_coarsening_factor=1), quantiles=quantiles, warmup=warmpup, rep=rep)
     
     if provider.startswith('csc-wf-coarse-thread-tc'):
@@ -1233,9 +1296,15 @@ def benchmark(matrices, provider):
         d_indices = cuda.to_device(A.indices)
         d_indptr = cuda.to_device(A.indptr)
         d_x = cuda.to_device(np.zeros(n))
+        
+        # Time DAG creation
+        t0 = time.perf_counter()
         wavefronts = compute_wavefront(A)
         wave_start, waves, level_boundaries = compact_coarsened_wavefronts(wavefronts, 1)
         waves_gpu = cuda.to_device(waves)
+        dag_creation_time = (time.perf_counter() - t0) * 1000  # Convert to ms
+        cuda.synchronize()  # Ensure GPU is ready before benchmark
+        
         ms, min_ms, max_ms = triton.testing.do_bench(lambda: sptrsv_numba_csc_wavefront_thread_coarsening(d_data, d_indices, d_indptr, d_x, A.shape[0], A.shape[1], A.nnz, wave_start, waves_gpu, thread_coarsening_factor=1, threads_per_block=threads_per_block), quantiles=quantiles, warmup=warmpup, rep=rep)
     
     if provider.startswith('csr-wf-coarse-thread-tc'):
@@ -1245,9 +1314,15 @@ def benchmark(matrices, provider):
         d_indices = cuda.to_device(A_csr.indices)
         d_indptr = cuda.to_device(A_csr.indptr)
         d_x = cuda.to_device(np.zeros(n))
+        
+        # Time DAG creation
+        t0 = time.perf_counter()
         wavefronts = compute_wavefront(A)
         wave_start, waves, level_boundaries = compact_coarsened_wavefronts(wavefronts, 1)
         waves_gpu = cuda.to_device(waves)
+        dag_creation_time = (time.perf_counter() - t0) * 1000  # Convert to ms
+        cuda.synchronize()  # Ensure GPU is ready before benchmark
+        
         ms, min_ms, max_ms = triton.testing.do_bench(lambda: sptrsv_numba_csr_wavefront_thread_coarsening(d_data, d_indices, d_indptr, d_x, A.shape[0], A.shape[1], A_csr.nnz, wave_start, waves_gpu, thread_coarsening_factor=1, threads_per_block=threads_per_block), quantiles=quantiles, warmup=warmpup, rep=rep)
     
     if provider.startswith('csc-wf-coarse-comb-wc') and '-w' in provider and '-tc' in provider:
@@ -1262,9 +1337,15 @@ def benchmark(matrices, provider):
         d_indices = cuda.to_device(A.indices)
         d_indptr = cuda.to_device(A.indptr)
         d_x = cuda.to_device(np.zeros(n))
+        
+        # Time DAG creation
+        t0 = time.perf_counter()
         wavefronts = compute_wavefront(A)
         wave_start_loc, waves, level_boundaries = compact_coarsened_wavefronts(wavefronts, coarsening_factor)
         waves_gpu = cuda.to_device(waves)
+        dag_creation_time = (time.perf_counter() - t0) * 1000  # Convert to ms
+        cuda.synchronize()  # Ensure GPU is ready before benchmark
+        
         ms, min_ms, max_ms = triton.testing.do_bench(lambda: sptrsv_numba_csc_coarsened_mapping(d_data, d_indices, d_indptr, d_x, A.shape[0], A.shape[1], A.nnz, wave_start_loc, waves_gpu, coarsening_factor, threads_per_block, thread_coarsening_factor=thread_coarsening_factor, level_boundaries=level_boundaries), quantiles=quantiles, warmup=warmpup, rep=rep)
     
     if provider.startswith('csr-wf-coarse-comb-wc') and '-w' in provider and '-tc' in provider:
@@ -1280,9 +1361,15 @@ def benchmark(matrices, provider):
         d_indices = cuda.to_device(A_csr.indices)
         d_indptr = cuda.to_device(A_csr.indptr)
         d_x = cuda.to_device(np.zeros(n))
+        
+        # Time DAG creation
+        t0 = time.perf_counter()
         wavefronts = compute_wavefront(A)
         wave_start_loc, waves, level_boundaries = compact_coarsened_wavefronts(wavefronts, coarsening_factor)
         waves_gpu = cuda.to_device(waves)
+        dag_creation_time = (time.perf_counter() - t0) * 1000  # Convert to ms
+        cuda.synchronize()  # Ensure GPU is ready before benchmark
+        
         ms, min_ms, max_ms = triton.testing.do_bench(lambda: sptrsv_numba_csr_coarsened_mapping(d_data, d_indices, d_indptr, d_x, A.shape[0], A.shape[1], A_csr.nnz, wave_start_loc, waves_gpu, coarsening_factor, threads_per_block, thread_coarsening_factor=thread_coarsening_factor, level_boundaries=level_boundaries), quantiles=quantiles, warmup=warmpup, rep=rep)
     
     # ========================================================================
@@ -1296,10 +1383,15 @@ def benchmark(matrices, provider):
         d_indices = cuda.to_device(A.indices)
         d_indptr = cuda.to_device(A.indptr)
         d_x = cuda.to_device(np.zeros(n))
+        
+        # Time DAG creation
+        t0 = time.perf_counter()
         dep_count = incoming_edge(A)
         succ_offsets_csc, succ_indices_csc = build_csc_successors(A)
         d_succ_offsets_csc = cuda.to_device(succ_offsets_csc)
         d_succ_indices_csc = cuda.to_device(succ_indices_csc)
+        dag_creation_time = (time.perf_counter() - t0) * 1000  # Convert to ms
+        cuda.synchronize()  # Ensure GPU is ready before benchmark
         
         if unroll_factor == 1:
             # Mapping variant
@@ -1325,8 +1417,13 @@ def benchmark(matrices, provider):
         d_indices = cuda.to_device(A_csr.indices)
         d_indptr = cuda.to_device(A_csr.indptr)
         d_x = cuda.to_device(np.zeros(n))
+        
+        # Time DAG creation
+        t0 = time.perf_counter()
         dep_count = incoming_edge_csr_rows(A_csr)
         succ_offsets, succ_indices = build_csr_successors(A_csr)
+        dag_creation_time = (time.perf_counter() - t0) * 1000  # Convert to ms
+        cuda.synchronize()  # Ensure GPU is ready before benchmark
         
         if unroll_factor == 1:
             # Mapping variant
@@ -1352,7 +1449,13 @@ def benchmark(matrices, provider):
         d_indices = cuda.to_device(A.indices)
         d_indptr = cuda.to_device(A.indptr)
         d_x = cuda.to_device(np.zeros(n))
+        
+        # Time DAG creation
+        t0 = time.perf_counter()
         dep_count = incoming_edge(A)
+        dag_creation_time = (time.perf_counter() - t0) * 1000  # Convert to ms
+        cuda.synchronize()  # Ensure GPU is ready before benchmark
+        
         ms, min_ms, max_ms = triton.testing.do_bench(lambda: sptrsv_numba_csc_sync_free_block_coarsening(d_data, d_indices, d_indptr, d_x, A.shape[0], A.shape[1], A.nnz, dep_count, block_coarsening_factor=block_coarsening_factor), quantiles=quantiles, warmup=warmpup, rep=rep)
     
     if provider.startswith('csr-sf-coarse-block-bc'):
@@ -1362,8 +1465,14 @@ def benchmark(matrices, provider):
         d_indices = cuda.to_device(A_csr.indices)
         d_indptr = cuda.to_device(A_csr.indptr)
         d_x = cuda.to_device(np.zeros(n))
+        
+        # Time DAG creation
+        t0 = time.perf_counter()
         dep_count = incoming_edge_csr_rows(A_csr)
         succ_offsets, succ_indices = build_csr_successors(A_csr)
+        dag_creation_time = (time.perf_counter() - t0) * 1000  # Convert to ms
+        cuda.synchronize()  # Ensure GPU is ready before benchmark
+        
         ms, min_ms, max_ms = triton.testing.do_bench(lambda: sptrsv_numba_csr_sync_free_block_coarsening(d_data, d_indices, d_indptr, d_x, A.shape[0], A.shape[1], A_csr.nnz, dep_count, succ_offsets, succ_indices, block_coarsening_factor=block_coarsening_factor), quantiles=quantiles, warmup=warmpup, rep=rep)
     
     if provider.startswith('csc-sf-coarse-thread-tc'):
@@ -1372,7 +1481,13 @@ def benchmark(matrices, provider):
         d_indices = cuda.to_device(A.indices)
         d_indptr = cuda.to_device(A.indptr)
         d_x = cuda.to_device(np.zeros(n))
+        
+        # Time DAG creation
+        t0 = time.perf_counter()
         dep_count = incoming_edge(A)
+        dag_creation_time = (time.perf_counter() - t0) * 1000  # Convert to ms
+        cuda.synchronize()  # Ensure GPU is ready before benchmark
+        
         ms, min_ms, max_ms = triton.testing.do_bench(lambda: sptrsv_numba_csc_sync_free_thread_coarsening(d_data, d_indices, d_indptr, d_x, A.shape[0], A.shape[1], A.nnz, dep_count, thread_coarsening_factor=1, threads_per_block=threads_per_block), quantiles=quantiles, warmup=warmpup, rep=rep)
     
     if provider.startswith('csr-sf-coarse-thread-tc'):
@@ -1382,8 +1497,14 @@ def benchmark(matrices, provider):
         d_indices = cuda.to_device(A_csr.indices)
         d_indptr = cuda.to_device(A_csr.indptr)
         d_x = cuda.to_device(np.zeros(n))
+        
+        # Time DAG creation
+        t0 = time.perf_counter()
         dep_count = incoming_edge_csr_rows(A_csr)
         succ_offsets, succ_indices = build_csr_successors(A_csr)
+        dag_creation_time = (time.perf_counter() - t0) * 1000  # Convert to ms
+        cuda.synchronize()  # Ensure GPU is ready before benchmark
+        
         ms, min_ms, max_ms = triton.testing.do_bench(lambda: sptrsv_numba_csr_sync_free_thread_coarsening(d_data, d_indices, d_indptr, d_x, A.shape[0], A.shape[1], A_csr.nnz, dep_count, succ_offsets, succ_indices, thread_coarsening_factor=1, threads_per_block=threads_per_block), quantiles=quantiles, warmup=warmpup, rep=rep)
     
     # ========================================================================
@@ -1395,10 +1516,21 @@ def benchmark(matrices, provider):
         d_indices = cuda.to_device(A.indices)
         d_indptr = cuda.to_device(A.indptr)
         d_x = cuda.to_device(np.zeros(n))
+        
+        # Time DAG creation
+        t0 = time.perf_counter()
         wavefronts = compute_wavefront(A)
         wave_start_loc, waves = compact_2d_list(wavefronts)
         waves_gpu = cuda.to_device(waves)
+        dag_creation_time = (time.perf_counter() - t0) * 1000  # Convert to ms
+        cuda.synchronize()  # Ensure GPU is ready
+        
+        # Time coarsening (h-level analyze)
+        t0 = time.perf_counter()
         h_level_data = sptrsv_h_level_analyze(d_indptr, d_indices, waves_gpu, wave_start_loc, band_width=band_width)
+        coarsening_time = (time.perf_counter() - t0) * 1000  # Convert to ms
+        cuda.synchronize()  # Ensure GPU is ready before benchmark
+        
         ms, min_ms, max_ms = triton.testing.do_bench(lambda: sptrsv_numba_csc_h_level_solve(d_data, d_indices, d_indptr, d_x, A.shape[0], A.shape[1], A.nnz, h_level_data), quantiles=quantiles, warmup=warmpup, rep=rep)
     
     if provider.startswith('csc-h-sf-bw'):
@@ -1407,11 +1539,22 @@ def benchmark(matrices, provider):
         d_indices = cuda.to_device(A.indices)
         d_indptr = cuda.to_device(A.indptr)
         d_x = cuda.to_device(np.zeros(n))
+        
+        # Time DAG creation
+        t0 = time.perf_counter()
         wavefronts = compute_wavefront(A)
         wave_start_loc, waves = compact_2d_list(wavefronts)
         waves_gpu = cuda.to_device(waves)
         dep_counts = incoming_edge(A)
+        dag_creation_time = (time.perf_counter() - t0) * 1000  # Convert to ms
+        cuda.synchronize()  # Ensure GPU is ready
+        
+        # Time coarsening (h-level analyze)
+        t0 = time.perf_counter()
         h_level_data = sptrsv_h_level_analyze(d_indptr, d_indices, waves_gpu, wave_start_loc, band_width=band_width)
+        coarsening_time = (time.perf_counter() - t0) * 1000  # Convert to ms
+        cuda.synchronize()  # Ensure GPU is ready before benchmark
+        
         ms, min_ms, max_ms = triton.testing.do_bench(lambda: sptrsv_numba_csc_syncfree_h_level_solve(d_data, d_indices, d_indptr, d_x, A.shape[0], A.shape[1], A.nnz, h_level_data, dep_counts), quantiles=quantiles, warmup=warmpup, rep=rep)
     
     if provider.startswith('csc-h-sf-persist-bw'):
@@ -1420,11 +1563,22 @@ def benchmark(matrices, provider):
         d_indices = cuda.to_device(A.indices)
         d_indptr = cuda.to_device(A.indptr)
         d_x = cuda.to_device(b.copy())  # persistent solver expects b copy
+        
+        # Time DAG creation
+        t0 = time.perf_counter()
         wavefronts = compute_wavefront(A)
         wave_start_loc, waves = compact_2d_list(wavefronts)
         waves_gpu = cuda.to_device(waves)
         dep_counts = incoming_edge(A)
+        dag_creation_time = (time.perf_counter() - t0) * 1000  # Convert to ms
+        cuda.synchronize()  # Ensure GPU is ready
+        
+        # Time coarsening (h-level analyze)
+        t0 = time.perf_counter()
         h_level_data = sptrsv_h_level_analyze(d_indptr, d_indices, waves_gpu, wave_start_loc, band_width=band_width)
+        coarsening_time = (time.perf_counter() - t0) * 1000  # Convert to ms
+        cuda.synchronize()  # Ensure GPU is ready before benchmark
+        
         ms, min_ms, max_ms = triton.testing.do_bench(lambda: sptrsv_numba_csc_syncfree_persistent_solve(d_data, d_indices, d_indptr, d_x, A.shape[0], A.shape[1], A.nnz, h_level_data, dep_counts), quantiles=quantiles, warmup=warmpup, rep=rep)
     
     if provider.startswith('csr-h-bw'):
@@ -1434,10 +1588,21 @@ def benchmark(matrices, provider):
         d_indices = cuda.to_device(A_csr.indices)
         d_indptr = cuda.to_device(A_csr.indptr)
         d_x = cuda.to_device(np.zeros(n))
+        
+        # Time DAG creation
+        t0 = time.perf_counter()
         wavefronts = compute_wavefront(A)
         wave_start_loc, waves = compact_2d_list(wavefronts)
         waves_gpu = cuda.to_device(waves)
+        dag_creation_time = (time.perf_counter() - t0) * 1000  # Convert to ms
+        cuda.synchronize()  # Ensure GPU is ready
+        
+        # Time coarsening (h-level analyze)
+        t0 = time.perf_counter()
         h_level_data = sptrsv_h_level_analyze(d_indptr, d_indices, waves_gpu, wave_start_loc, band_width=band_width)
+        coarsening_time = (time.perf_counter() - t0) * 1000  # Convert to ms
+        cuda.synchronize()  # Ensure GPU is ready before benchmark
+        
         ms, min_ms, max_ms = triton.testing.do_bench(lambda: sptrsv_numba_csr_h_level_solve(d_data, d_indices, d_indptr, d_x, A.shape[0], A.shape[1], A_csr.nnz, h_level_data), quantiles=quantiles, warmup=warmpup, rep=rep)
     
     if provider.startswith('csr-h-sf-bw'):
@@ -1447,10 +1612,21 @@ def benchmark(matrices, provider):
         d_indices = cuda.to_device(A_csr.indices)
         d_indptr = cuda.to_device(A_csr.indptr)
         d_x = cuda.to_device(np.zeros(n))
+        
+        # Time DAG creation
+        t0 = time.perf_counter()
         wavefronts = compute_wavefront(A)
         wave_start_loc, waves = compact_2d_list(wavefronts)
         waves_gpu = cuda.to_device(waves)
+        dag_creation_time = (time.perf_counter() - t0) * 1000  # Convert to ms
+        cuda.synchronize()  # Ensure GPU is ready
+        
+        # Time coarsening (h-level analyze)
+        t0 = time.perf_counter()
         h_level_data = sptrsv_h_level_analyze(d_indptr, d_indices, waves_gpu, wave_start_loc, band_width=band_width)
+        coarsening_time = (time.perf_counter() - t0) * 1000  # Convert to ms
+        cuda.synchronize()  # Ensure GPU is ready before benchmark
+        
         ms, min_ms, max_ms = triton.testing.do_bench(lambda: sptrsv_numba_csr_syncfree_h_level_solve(d_data, d_indices, d_indptr, d_x, A.shape[0], A.shape[1], A_csr.nnz, h_level_data), quantiles=quantiles, warmup=warmpup, rep=rep)
     
     if provider.startswith('csr-h-sf-persist-bw'):
@@ -1460,10 +1636,21 @@ def benchmark(matrices, provider):
         d_indices = cuda.to_device(A_csr.indices)
         d_indptr = cuda.to_device(A_csr.indptr)
         d_x = cuda.to_device(np.zeros(n))
+        
+        # Time DAG creation
+        t0 = time.perf_counter()
         wavefronts = compute_wavefront(A)
         wave_start_loc, waves = compact_2d_list(wavefronts)
         waves_gpu = cuda.to_device(waves)
+        dag_creation_time = (time.perf_counter() - t0) * 1000  # Convert to ms
+        cuda.synchronize()  # Ensure GPU is ready
+        
+        # Time coarsening (h-level analyze)
+        t0 = time.perf_counter()
         h_level_data = sptrsv_h_level_analyze(d_indptr, d_indices, waves_gpu, wave_start_loc, band_width=band_width)
+        coarsening_time = (time.perf_counter() - t0) * 1000  # Convert to ms
+        cuda.synchronize()  # Ensure GPU is ready before benchmark
+        
         ms, min_ms, max_ms = triton.testing.do_bench(lambda: sptrsv_numba_csr_syncfree_persistent_solve(d_data, d_indices, d_indptr, d_x, A.shape[0], A.shape[1], A_csr.nnz, h_level_data), quantiles=quantiles, warmup=warmpup, rep=rep)
     
     # Keep old providers for backwards compatibility (if needed for testing)
@@ -1892,8 +2079,25 @@ def benchmark(matrices, provider):
     #print(f"seconds: {ms}")
     #print(f"max: {perf(max_ms)}, min: {perf(min_ms)}, median: {perf(ms)}")
     maybe_print(f"{provider} -- {matrices} -- seconds: {ms}")
+    
+    # Record overhead data
+    record_overhead(matrix_name, provider, dag_creation_time, coarsening_time)
+    
     return perf(ms), perf(min_ms), perf(max_ms)
 
 # Call the benchmark function (plots disabled, CSV logging enabled)
 benchmark.run(print_data=False, save_path=".", show_plots=False)
+
+# Export runtime overhead data to CSV
+import pandas as pd
+if overhead_data:
+    df_overhead = pd.DataFrame(overhead_data)
+    # Generate filename with matrix name postfix
+    if mtx_override:
+        matrix_name = os.path.basename(mtx_override).replace('.mtx', '')
+        csv_filename = f"runtime_overhead_{matrix_name}.csv"
+    else:
+        csv_filename = "runtime_overhead_all_matrices.csv"
+    df_overhead.to_csv(csv_filename, index=False)
+    print(f"Runtime overhead data exported to {csv_filename} ({len(overhead_data)} entries)")
 
