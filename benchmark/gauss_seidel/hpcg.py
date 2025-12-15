@@ -906,17 +906,39 @@ def run_pcg_benchmark(matrix_path):
 
 if __name__ == "__main__":
     import csv
+    import argparse
     from datetime import datetime
     
-    matrices = [
-        "/home/mad29/projects/testdata/matrices/1138_bus.mtx",
-        "/home/mad29/projects/testdata/matrices/bcsstk09.mtx",
-        "/home/mad29/projects/testdata/matrices/bcsstk10.mtx",
-    ]
+    parser = argparse.ArgumentParser(description='HPCG benchmark with Gauss-Seidel preconditioners')
+    parser.add_argument('--matrix', type=str, help='Single matrix file to benchmark')
+    parser.add_argument('--matrix-list', type=str, help='File containing list of matrices')
+    parser.add_argument('--output-dir', type=str, default='.', help='Output directory for results')
+    args = parser.parse_args()
+    
+    # Determine which matrices to run
+    matrices = []
+    if args.matrix:
+        # Single matrix mode (for bash script)
+        matrices = [args.matrix]
+    elif args.matrix_list:
+        # Read from matrix list file
+        with open(args.matrix_list, 'r') as f:
+            matrices = [line.strip() for line in f if line.strip() and not line.strip().startswith('#')]
+    else:
+        # Default test matrices
+        matrices = [
+            "/home/mad29/projects/testdata/matrices/1138_bus.mtx",
+            "/home/mad29/projects/testdata/matrices/bcsstk09.mtx",
+            "/home/mad29/projects/testdata/matrices/bcsstk10.mtx",
+        ]
     
     all_results = []
     
-    print(f"Starting HPCG benchmark on {len(matrices)} matrices...")
+    if len(matrices) == 1:
+        # Single matrix mode - minimal output
+        print(f"Benchmarking: {os.path.basename(matrices[0])}")
+    else:
+        print(f"Starting HPCG benchmark on {len(matrices)} matrices...")
     
     for mat in matrices:
         try:
@@ -928,14 +950,20 @@ if __name__ == "__main__":
             traceback.print_exc()
     
     # Export to CSV
-    timestamp = datetime.now().strftime("%y%m%d_%H%M%S")
-    csv_filename = f"hpcg_results_{timestamp}.csv"
-    
     all_methods = ["cupy", "gs-wf-base", "gs-wf-base-diag", "gs-sf-base", "gs-sf-base-diag",
                    "gs-sf-unroll-4", "gs-sf-unroll-4-diag", "gs-sf-unroll-8", "gs-sf-unroll-8-diag",
                    "gs-sf-unroll-16", "gs-sf-unroll-16-diag", "gs-sf-unroll-32", "gs-sf-unroll-32-diag",
                    "gs-sf-unroll-64", "gs-sf-unroll-64-diag",
                    "gs-h-sf-persist", "gs-h-sf-persist-diag"]
+    
+    if len(matrices) == 1:
+        # Single matrix mode - output to matrix-specific CSV
+        matrix_name = all_results[0][0]
+        csv_filename = os.path.join(args.output_dir, f"hpcg_results_{matrix_name}.csv")
+    else:
+        # Multi-matrix mode - output to timestamped CSV
+        timestamp = datetime.now().strftime("%y%m%d_%H%M%S")
+        csv_filename = os.path.join(args.output_dir, f"hpcg_results_{timestamp}.csv")
     
     with open(csv_filename, 'w', newline='') as f:
         writer = csv.writer(f)
@@ -952,15 +980,18 @@ if __name__ == "__main__":
                     row.append("N/A")
             writer.writerow(row)
     
-    print(f"\n{'='*80}")
-    print(f"Results exported to: {csv_filename}")
-    print(f"{'='*80}")
-    
-    # Print summary table
-    print(f"\n{'Matrix':<20} {'CuPy':<12} {'Best Custom':<12} {'Speedup':<10}")
-    print(f"{'-'*80}")
-    for matrix_name, results in all_results:
-        cupy_time = results.get('cupy', {}).get('time', float('inf'))
-        best_custom_time = min([r['time'] for m, r in results.items() if m != 'cupy'], default=float('inf'))
-        speedup = cupy_time / best_custom_time if best_custom_time < float('inf') else 0.0
-        print(f"{matrix_name:<20} {cupy_time:<12.3f} {best_custom_time:<12.3f} {speedup:<10.2f}x")
+    if len(matrices) == 1:
+        print(f"Results saved to: {csv_filename}")
+    else:
+        print(f"\n{'='*80}")
+        print(f"Results exported to: {csv_filename}")
+        print(f"{'='*80}")
+        
+        # Print summary table
+        print(f"\n{'Matrix':<20} {'CuPy':<12} {'Best Custom':<12} {'Speedup':<10}")
+        print(f"{'-'*80}")
+        for matrix_name, results in all_results:
+            cupy_time = results.get('cupy', {}).get('time', float('inf'))
+            best_custom_time = min([r['time'] for m, r in results.items() if m != 'cupy'], default=float('inf'))
+            speedup = cupy_time / best_custom_time if best_custom_time < float('inf') else 0.0
+            print(f"{matrix_name:<20} {cupy_time:<12.3f} {best_custom_time:<12.3f} {speedup:<10.2f}x")
