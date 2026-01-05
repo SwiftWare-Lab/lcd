@@ -170,3 +170,4 @@ data/
 cmake-build-debug/
 *.csv
 *.png
+cmake-build-debug

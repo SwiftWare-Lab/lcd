@@ -1,3 +1,4 @@
+import os
 import sys
 
 import numpy as np
@@ -50,6 +51,9 @@ def compute_cholesky_lfactor(input_mtx_file: str, output_mtx_file: str):
         # 3. Store the L-factor as a Matrix Market file
         # The L factor is an Upper Triangular matrix in this case (L^T * L = A^T * A)
         # We can store it directly. mmwrite handles sparse matrices.
+        output_mtx_folder = "/".join(output_mtx_file.split("/")[:-1])
+        print(output_mtx_folder)
+        os.makedirs(output_mtx_folder, exist_ok=True)
         print(f"Saving L-factor to: {output_mtx_file}")
         mmwrite(output_mtx_file, L, comment='Cholesky L-factor')
 
@@ -62,11 +66,21 @@ def compute_cholesky_lfactor(input_mtx_file: str, output_mtx_file: str):
 
 
 if __name__ == "__main__":
-    if len(sys.argv) != 3:
+    if len(sys.argv) != 4:
         print("Usage: python generate_lfactors.py <input_matrix.mtx> <output_lfactor_name.mtx>")
         sys.exit(1)
     # Define file paths
-    input_file = sys.argv[1] # e.g., "input_matrix.mtx"
-    output_file = sys.argv[2] # e.g., "l_factor.mtx"
+    list_file = sys.argv[1]
+    matrix_folder = sys.argv[2]
+    output_folder = sys.argv[3]
+    with open(list_file) as f:
+        lines = f.readlines()
+        mat_list = map(str.strip, lines)
+        for mat_name in mat_list:
+            input_file = os.path.join(matrix_folder, mat_name)
+            output_file = os.path.join(output_folder, mat_name)
+            compute_cholesky_lfactor(input_file, output_file)
+    # input_file = sys.argv[1] # e.g., "input_matrix.mtx"
+    # output_file = sys.argv[2] # e.g., "l_factor.mtx"
+    # compute_cholesky_lfactor(input_file, output_file)
 
-    compute_cholesky_lfactor(input_file, output_file)

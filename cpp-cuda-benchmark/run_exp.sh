@@ -17,7 +17,7 @@ cmake -DCMAKE_BUILD_TYPE=Release ..
 
 cmake --build . --config Release -- -j4
 
-echo "impl,time,matrix" > sptrsv_supernodal_bench
+echo "impl,time,matrix,rows,nnz" > sptrsv_supernodal_bench
 
 while read line; do
   mat="$MAT_FOLDER/$line"

@@ -1,4 +1,4 @@
-Launching Custom Graph...//
+//
 // Created by salehm32 on 2025-11-18.
 //
 
@@ -133,7 +133,7 @@ int main(int argc, char** argv){
 
     // Retrieve Custom Results
     CUDA_CHECK(cudaMemcpy(x, d_x, n * sizeof(float), cudaMemcpyDeviceToHost));
-    std::cout << "cudagraph," << avg_cudagraph << "," << file_name << std::endl;
+    std::cout << "cudagraph," << avg_cudagraph << "," << file_name << "," << cscMatrix->n << "," << nnz_total << std::endl;
 
     // --- 4. Benchmark cuSPARSE ---
  //   std::cout << "Preparing cuSPARSE..." << std::endl;
@@ -231,7 +231,7 @@ int main(int argc, char** argv){
             },
             avg_cusparse
     );
-    std::cout << "cusparse,"<< avg_cusparse << "," << file_name << std::endl;
+    std::cout << "cusparse,"<< avg_cusparse << "," << file_name << "," << cscMatrix->n << "," << nnz_total << std::endl;
 
 //    std::cout << "------------------------------------------" << std::endl;
 //    std::cout << "Performance Results:" << std::endl;

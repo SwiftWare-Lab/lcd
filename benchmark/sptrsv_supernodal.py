@@ -221,6 +221,7 @@ def sptrsv_csc_supernodal_numba_cuda(sn_begin, col_to_sup, Lip, Li, Lp, Lx, x,
     sptrsv_csc_supernodal_numba_cuda_kernel[blocks_per_grid, threads_per_block](
         sn_begin, col_to_sup, Lip, Li, Lp, Lx, x, tmp_mem, max_width, flag_thread
     )
+    cuda.synchronize()
 
 
 # =============================================================================

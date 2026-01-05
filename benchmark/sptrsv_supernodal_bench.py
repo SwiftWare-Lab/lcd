@@ -15,7 +15,7 @@ import numpy as np
 import pandas as pd
 import scipy.sparse as sp
 import scipy.io as spio
-from sksparse.cholmod import cholesky
+from sksparse.cholmod import cholesky_AAt
 
 import cupy
 import triton
@@ -52,8 +52,18 @@ print(f"Compute Capability: {device.compute_capability}")
 # Benchmark configuration
 mtx_list = [
     "/home/salehm32/projects/fused-gnn/fusion/data/all-ss/apache1/apache1.mtx",
+    # "/home/salehm32/projects/fused-gnn/fusion/data/all-ss/apache2/apache2.mtx",
     "/home/salehm32/projects/fused-gnn/fusion/data/all-ss/FEM_3D_thermal1/FEM_3D_thermal1.mtx",
     "/home/salehm32/projects/fused-gnn/fusion/data/all-ss/thermal1/thermal1.mtx",
+    "/home/salehm32/projects/fused-gnn/fusion/data/all-ss/ACTIVSg70K/ACTIVSg70K.mtx",
+    "/home/salehm32/projects/fused-gnn/fusion/data/all-ss/helm2d03/helm2d03.mtx",
+    "/home/salehm32/projects/fused-gnn/fusion/data/all-ss/dawson5/dawson5.mtx",
+    # "/home/salehm32/projects/gpu-backend/data/supernodes/apache1.mtx",
+    # "/home/salehm32/projects/gpu-backend/data/supernodes/FEM_3D_thermal1.mtx",
+    # "/home/salehm32/projects/gpu-backend/data/supernodes/thermal1.mtx",
+    # "/home/salehm32/projects/gpu-backend/data/supernodes/ACTIVSg70K.mtx",
+    # "/home/salehm32/projects/gpu-backend/data/supernodes/helm2d03.mtx",
+    # "/home/salehm32/projects/gpu-backend/data/supernodes/dawson5.mtx",
     # "/home/salehm32/projects/gpu-backend/data/supernodes/apache2.mtx",
 ]
 
@@ -61,7 +71,7 @@ method_list = [
     "python-cpu-sequential",
     "numba-cpu-sequential",
     "numba-cpu-wavefront",
-    "numba-gpu-syncfree",
+    # "numba-gpu-syncfree",
     "numba-gpu-wavefront"
 ]
 
@@ -79,7 +89,7 @@ def correctness_test():
         # Load matrix and compute Cholesky factorization
         Ao = spio.mmread(mtx_matrix_path)
         A = sp.tril(Ao).tocsc()
-        factor = cholesky(Ao)
+        factor = cholesky_AAt(Ao)
         L = factor.L()
         mat_name = mtx_matrix_path.split("/")[-1]
         
@@ -174,7 +184,7 @@ def setup_benchmark_config():
             "Python CPU Sequential",
             "Numba CPU Sequential",
             "Numba CPU Wavefront",
-            "Numba GPU Sync-Free",
+            # "Numba GPU Sync-Free",
             "Numba GPU Wavefront"
         ],
         styles=[
@@ -196,8 +206,8 @@ def benchmark(matrices, provider):
     """Benchmark a specific method on a specific matrix."""
     # Load matrix and compute Cholesky factorization
     matrix = spio.mmread(matrices)
-    # L = matrix.tocsr()
-    factor = cholesky(matrix)
+    matrix = matrix.tocsc()
+    factor = cholesky_AAt(matrix)
     L = factor.L()
     b = L.dot(np.ones(L.shape[0]))
     #
@@ -246,22 +256,22 @@ def benchmark(matrices, provider):
             quantiles=quantiles, warmup=warmup, rep=rep
         )
     
-    elif provider == 'numba-gpu-syncfree':
-        d_lx = cuda.to_device(Ls['x'])
-        d_super = cuda.to_device(Ls['supernodes'])
-        d_col_to_sup = cuda.to_device(Ls['col_to_super'])
-        d_ip = cuda.to_device(Ls['ip'])
-        d_i = cuda.to_device(Ls['i'])
-        d_p = cuda.to_device(Ls['p'])
-        d_thread_flags = cuda.to_device(thread_flags)
-        d_x = cuda.to_device(b)
-        ms, min_ms, max_ms = triton.testing.do_bench(
-            lambda: sptrsv_csc_supernodal_numba_cuda(d_super, d_col_to_sup, d_ip, d_i, 
-                                                     d_p, d_lx, d_x, d_thread_flags, 
-                                                     Ls['max_width']),
-            quantiles=quantiles, warmup=warmup, rep=rep
-        )
-    
+    # elif provider == 'numba-gpu-syncfree':
+    #     d_lx = cuda.to_device(Ls['x'])
+    #     d_super = cuda.to_device(Ls['supernodes'])
+    #     d_col_to_sup = cuda.to_device(Ls['col_to_super'])
+    #     d_ip = cuda.to_device(Ls['ip'])
+    #     d_i = cuda.to_device(Ls['i'])
+    #     d_p = cuda.to_device(Ls['p'])
+    #     d_thread_flags = cuda.to_device(thread_flags)
+    #     d_x = cuda.to_device(b)
+    #     ms, min_ms, max_ms = triton.testing.do_bench(
+    #         lambda: sptrsv_csc_supernodal_numba_cuda(d_super, d_col_to_sup, d_ip, d_i,
+    #                                                  d_p, d_lx, d_x, d_thread_flags,
+    #                                                  Ls['max_width']),
+    #         quantiles=quantiles, warmup=warmup, rep=rep
+    #     )
+    #
     elif provider == 'numba-gpu-wavefront':
         d_lx = cuda.to_device(Ls['x'])
         d_super = cuda.to_device(Ls['supernodes'])
