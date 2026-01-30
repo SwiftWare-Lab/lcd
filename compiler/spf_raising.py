@@ -321,3 +321,29 @@ def extract_node_data(spf_node):
     return node_data
 
 
+
+test_code = """
+n = len(A_indptr) - 1
+for i in range(n):
+    row_start = A_indptr[i]
+    row_end = A_indptr[i + 1]
+    for k_ptr in range(row_start, row_end):
+        k = A_indices[k_ptr]
+        if k >= i:
+            break
+        diag_val = 0.0
+        for diag_ptr in range(A_indptr[k], A_indptr[k + 1]):
+            if A_indices[diag_ptr] == k:
+                diag_val = A_data[diag_ptr]
+                break
+        if diag_val != 0.0:
+            A_data[k_ptr] = A_data[k_ptr] / diag_val
+            l_ik = A_data[k_ptr]
+            for j_ptr in range(k_ptr + 1, row_end):
+                j = A_indices[j_ptr]
+                for kj_ptr in range(A_indptr[k], A_indptr[k + 1]):
+                    if A_indices[kj_ptr] == j:
+                        u_kj = A_data[kj_ptr]
+                        A_data[j_ptr] = A_data[j_ptr] - l_ik * u_kj
+                        break
+"""

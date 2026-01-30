@@ -1,0 +1,2 @@
+matrices,Python SpTRSV CSC,Numba SpTRSV CSC Supernodal,Numba SpTRSV CSC Supernodal Wavefront,CudaNumba SpTRSV CSC Supernodal SyncFree,Cholmod Solve
+/home/salehm32/projects/fused-gnn/fusion/data/new-ss/1138_bus/1138_bus.mtx,0.000107,7.488281,7.488281,0.000318,7.488281

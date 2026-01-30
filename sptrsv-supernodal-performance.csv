@@ -1,0 +1,4 @@
+matrices,Python CPU Sequential,Numba CPU Sequential,Numba CPU Wavefront,Numba GPU Sync-Free,Numba GPU Wavefront
+/home/salehm32/projects/fused-gnn/fusion/data/all-ss/apache1/apache1.mtx,0.006927,1.896382,4.488110,0.506418,0.140875
+/home/salehm32/projects/fused-gnn/fusion/data/all-ss/FEM_3D_thermal1/FEM_3D_thermal1.mtx,0.006994,1.365618,6.638327,0.563730,0.057005
+/home/salehm32/projects/fused-gnn/fusion/data/all-ss/thermal1/thermal1.mtx,0.006678,2.927301,3.261649,1.161385,0.116137
