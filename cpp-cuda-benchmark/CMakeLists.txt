@@ -45,6 +45,34 @@ target_link_libraries(bench PRIVATE
         CUDA::cuda_driver
         CUDA::cusparse)
 
+find_package(MPI)
+
+# Check for NCCL
+find_path(NCCL_INCLUDE_DIR nccl.h
+    HINTS /usr/local/cuda/include /usr/include
+)
+find_library(NCCL_LIBRARY cncl nccl
+    HINTS /usr/local/cuda/lib64 /usr/lib/x86_64-linux-gnu
+)
+
+if (NCCL_INCLUDE_DIR AND NCCL_LIBRARY)
+    message(STATUS "Found NCCL: ${NCCL_LIBRARY}")
+else()
+    message(WARNING "NCCL not found! Multi-GPU features might fail.")
+endif()
+
+add_executable(multi_gpu_test multi_gpu_test.cu)
+target_include_directories(multi_gpu_test PRIVATE ${eigen_SOURCE_DIR} ${NCCL_INCLUDE_DIR})
+if(MPI_FOUND)
+    target_link_libraries(multi_gpu_test PRIVATE MPI::MPI_CXX)
+endif()
+target_link_libraries(multi_gpu_test PRIVATE
+    CUDA::cudart
+    CUDA::cublas
+    CUDA::cusparse
+    ${NCCL_LIBRARY}
+)
+
 
 
 
