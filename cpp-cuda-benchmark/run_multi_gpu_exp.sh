@@ -19,6 +19,18 @@ module load gcc
 module load cuda
 module load openmpi
 
+echo "----- Building -----"
+
+export CUDACXX=$(which nvcc)
+
+# Create build folder
+mkdir -p build && cd build
+
+# Configure
+cmake -DCMAKE_BUILD_TYPE=Release ..
+
+cmake --build . --config Release -- -j4
+
 echo "Running on $SLURM_NTASKS MPI ranks"
 echo "GPUs per rank: 1"
 
