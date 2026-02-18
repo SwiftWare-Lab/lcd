@@ -5,6 +5,7 @@
 #include <unistd.h>
 #include "mm_loader.h"
 #include "sptrsv_multi_gpu.cuh"
+#include <chrono>
 
 // Unique ID for NCCL
 void get_nccl_unique_id(ncclUniqueId* id, int rank) {
@@ -51,14 +52,14 @@ int main(int argc, char* argv[]) {
     int n = spTriLMat.rows();
     int nnz = spTriLMat.nonZeros();
     
-    CSCMatrix<float> csc;
-    csc.n = n;
-    csc.indptr = const_cast<int*>(spTriLMat.outerIndexPtr());
-    csc.indices = const_cast<int*>(spTriLMat.innerIndexPtr());
-    csc.data = const_cast<float*>(spTriLMat.valuePtr());
+    auto *csc = new CSCMatrix<float>();
+    csc->n = n;
+    csc->indptr = const_cast<int*>(spTriLMat.outerIndexPtr());
+    csc->indices = const_cast<int*>(spTriLMat.innerIndexPtr());
+    csc->data = const_cast<float*>(spTriLMat.valuePtr());
 
     // Supernode Conversion
-    auto snMat = convert_csc_to_supernodal<float>(csc);
+    auto snMat = convert_csc_to_supernodal<float>(*csc);
     auto deps  = build_dependency_graph(snMat);
     int nnz_sn = snMat.x.size();
 
