@@ -28,6 +28,7 @@ int main(int argc, char* argv[]) {
     // --- GPU Init ---
     int n_devices = 0;
     cudaGetDeviceCount(&n_devices);
+    std::cout << "GPUs per NODE: "  << n_devices << std::endl;
     int local_gpu = rank % n_devices;
     cudaSetDevice(local_gpu);
 

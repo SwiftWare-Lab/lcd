@@ -343,7 +343,7 @@ cudaGraph_t create_single_gpu_sptrsv_graph_for_part(
         int n_super,
         int nnz_sn,
         int part,
-        int n_ranks,
+        int n_ranks
 ) {
     CudaDagBuilder builder;
     cublasHandle_t cublas;
