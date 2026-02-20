@@ -8,7 +8,7 @@
 #SBATCH --ntasks=2                     # number of MPI ranks
 #SBATCH --cpus-per-task=4              # CPU threads per rank
 #SBATCH --gpus-per-task=1              # one GPU per rank
-#SBATCH --mem-per-task=10G
+#SBATCH --mem=20G
 #SBATCH --output="lpc.%j.%N.out"
 #SBATCH -t 01:59:00
 

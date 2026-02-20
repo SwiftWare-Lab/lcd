@@ -45,16 +45,6 @@ target_link_libraries(bench PRIVATE
         CUDA::cuda_driver
         CUDA::cusparse)
 
-# Build benchmark executable
-#add_executable(single_gpu_partitioned_test single_gpu_partitioned.cu)
-#target_include_directories(single_gpu_partitioned_test PRIVATE ${eigen_SOURCE_DIR})
-#target_link_libraries(single_gpu_partitioned_test PRIVATE
-#        #        nvbench::main
-#        CUDA::cudart
-#        CUDA::cublas          # 🟩 required
-#        CUDA::cublasLt        # optional but recommended
-#        CUDA::cuda_driver
-#        CUDA::cusparse)
 
 find_package(MPI)
 
@@ -95,6 +85,17 @@ target_link_libraries(multi_gpu_partitioned_test PRIVATE
         CUDA::cusparse
         ${NCCL_LIBRARY}
 )
+
+add_executable(single_gpu_partitioned_test single_gpu_partitioned.cu)
+target_include_directories(single_gpu_partitioned_test PRIVATE ${eigen_SOURCE_DIR})
+target_link_libraries(single_gpu_partitioned_test PRIVATE
+        #        nvbench::main
+        CUDA::cudart
+        CUDA::cublas          # 🟩 required
+        CUDA::cublasLt        # optional but recommended
+        CUDA::cuda_driver
+        CUDA::cusparse
+        ${NCCL_LIBRARY})
 
 
 

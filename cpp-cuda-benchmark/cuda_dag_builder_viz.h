@@ -136,7 +136,7 @@ public:
         }
         
         if (sortedOrder.size() != nodes.size()) {
-            std::cerr << "Error: Cycle detected." << std::endl;
+            std::cerr << "Error: Cycle detected. Sorted order is " << sortedOrder.size() << "and node count is " << nodes.size() << std::endl;
             exit(1);
         }
 

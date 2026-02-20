@@ -342,141 +342,135 @@ cudaGraph_t create_single_gpu_sptrsv_graph_for_part(
         std::vector<std::vector<int>>& deps, // Dependencies (host)
         int n_super,
         int nnz_sn,
-        int part,
-        int n_ranks
+        int num_parts
 ) {
+
     CudaDagBuilder builder;
     cublasHandle_t cublas;
     CUBLAS_CHECK(cublasCreate(&cublas));
+    int end_node_id = -1;
+    for (int part = 0; part < num_parts; part++) {
+        int my_start_sn, my_end_sn;
+        get_partition_range(n_super, part, num_parts, my_start_sn, my_end_sn);
 
-    int my_start_sn, my_end_sn;
-    get_partition_range(n_super, part, n_ranks, my_start_sn, my_end_sn);
+        int part_col_b = sn_begin[my_start_sn];
+        int part_col_e = sn_begin[my_end_sn];
 
-    int part_col_b = sn_begin[my_start_sn];
-    int part_col_e = sn_begin[my_end_sn];
+        int part_val_beg = Lp[part_col_b];
+        int part_val_end = Lp[part_col_e];
+        int part_nnz_count = part_val_end - part_val_beg;
 
-    int part_val_beg = Lp[part_col_b];
-    int part_val_end = Lp[part_col_e];
-    int part_nnz_count = part_val_end - part_val_beg;
+        int part_row_idx_start = Lip[my_start_sn];
+        int part_row_idx_end = Lip[my_end_sn];
+        int part_Li_count = part_row_idx_end - part_row_idx_start;
 
-    int part_row_idx_start = Lip[my_start_sn];
-    int part_row_idx_end = Lip[my_end_sn];
-    int part_Li_count = part_row_idx_end - part_row_idx_start;
+        float *d_Lx;
+        int *d_Li;
 
-    float* d_Lx;
-    int* d_Li;
-    // Allocate Full Size on all ranks (simplification)
-//    CUDA_CHECK(cudaMalloc(&d_Lx, part_nnz_count * sizeof(float)));
-//    CUDA_CHECK(cudaMalloc(&d_Li, part_Li_count * sizeof(int)));
-//    CUDA_CHECK(cudaMemcpy(d_Lx, Lx + part_val_beg, part_nnz_count * sizeof(float), cudaMemcpyHostToDevice));
-//    CUDA_CHECK(cudaMemcpy(d_Li, Li + part_row_idx_start, part_Li_count * sizeof(int), cudaMemcpyHostToDevice));
+        // Determine dependencies from previous ranks
+        // Ideally, we find exactly which *values* we need.
+        // For this prototype:
+        // - Rank K receives the Full X vector updates from Rank 0...K-1.
+        // - Rank K computes.
+        // - Rank K sends its updates to Rank K+1...N-1.
+        // This serializes the blocks but uses DAG locally.
 
+        // Note: To make this "Graph compliant", we encapsulate NCCL in nodes.
 
-
-    // Determine dependencies from previous ranks
-    // Ideally, we find exactly which *values* we need.
-    // For this prototype:
-    // - Rank K receives the Full X vector updates from Rank 0...K-1.
-    // - Rank K computes.
-    // - Rank K sends its updates to Rank K+1...N-1.
-    // This serializes the blocks but uses DAG locally.
-
-    // Note: To make this "Graph compliant", we encapsulate NCCL in nodes.
-
-    // 1. Receive Node (from previous rank)
-    int mem_load_node_id = -1;
-    if (part > 0) {
-        auto mem_load = [=,&d_Lx,&d_Li](cudaStream_t s) {
-            CUDA_CHECK(cudaMalloc(&d_Lx, part_nnz_count * sizeof(float)));
-            CUDA_CHECK(cudaMalloc(&d_Li, part_Li_count * sizeof(int)));
-            CUDA_CHECK(cudaMemcpyAsync(d_Lx, Lx + part_val_beg, part_nnz_count * sizeof(float), cudaMemcpyHostToDevice, s));
-            CUDA_CHECK(cudaMemcpyAsync(d_Li, Li + part_row_idx_start, part_Li_count * sizeof(int), cudaMemcpyHostToDevice, s));
-        };
-        mem_load_node_id = builder.addNode("NCCL_Recv", mem_load, {});
-    }
-
-    // 2. Compute Nodes (Local Supernodes)
-    std::map<int, int> sn_to_node_id;
-
-    for (int sn_id = my_start_sn; sn_id < my_end_sn; sn_id++) {
-        int col_b = sn_begin[sn_id];
-        int col_e = sn_begin[sn_id + 1];
-        int sup_width = col_e - col_b;
-        int sup_len = Lip[sn_id + 1] - Lip[sn_id];
-        int val_beg = Lp[col_b] - part_val_beg;
-
-        int row_idx_start = Lip[sn_id] + sup_width - part_row_idx_start;
-        int row_idx_end   = Lip[sn_id + 1] - part_row_idx_start;
-        int n_scatter     = row_idx_end - row_idx_start;
-
-        const float* diag_block_ptr = d_Lx + val_beg;
-        float* x_block_ptr = d_x + col_b;
-        const int* d_current_row_indices = d_Li + row_idx_start;
-
-        // Same logic as single GPU
-        auto supernode_op = [=](cudaStream_t s) {
-            cublasSetStream(cublas, s);
-            if (sup_width > 0) {
-                // Diagonal solve
-                CUBLAS_CHECK(cublasStrsv(
-                        cublas, CUBLAS_FILL_MODE_LOWER, CUBLAS_OP_N, CUBLAS_DIAG_NON_UNIT,
-                        sup_width, diag_block_ptr, sup_len, x_block_ptr, 1));
-            }
-            if (sup_len > sup_width && n_scatter > 0) {
-                // Scatter update
-                const float *off_diag_ptr = diag_block_ptr + sup_width;
-                float *d_update = nullptr;
-                CUDA_CHECK(cudaMallocAsync(&d_update, sizeof(float) * n_scatter, s));
-                const float alpha = -1.0f; const float beta = 0.0f;
-
-                CUBLAS_CHECK(cublasSgemv(
-                        cublas, CUBLAS_OP_N, n_scatter, sup_width, &alpha,
-                        off_diag_ptr, sup_len, x_block_ptr, 1, &beta, d_update, 1));
-
-                const int threads_per_block = 256;
-                const int blocks = (n_scatter + threads_per_block - 1) / threads_per_block;
-                scatter_kernel<<<blocks, threads_per_block, 0, s>>>(d_update, d_current_row_indices, d_x, n_scatter);
-                CUDA_CHECK(cudaFreeAsync(d_update, s));
-            }
-        };
-
-        // Determine dependencies
-        std::vector<int> graph_deps;
-        graph_deps.push_back(mem_load_node_id);
-
-        // Add Local Dependencies
-        for (int dep_sn : deps[sn_id]) {
-            if (dep_sn >= my_start_sn && dep_sn < my_end_sn) {
-                if (sn_to_node_id.count(dep_sn)) {
-                    graph_deps.push_back(sn_to_node_id[dep_sn]);
-                }
-            }
+        // 1. Receive Node (from previous rank)
+        int mem_load_node_id = -1;
+        if (part > 0) {
+            auto mem_load = [=, &d_Lx, &d_Li](cudaStream_t s) {
+                CUDA_CHECK(cudaMallocAsync(&d_Lx, part_nnz_count * sizeof(float), s));
+                CUDA_CHECK(cudaMallocAsync(&d_Li, part_Li_count * sizeof(int), s));
+                CUDA_CHECK(
+                        cudaMemcpyAsync(d_Lx, Lx + part_val_beg, part_nnz_count * sizeof(float), cudaMemcpyHostToDevice,
+                                        s));
+                CUDA_CHECK(cudaMemcpyAsync(d_Li, Li + part_row_idx_start, part_Li_count * sizeof(int),
+                                           cudaMemcpyHostToDevice, s));
+            };
+            mem_load_node_id = builder.addNode("Part_start", mem_load, {end_node_id});
         }
 
-        int node_id = builder.addNode("SuperNode_" + std::to_string(sn_id), supernode_op, graph_deps);
-        sn_to_node_id[sn_id] = node_id;
-    }
+        // 2. Compute Nodes (Local Supernodes)
+        std::map<int, int> sn_to_node_id;
 
-    // 3. finish Node (to next part)
-    if (part < n_ranks - 1) {
-        auto send_op = [=](cudaStream_t s) {};
+        for (int sn_id = my_start_sn; sn_id < my_end_sn; sn_id++) {
+            int col_b = sn_begin[sn_id];
+            int col_e = sn_begin[sn_id + 1];
+            int sup_width = col_e - col_b;
+            int sup_len = Lip[sn_id + 1] - Lip[sn_id];
+            int val_beg = Lp[col_b] - part_val_beg;
 
-        // Send depends on ALL local computations
-        // We can create a "Barrier" node or just add dependencies from all leaves.
-        // Or simpler: Make it depend on the last few nodes?
-        // Correctness: Must depend on ANY node that writes to X.
-        // For simplicity: Add explicit dependencies from ALL local nodes? That's too many edges.
-        // Better: CudaDagBuilder doesn't have a "Global Barrier".
-        // Alternative: Create a dummy node that depends on everything?
-        // Let's iterate and find nodes with 0 children? Or just all nodes?
-        // Optimization: Just ensure it runs after the LAST scheduled logical node.
+            int row_idx_start = Lip[sn_id] + sup_width - part_row_idx_start;
+            int row_idx_end = Lip[sn_id + 1] - part_row_idx_start;
+            int n_scatter = row_idx_end - row_idx_start;
 
-        std::vector<int> all_local_nodes;
-        for(auto& p : sn_to_node_id) all_local_nodes.push_back(p.second);
+            const float *diag_block_ptr = d_Lx + val_beg;
+            float *x_block_ptr = d_x + col_b;
+            const int *d_current_row_indices = d_Li + row_idx_start;
 
-        // Ideally we only depend on sinks. But finding sinks requires parsing deps.
-        // Let's try adding all. CudaGraph can handle it.
-        builder.addNode("Part_over", send_op, all_local_nodes);
+            // Same logic as single GPU
+            auto supernode_op = [=](cudaStream_t s) {
+                cublasSetStream(cublas, s);
+                if (sup_width > 0) {
+                    // Diagonal solve
+                    CUBLAS_CHECK(cublasStrsv(
+                            cublas, CUBLAS_FILL_MODE_LOWER, CUBLAS_OP_N, CUBLAS_DIAG_NON_UNIT,
+                            sup_width, diag_block_ptr, sup_len, x_block_ptr, 1));
+                }
+                if (sup_len > sup_width && n_scatter > 0) {
+                    // Scatter update
+                    const float *off_diag_ptr = diag_block_ptr + sup_width;
+                    float *d_update = nullptr;
+                    CUDA_CHECK(cudaMallocAsync(&d_update, sizeof(float) * n_scatter, s));
+                    const float alpha = -1.0f;
+                    const float beta = 0.0f;
+
+                    CUBLAS_CHECK(cublasSgemv(
+                            cublas, CUBLAS_OP_N, n_scatter, sup_width, &alpha,
+                            off_diag_ptr, sup_len, x_block_ptr, 1, &beta, d_update, 1));
+
+                    const int threads_per_block = 256;
+                    const int blocks = (n_scatter + threads_per_block - 1) / threads_per_block;
+                    scatter_kernel<<<blocks, threads_per_block, 0, s>>>(d_update, d_current_row_indices, d_x,
+                                                                        n_scatter);
+                    CUDA_CHECK(cudaFreeAsync(d_update, s));
+                }
+            };
+
+            // Determine dependencies
+            std::vector<int> graph_deps;
+            if (part > 0)
+                graph_deps.push_back(mem_load_node_id);
+
+            // Add Local Dependencies
+            for (int dep_sn: deps[sn_id]) {
+                if (dep_sn >= my_start_sn && dep_sn < my_end_sn) {
+                    if (sn_to_node_id.count(dep_sn)) {
+                        graph_deps.push_back(sn_to_node_id[dep_sn]);
+                    }
+                }
+            }
+
+            int node_id = builder.addNode("SuperNode_" + std::to_string(sn_id), supernode_op, graph_deps);
+            sn_to_node_id[sn_id] = node_id;
+        }
+
+        // 3. finish Node (to next part)
+        if (part < num_parts - 1) {
+            auto send_op = [=](cudaStream_t s) {
+                cudaFree(d_Lx);
+                cudaFree(d_Li);
+            };
+            // dummy graph node to indicate a partition finish
+            std::vector<int> all_local_nodes;
+            for (auto &p: sn_to_node_id) all_local_nodes.push_back(p.second);
+
+            // Ideally we only depend on sinks. But finding sinks requires parsing deps.
+            // Let's try adding all. CudaGraph can handle it.
+            end_node_id = builder.addNode("Part_finish", send_op, all_local_nodes);
+        }
     }
 
     return builder.captureGraph();

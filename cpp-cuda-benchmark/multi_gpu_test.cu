@@ -31,7 +31,10 @@ int main(int argc, char* argv[]) {
 
     // --- NCCL Init ---
     ncclUniqueId id;
-    get_nccl_unique_id(&id, rank);
+    if (rank == 0) {
+        NCCLCHECK(ncclGetUniqueId(&id));
+    }
+    MPI_Bcast(&id, sizeof(id), MPI_BYTE, 0, MPI_COMM_WORLD);
     ncclComm_t comm;
     NCCLCHECK(ncclCommInitRank(&comm, n_ranks, id, rank));
 
