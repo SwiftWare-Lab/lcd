@@ -1,16 +1,16 @@
 #! /bin/bash
 #SBATCH --export=ALL
-#SBATCH --job-name="lpc"
+#SBATCH --job-name="mg-sn-sptrsv"
 #SBATCH --mail-type=begin  # email me when the job starts
 #SBATCH --mail-type=end    # email me when the job finishes
 #SBATCH --mail-user=msalehi20@gmail.com
 #SBATCH --nodes=1
-#SBATCH --ntasks=2                     # number of MPI ranks
-#SBATCH --cpus-per-task=4              # CPU threads per rank
-#SBATCH --gpus-per-task=1              # one GPU per rank
-#SBATCH --mem=20G
-#SBATCH --output="lpc.%j.%N.out"
-#SBATCH -t 01:59:00
+#SBATCH --gres=gpu:h100:4         #Number of GPUs
+#SBATCH --ntasks=2
+#SBATCH --cpus-per-task=32
+#SBATCH --output="mg-sn-sptrsv.%j.%N.out"
+#SBATCH -t 02:59:00
+
 
 MAT_PATH=$1
 
