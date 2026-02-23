@@ -41,13 +41,16 @@ int main(int argc, char* argv[]) {
     int nnz_sn = snMat.x.size();
 
     // Prepare Device Memory
-    float *d_x, *d_b;
+    float *d_x, *d_b, *d_Lx;
+    int *d_Li;
 
     // Allocate Full Size on all ranks (simplification)
     CUDA_CHECK(cudaMalloc(&d_x, n * sizeof(float)));
     // Initialize X with 1.0 (RHS B implicit as 1.0 logic from main.cu)
     std::vector<float> h_x(n, 1.0f);
     CUDA_CHECK(cudaMemcpy(d_x, h_x.data(), n * sizeof(float), cudaMemcpyHostToDevice));
+    CUDA_CHECK(cudaMalloc(&d_Lx, snMat.x.size()*sizeof(float)));
+    CUDA_CHECK(cudaMalloc(&d_Li, snMat.i.size() * sizeof(int)));
 
     //TODO: get num parts from arguments later.
     // Create Graph
@@ -56,8 +59,10 @@ int main(int argc, char* argv[]) {
             snMat.supernodes.data(),
             snMat.ip.data(),
             snMat.i.data(),
-            snMat.p.data(),
             snMat.x.data(),
+            snMat.p.data(),
+            d_Li,
+            d_Lx,
             nullptr, // b is implicit in logic or unused in favor of x init
             d_x,
             n,
@@ -106,6 +111,8 @@ int main(int argc, char* argv[]) {
     // Cleanup
     cudaGraphExecDestroy(graphExec);
     cudaGraphDestroy(graph);
+    cudaFree(d_Lx);
+    cudaFree(d_Li);
     cudaFree(d_x);
     return 0;
 }

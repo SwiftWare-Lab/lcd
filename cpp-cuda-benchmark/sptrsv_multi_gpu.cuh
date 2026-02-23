@@ -333,9 +333,11 @@ cudaGraph_t create_multi_gpu_sptrsv_graph_for_part(
 cudaGraph_t create_single_gpu_sptrsv_graph_for_part(
         const int* sn_begin,
         const int* Lip,
-        const int* Li,  // Device pointer to row indices
-        const int* Lp,
+        const int* Li,
         const float* Lx,
+        const int* Lp,
+        int* d_Li,
+        float* d_Lx,
         const float* d_b,
         float* d_x,       // Solution vector (device)
         int n,            // Total rows
@@ -364,9 +366,6 @@ cudaGraph_t create_single_gpu_sptrsv_graph_for_part(
         int part_row_idx_end = Lip[my_end_sn];
         int part_Li_count = part_row_idx_end - part_row_idx_start;
 
-        float *d_Lx;
-        int *d_Li;
-
         // Determine dependencies from previous ranks
         // Ideally, we find exactly which *values* we need.
         // For this prototype:
@@ -380,12 +379,9 @@ cudaGraph_t create_single_gpu_sptrsv_graph_for_part(
         // 1. Receive Node (from previous rank)
         int mem_load_node_id = -1;
         if (part > 0) {
-            auto mem_load = [=, &d_Lx, &d_Li](cudaStream_t s) {
-                CUDA_CHECK(cudaMallocAsync(&d_Lx, part_nnz_count * sizeof(float), s));
-                CUDA_CHECK(cudaMallocAsync(&d_Li, part_Li_count * sizeof(int), s));
-                CUDA_CHECK(
-                        cudaMemcpyAsync(d_Lx, Lx + part_val_beg, part_nnz_count * sizeof(float), cudaMemcpyHostToDevice,
-                                        s));
+            auto mem_load = [=](cudaStream_t s) {
+                CUDA_CHECK(cudaMemcpyAsync(d_Lx, Lx + part_val_beg, part_nnz_count * sizeof(float), cudaMemcpyHostToDevice,
+                                           s));
                 CUDA_CHECK(cudaMemcpyAsync(d_Li, Li + part_row_idx_start, part_Li_count * sizeof(int),
                                            cudaMemcpyHostToDevice, s));
             };
@@ -459,10 +455,7 @@ cudaGraph_t create_single_gpu_sptrsv_graph_for_part(
 
         // 3. finish Node (to next part)
         if (part < num_parts - 1) {
-            auto send_op = [=](cudaStream_t s) {
-                cudaFree(d_Lx);
-                cudaFree(d_Li);
-            };
+            auto send_op = [=](cudaStream_t s) {};
             // dummy graph node to indicate a partition finish
             std::vector<int> all_local_nodes;
             for (auto &p: sn_to_node_id) all_local_nodes.push_back(p.second);
