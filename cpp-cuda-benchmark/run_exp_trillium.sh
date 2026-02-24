@@ -7,7 +7,7 @@
 #SBATCH --nodes=1
 #SBATCH --gpus-per-node=1
 #SBATCH --output="lpc.%j.%N.out"
-#SBATCH -t 11:59:00
+#SBATCH -t 3:00:00
 
 
 MAT_FOLDER=$1

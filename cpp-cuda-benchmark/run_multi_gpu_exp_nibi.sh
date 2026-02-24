@@ -5,7 +5,7 @@
 #SBATCH --mail-type=end    # email me when the job finishes
 #SBATCH --mail-user=msalehi20@gmail.com
 #SBATCH --nodes=1
-#SBATCH --gres=gpu:h100:4         #Number of GPUs
+#SBATCH --gres=gpu:h100:2         #Number of GPUs
 #SBATCH --ntasks=2
 #SBATCH --cpus-per-task=32
 #SBATCH --output="mg-sn-sptrsv.%j.%N.out"
@@ -32,6 +32,5 @@ cmake -DCMAKE_BUILD_TYPE=Release ..
 cmake --build . --config Release -- -j4
 
 echo "Running on $SLURM_NTASKS MPI ranks"
-echo "GPUs per rank: 1"
 
-srun ./multi_gpu_partitioned_test $MAT_PATH
+srun --export=ALL,NCCL_DEBUG=INFO ./multi_gpu_partitioned_test $MAT_PATH
