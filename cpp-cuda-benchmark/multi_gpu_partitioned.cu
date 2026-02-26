@@ -138,11 +138,9 @@ int main(int argc, char* argv[]) {
     //How does warmup work with other processes?
     // Warmup & Run
     for(int i=0; i<3; ++i) {
+        CUDA_CHECK(cudaMemcpy(d_x, h_x.data(), n * sizeof(float), cudaMemcpyHostToDevice));
         CUDA_CHECK(cudaGraphLaunch(graphExec, 0));
         CUDA_CHECK(cudaDeviceSynchronize());
-        // Simple barrier via NCCL just to keep steps aligned roughly (optional)
-        // ncclAllReduce(...) usage prevents race if we loop fast?
-        // Actually cudaGraphLaunch is async.
     }
 
     // Timer
@@ -150,9 +148,10 @@ int main(int argc, char* argv[]) {
     auto start = std::chrono::high_resolution_clock::now();
 
     for(int i=0; i<10; ++i) {
+        CUDA_CHECK(cudaMemcpy(d_x, h_x.data(), n * sizeof(float), cudaMemcpyHostToDevice));
         CUDA_CHECK(cudaGraphLaunch(graphExec, 0));
+        CUDA_CHECK(cudaDeviceSynchronize());
     }
-    CUDA_CHECK(cudaDeviceSynchronize());
     MPI_Barrier(MPI_COMM_WORLD);
 
     auto end = std::chrono::high_resolution_clock::now();

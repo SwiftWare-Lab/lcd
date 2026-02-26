@@ -122,18 +122,8 @@ cudaGraph_t create_multi_gpu_sptrsv_graph(
         // Determine dependencies
         std::vector<int> graph_deps;
         if (recv_node_id != -1) {
-            // Implicitly depend on Recv if we depend on any REMOTE node.
-            // For block partition, ANY dependency < my_start_sn implies remote dependency.
-            bool depends_on_remote = false;
-            for (int dep_sn : deps[sn_id]) {
-                if (dep_sn < my_start_sn) {
-                    depends_on_remote = true;
-                    break;
-                }
-            }
-            if (depends_on_remote) {
-                graph_deps.push_back(recv_node_id);
-            }
+            // Must depend on Recv to avoid outcome being overwritten by receiving full vector x
+            graph_deps.push_back(recv_node_id);
         }
         
         // Add Local Dependencies
@@ -274,18 +264,8 @@ cudaGraph_t create_multi_gpu_sptrsv_graph_for_part(
         // Determine dependencies
         std::vector<int> graph_deps;
         if (recv_node_id != -1) {
-            // Implicitly depend on Recv if we depend on any REMOTE node.
-            // For block partition, ANY dependency < my_start_sn implies remote dependency.
-            bool depends_on_remote = false;
-            for (int dep_sn : deps[sn_id]) {
-                if (dep_sn < my_start_sn) {
-                    depends_on_remote = true;
-                    break;
-                }
-            }
-            if (depends_on_remote) {
-                graph_deps.push_back(recv_node_id);
-            }
+            // Must depend on Recv to avoid outcome being overwritten by receiving full vector x
+            graph_deps.push_back(recv_node_id);
         }
 
         // Add Local Dependencies

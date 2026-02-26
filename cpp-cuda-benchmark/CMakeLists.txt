@@ -50,10 +50,12 @@ find_package(MPI)
 
 # Check for NCCL
 find_path(NCCL_INCLUDE_DIR nccl.h
-    HINTS /usr/local/cuda/include /usr/include
+    HINTS /usr/local/cuda/include /usr/include $ENV{NCCL_ROOT} $ENV{NCCL_HOME}
+    PATH_SUFFIXES include
 )
-find_library(NCCL_LIBRARY cncl nccl
-    HINTS /usr/local/cuda/lib64 /usr/lib/x86_64-linux-gnu
+find_library(NCCL_LIBRARY NAMES nccl
+    HINTS /usr/local/cuda/lib64 /usr/lib/x86_64-linux-gnu $ENV{NCCL_ROOT} $ENV{NCCL_HOME}
+    PATH_SUFFIXES lib lib64
 )
 
 if (NCCL_INCLUDE_DIR AND NCCL_LIBRARY)
