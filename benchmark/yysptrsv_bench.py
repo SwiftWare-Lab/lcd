@@ -8,8 +8,6 @@ import math
 import cupy as cp
 import sys
 
-# sys.path.append("/home/salehm32/projects/YuenyeungSpTRSV/cmake-build-debug/")
-print(sys.path)
 import yysptrsv_wrapper
 
 
