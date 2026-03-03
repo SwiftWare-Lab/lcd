@@ -27,7 +27,7 @@ source $VENV_PATH/bin/activate
 while read line; do
   mat="$MAT_FOLDER/$line"
   echo $mat
-  python yysptrsv_bench.py >> yysptrsv_bench
+  python yysptrsv_bench.py $mat >> yysptrsv_bench
 done < $MAT_FILE
 
 deactivate
