@@ -8,7 +8,7 @@ from kernels.sptrsv_baseline import *
 
 
 DEFAULT_MTX_LIST = ["/home/salehm32/projects/fused-gnn/fusion/data/gpu-backend-data/1138_bus/1138_bus.mtx"]
-mtx_override = os.environ.get("MATRIX_LIST_FILE")
+mtx_override = os.environ.get("MATRICES")
 mtx_list = [mtx_override] if mtx_override else DEFAULT_MTX_LIST
 method_list = ["tr_csr_syncfree_baseline", "tr_csc_syncfree_baseline", "tr_csr_wavefront_baseline", "tr_csc_wavefront_baseline"]
 configs = []
