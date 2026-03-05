@@ -11,7 +11,7 @@
 
 MAT_FOLDER=$1
 MAT_FILE=$2
-#VENV_PATH=$3
+VENV_PATH=$3
 MATRIX_LIST_FILE=${MAT_FOLDER/$MAT_FILE}
 readarray -t MATRICES < <(grep -v '^\s*#' "$MATRIX_LIST_FILE" | sed '/^\s*$/d')
 
@@ -21,15 +21,9 @@ module load cuda
 module load python
 
 
-echo "matrix,time,throughput" > yysptrsv_bench
-
 source $VENV_PATH/bin/activate
 
-while read line; do
-  mat="$MAT_FOLDER/$line"
-  echo $mat
-  python yysptrsv_bench.py $mat >> yysptrsv_bench
-done < $MAT_FILE
+python triton_benchmarks.py
 
 deactivate
 
