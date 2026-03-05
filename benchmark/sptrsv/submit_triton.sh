@@ -12,8 +12,6 @@
 MAT_FOLDER=$1
 MAT_FILE=$2
 VENV_PATH=$3
-MATRIX_LIST_FILE=${MAT_FOLDER/$MAT_FILE}
-readarray -t MATRICES < <(grep -v '^\s*#' "$MATRIX_LIST_FILE" | sed '/^\s*$/d')
 
 module load StdEnv/2023
 module load gcc
@@ -23,7 +21,7 @@ module load python
 
 source $VENV_PATH/bin/activate
 
-python triton_benchmarks.py
+python triton_benchmarks.py $MAT_FILE $MAT_FOLDER
 
 deactivate
 

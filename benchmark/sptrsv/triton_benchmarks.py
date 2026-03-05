@@ -8,8 +8,12 @@ from kernels.sptrsv_baseline import *
 
 
 DEFAULT_MTX_LIST = ["/home/salehm32/projects/fused-gnn/fusion/data/gpu-backend-data/1138_bus/1138_bus.mtx"]
-mtx_override = os.environ.get("MATRICES")
-mtx_list = [mtx_override] if mtx_override else DEFAULT_MTX_LIST
+if len(sys.argv) > 1:
+    mtx_file = sys.argv[1]
+    mtx_folder = sys.argv[2]
+    with open(mtx_file) as f:
+        mtx_list = f.readlines()
+        mtx_list = list(map(lambda x: os.path.join(mtx_folder,x.strip()), mtx_list))
 method_list = ["tr_csr_syncfree_baseline", "tr_csc_syncfree_baseline", "tr_csr_wavefront_baseline", "tr_csc_wavefront_baseline"]
 configs = []
 
@@ -54,7 +58,6 @@ def benchmark(matrices, provider):
         in_edge = incoming_edge(A)
         dep_count = torch.tensor(in_edge, dtype=torch.int32, device=DEVICE)
         succ_offsets_csr, succ_indices_csr = build_csr_successors(A_csr)
-        print(succ_offsets_csr)
         succ_offsets_csr_f32 = torch.tensor(succ_offsets_csr, dtype=torch.int32, device=DEVICE)
         succ_indices_csr_i32 = torch.tensor(succ_indices_csr, dtype=torch.int32, device=DEVICE)
         ms, min_ms, max_ms = triton.testing.do_bench(lambda:sptrsv_sync_free_csr_baseline(
