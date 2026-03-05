@@ -68,7 +68,7 @@ def _select_block_threads(work_items, *, min_threads=32, max_threads=128):
 _SMALL_WORK_THRESHOLD = 8
 
 
-@njit(numba.float64[:](numba.float32[:], numba.int32[:], numba.int32[:], numba.float32[:]), pipeline_class=MyCompiler)
+@njit(numba.float64[:](numba.float32[:], numba.int32[:], numba.int32[:], numba.float32[:]))
 def sptrsv_csr_numba(A, IA, JA, b):
     n = len(IA) - 1
     x = np.zeros(n)
