@@ -172,3 +172,4 @@ code_gen/mtx_matrices/
 *.txt
 *.png
 *.html
+data/

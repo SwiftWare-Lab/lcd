@@ -18,7 +18,6 @@ module load gcc
 module load cuda
 module load python
 
-cd "$(dirname "${BASH_SOURCE[0]}")"
 source $VENV_PATH/bin/activate
 export PYTHONPATH=$SCRATCH/projects/gpu-backend/
 python triton_benchmarks.py $MAT_FILE $MAT_FOLDER
