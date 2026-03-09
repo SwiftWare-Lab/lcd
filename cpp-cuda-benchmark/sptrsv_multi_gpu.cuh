@@ -5,6 +5,8 @@
 #include <vector>
 #include <iostream>
 #include <algorithm>
+#include <set>
+#include <numeric>
 #include "cuda_dag_builder_viz.h"
 #include "sptrsv_supernodal_cuda_graph.cuh"
 
@@ -18,15 +20,98 @@
   }                                                 \
 } while(0)
 
-// Function to partition supernodes among ranks
-// For simplicity, we use 1D block partitioning.
+// Simple block partitioning by supernode count (legacy)
 inline void get_partition_range(int n_super, int rank, int n_ranks, int& start, int& end) {
     int chunk = (n_super + n_ranks - 1) / n_ranks;
     start = std::min(rank * chunk, n_super);
     end = std::min((rank + 1) * chunk, n_super);
 }
 
-// Multi-GPU SpTRSV Graph Construction
+// Optimization 5: Load-balanced partitioning using supernode cost weights.
+// Cost model: w^2 + w * scatter_size  (BLAS trsv + gemv + scatter)
+inline void get_weighted_partition_range(
+    int n_super, int rank, int n_ranks,
+    const int* sn_begin, const int* Lip, const int* Lp,
+    int& start, int& end)
+{
+    // Compute per-supernode cost and prefix sum
+    std::vector<double> prefix(n_super + 1, 0.0);
+    for (int sn = 0; sn < n_super; sn++) {
+        int w = sn_begin[sn + 1] - sn_begin[sn];
+        int sup_len = Lip[sn + 1] - Lip[sn];
+        int scatter = std::max(0, sup_len - w);
+        prefix[sn + 1] = prefix[sn] + (double)w * w + (double)w * scatter;
+    }
+    double total_cost = prefix[n_super];
+
+    // Compute ALL n_ranks+1 boundaries at once to guarantee no gaps/overlaps
+    std::vector<int> boundaries(n_ranks + 1);
+    boundaries[0] = 0;
+    boundaries[n_ranks] = n_super;
+
+    int sn = 0;
+    for (int r = 1; r < n_ranks; r++) {
+        double target = total_cost * r / n_ranks;
+        // Advance sn until prefix[sn+1] >= target
+        while (sn < n_super && prefix[sn + 1] < target) sn++;
+        // sn is now the first supernode where prefix[sn+1] >= target
+        // Pick boundary sn or sn+1 (whichever prefix is closer to target)
+        if (sn < n_super &&
+            (prefix[sn + 1] - target) < (target - prefix[sn])) {
+            boundaries[r] = sn + 1;
+        } else {
+            boundaries[r] = sn;
+        }
+    }
+
+    start = boundaries[rank];
+    end = boundaries[rank + 1];
+}
+
+// Helper: find sink nodes (local supernodes with no local children)
+inline std::vector<int> find_sink_node_ids(
+    int my_start_sn, int my_end_sn,
+    const std::vector<std::vector<int>>& deps,
+    const std::map<int, int>& sn_to_node_id)
+{
+    // A supernode is a "parent" if some OTHER local supernode depends on it
+    std::set<int> has_local_children;
+    for (int sn_id = my_start_sn; sn_id < my_end_sn; sn_id++) {
+        for (int dep_sn : deps[sn_id]) {
+            if (dep_sn != sn_id && dep_sn >= my_start_sn && dep_sn < my_end_sn) {
+                has_local_children.insert(dep_sn);
+            }
+        }
+    }
+
+    std::vector<int> sink_nodes;
+    for (auto& p : sn_to_node_id) {
+        if (!has_local_children.count(p.first)) {
+            sink_nodes.push_back(p.second);
+        }
+    }
+    return sink_nodes;
+}
+
+// Helper: compute total scatter buffer size and per-supernode offsets
+inline int compute_scatter_offsets(
+    int my_start_sn, int my_end_sn,
+    const int* sn_begin, const int* Lip,
+    std::vector<int>& scatter_offsets)
+{
+    scatter_offsets.resize(my_end_sn - my_start_sn);
+    int total_scatter = 0;
+    for (int sn_id = my_start_sn; sn_id < my_end_sn; sn_id++) {
+        scatter_offsets[sn_id - my_start_sn] = total_scatter;
+        int sup_width = sn_begin[sn_id + 1] - sn_begin[sn_id];
+        int sup_len = Lip[sn_id + 1] - Lip[sn_id];
+        int n_scatter = std::max(0, sup_len - sup_width);
+        total_scatter += n_scatter;
+    }
+    return total_scatter;
+}
+
+// Multi-GPU SpTRSV Graph Construction (full data on each GPU)
 cudaGraph_t create_multi_gpu_sptrsv_graph(
     const int* sn_begin,
     const int* Lip,
@@ -49,26 +134,23 @@ cudaGraph_t create_multi_gpu_sptrsv_graph(
     cublasHandle_t cublas;
     CUBLAS_CHECK(cublasCreate(&cublas));
 
+    // Optimization 5: Weighted partitioning
     int my_start_sn, my_end_sn;
-    get_partition_range(n_super, rank, n_ranks, my_start_sn, my_end_sn);
-    
-    // Determine dependencies from previous ranks
-    // Ideally, we find exactly which *values* we need.
-    // For this prototype: 
-    // - Rank K receives the Full X vector updates from Rank 0...K-1.
-    // - Rank K computes.
-    // - Rank K sends its updates to Rank K+1...N-1.
-    // This serializes the blocks but uses DAG locally.
-    
-    // Note: To make this "Graph compliant", we encapsulate NCCL in nodes.
-    
+    get_weighted_partition_range(n_super, rank, n_ranks, sn_begin, Lip, Lp,
+                                my_start_sn, my_end_sn);
+
+    // Optimization 4: Pre-allocate scatter buffer pool
+    std::vector<int> scatter_offsets;
+    int total_scatter = compute_scatter_offsets(my_start_sn, my_end_sn, sn_begin, Lip, scatter_offsets);
+    float* d_scatter_pool = nullptr;
+    if (total_scatter > 0) {
+        CUDA_CHECK(cudaMalloc(&d_scatter_pool, total_scatter * sizeof(float)));
+    }
+
     // 1. Receive Node (from previous rank)
     int recv_node_id = -1;
     if (rank > 0) {
         auto recv_op = [=](cudaStream_t s) {
-            // Receive the entire X vector (or relevant part) from rank-1
-            // Simple chain: Rank 0 -> Rank 1 -> Rank 2
-            // Receive from Rank - 1
             NCCLCHECK(ncclRecv(d_x, n, ncclFloat, rank - 1, comm, s));
         };
         recv_node_id = builder.addNode("NCCL_Recv", recv_op, {});
@@ -76,7 +158,7 @@ cudaGraph_t create_multi_gpu_sptrsv_graph(
 
     // 2. Compute Nodes (Local Supernodes)
     std::map<int, int> sn_to_node_id;
-    
+
     for (int sn_id = my_start_sn; sn_id < my_end_sn; sn_id++) {
         int col_b = sn_begin[sn_id];
         int col_e = sn_begin[sn_id + 1];
@@ -92,82 +174,79 @@ cudaGraph_t create_multi_gpu_sptrsv_graph(
         float* x_block_ptr = d_x + col_b;
         const int* d_current_row_indices = d_Li + row_idx_start;
 
-        // Same logic as single GPU
+        // Optimization 4: Use pre-allocated scatter buffer
+        float* d_update_ptr = (d_scatter_pool && n_scatter > 0)
+            ? d_scatter_pool + scatter_offsets[sn_id - my_start_sn]
+            : nullptr;
+
         auto supernode_op = [=](cudaStream_t s) {
             cublasSetStream(cublas, s);
             if (sup_width > 0) {
-                // Diagonal solve
                 CUBLAS_CHECK(cublasStrsv(
                     cublas, CUBLAS_FILL_MODE_LOWER, CUBLAS_OP_N, CUBLAS_DIAG_NON_UNIT,
                     sup_width, diag_block_ptr, sup_len, x_block_ptr, 1));
             }
             if (sup_len > sup_width && n_scatter > 0) {
-                // Scatter update
                 const float *off_diag_ptr = diag_block_ptr + sup_width;
-                float *d_update = nullptr;
-                CUDA_CHECK(cudaMallocAsync(&d_update, sizeof(float) * n_scatter, s)); 
                 const float alpha = -1.0f; const float beta = 0.0f;
-                
+
                 CUBLAS_CHECK(cublasSgemv(
                     cublas, CUBLAS_OP_N, n_scatter, sup_width, &alpha,
-                    off_diag_ptr, sup_len, x_block_ptr, 1, &beta, d_update, 1));
+                    off_diag_ptr, sup_len, x_block_ptr, 1, &beta, d_update_ptr, 1));
 
                 const int threads_per_block = 256;
                 const int blocks = (n_scatter + threads_per_block - 1) / threads_per_block;
-                scatter_kernel<<<blocks, threads_per_block, 0, s>>>(d_update, d_current_row_indices, d_x, n_scatter);
-                CUDA_CHECK(cudaFreeAsync(d_update, s));
+                scatter_kernel<<<blocks, threads_per_block, 0, s>>>(
+                    d_update_ptr, d_current_row_indices, d_x, n_scatter);
             }
         };
 
-        // Determine dependencies
+        // Optimization 2: Only root supernodes (no local parents) depend on recv.
+        // Others get recv dependency transitively through local parents.
         std::vector<int> graph_deps;
         if (recv_node_id != -1) {
-            // Must depend on Recv to avoid outcome being overwritten by receiving full vector x
-            graph_deps.push_back(recv_node_id);
+            bool has_local_parent = false;
+            for (int dep_sn : deps[sn_id]) {
+                if (dep_sn != sn_id && dep_sn >= my_start_sn && dep_sn < my_end_sn) {
+                    has_local_parent = true;
+                    break;
+                }
+            }
+            if (!has_local_parent) {
+                graph_deps.push_back(recv_node_id);
+            }
         }
-        
-        // Add Local Dependencies
+
+        // Add local dependencies
         for (int dep_sn : deps[sn_id]) {
-             if (dep_sn >= my_start_sn && dep_sn < my_end_sn) {
-                 if (sn_to_node_id.count(dep_sn)) {
-                     graph_deps.push_back(sn_to_node_id[dep_sn]);
-                 }
-             }
+            if (dep_sn >= my_start_sn && dep_sn < my_end_sn) {
+                if (sn_to_node_id.count(dep_sn)) {
+                    graph_deps.push_back(sn_to_node_id[dep_sn]);
+                }
+            }
         }
 
         int node_id = builder.addNode("SuperNode_" + std::to_string(sn_id), supernode_op, graph_deps);
         sn_to_node_id[sn_id] = node_id;
     }
 
-    // 3. Send Node (to next rank)
+    // 3. Send Node — Optimization 3: depend only on sink nodes
     if (rank < n_ranks - 1) {
         auto send_op = [=](cudaStream_t s) {
-            // Send entire X (updated) to next rank
             NCCLCHECK(ncclSend(d_x, n, ncclFloat, rank + 1, comm, s));
         };
-        
-        // Send depends on ALL local computations
-        // We can create a "Barrier" node or just add dependencies from all leaves.
-        // Or simpler: Make it depend on the last few nodes?
-        // Correctness: Must depend on ANY node that writes to X.
-        // For simplicity: Add explicit dependencies from ALL local nodes? That's too many edges.
-        // Better: CudaDagBuilder doesn't have a "Global Barrier".
-        // Alternative: Create a dummy node that depends on everything?
-        // Let's iterate and find nodes with 0 children? Or just all nodes?
-        // Optimization: Just ensure it runs after the LAST scheduled logical node.
-        
-        std::vector<int> all_local_nodes;
-        for(auto& p : sn_to_node_id) all_local_nodes.push_back(p.second);
-        
-        // Ideally we only depend on sinks. But finding sinks requires parsing deps. 
-        // Let's try adding all. CudaGraph can handle it.
-        builder.addNode("NCCL_Send", send_op, all_local_nodes);
+
+        std::vector<int> sink_nodes = find_sink_node_ids(
+            my_start_sn, my_end_sn, deps, sn_to_node_id);
+
+        builder.addNode("NCCL_Send", send_op, sink_nodes);
     }
-    
+
     return builder.captureGraph();
 }
 
 
+// Multi-GPU SpTRSV Graph Construction (partitioned data per GPU)
 cudaGraph_t create_multi_gpu_sptrsv_graph_for_part(
         const int* sn_begin,
         const int* Lip,
@@ -193,24 +272,21 @@ cudaGraph_t create_multi_gpu_sptrsv_graph_for_part(
     cublasHandle_t cublas;
     CUBLAS_CHECK(cublasCreate(&cublas));
 
+    int my_col_b = sn_begin[my_start_sn];
+    int my_col_e = sn_begin[my_end_sn];
 
-    // Determine dependencies from previous ranks
-    // Ideally, we find exactly which *values* we need.
-    // For this prototype:
-    // - Rank K receives the Full X vector updates from Rank 0...K-1.
-    // - Rank K computes.
-    // - Rank K sends its updates to Rank K+1...N-1.
-    // This serializes the blocks but uses DAG locally.
-
-    // Note: To make this "Graph compliant", we encapsulate NCCL in nodes.
+    // Optimization 4: Pre-allocate scatter buffer pool
+    std::vector<int> scatter_offsets;
+    int total_scatter = compute_scatter_offsets(my_start_sn, my_end_sn, sn_begin, Lip, scatter_offsets);
+    float* d_scatter_pool = nullptr;
+    if (total_scatter > 0) {
+        CUDA_CHECK(cudaMalloc(&d_scatter_pool, total_scatter * sizeof(float)));
+    }
 
     // 1. Receive Node (from previous rank)
     int recv_node_id = -1;
     if (rank > 0) {
         auto recv_op = [=](cudaStream_t s) {
-            // Receive the entire X vector (or relevant part) from rank-1
-            // Simple chain: Rank 0 -> Rank 1 -> Rank 2
-            // Receive from Rank - 1
             NCCLCHECK(ncclRecv(d_x, n, ncclFloat, rank - 1, comm, s));
         };
         recv_node_id = builder.addNode("NCCL_Recv", recv_op, {});
@@ -234,41 +310,49 @@ cudaGraph_t create_multi_gpu_sptrsv_graph_for_part(
         float* x_block_ptr = d_x + col_b;
         const int* d_current_row_indices = d_Li + row_idx_start;
 
-        // Same logic as single GPU
+        // Optimization 4: Use pre-allocated scatter buffer
+        float* d_update_ptr = (d_scatter_pool && n_scatter > 0)
+            ? d_scatter_pool + scatter_offsets[sn_id - my_start_sn]
+            : nullptr;
+
         auto supernode_op = [=](cudaStream_t s) {
             cublasSetStream(cublas, s);
             if (sup_width > 0) {
-                // Diagonal solve
                 CUBLAS_CHECK(cublasStrsv(
                         cublas, CUBLAS_FILL_MODE_LOWER, CUBLAS_OP_N, CUBLAS_DIAG_NON_UNIT,
                         sup_width, diag_block_ptr, sup_len, x_block_ptr, 1));
             }
             if (sup_len > sup_width && n_scatter > 0) {
-                // Scatter update
                 const float *off_diag_ptr = diag_block_ptr + sup_width;
-                float *d_update = nullptr;
-                CUDA_CHECK(cudaMallocAsync(&d_update, sizeof(float) * n_scatter, s));
                 const float alpha = -1.0f; const float beta = 0.0f;
 
                 CUBLAS_CHECK(cublasSgemv(
                         cublas, CUBLAS_OP_N, n_scatter, sup_width, &alpha,
-                        off_diag_ptr, sup_len, x_block_ptr, 1, &beta, d_update, 1));
+                        off_diag_ptr, sup_len, x_block_ptr, 1, &beta, d_update_ptr, 1));
 
                 const int threads_per_block = 256;
                 const int blocks = (n_scatter + threads_per_block - 1) / threads_per_block;
-                scatter_kernel<<<blocks, threads_per_block, 0, s>>>(d_update, d_current_row_indices, d_x, n_scatter);
-                CUDA_CHECK(cudaFreeAsync(d_update, s));
+                scatter_kernel<<<blocks, threads_per_block, 0, s>>>(
+                    d_update_ptr, d_current_row_indices, d_x, n_scatter);
             }
         };
 
-        // Determine dependencies
+        // Optimization 2: Only root supernodes (no local parents) depend on recv
         std::vector<int> graph_deps;
         if (recv_node_id != -1) {
-            // Must depend on Recv to avoid outcome being overwritten by receiving full vector x
-            graph_deps.push_back(recv_node_id);
+            bool has_local_parent = false;
+            for (int dep_sn : deps[sn_id]) {
+                if (dep_sn != sn_id && dep_sn >= my_start_sn && dep_sn < my_end_sn) {
+                    has_local_parent = true;
+                    break;
+                }
+            }
+            if (!has_local_parent) {
+                graph_deps.push_back(recv_node_id);
+            }
         }
 
-        // Add Local Dependencies
+        // Add local dependencies
         for (int dep_sn : deps[sn_id]) {
             if (dep_sn >= my_start_sn && dep_sn < my_end_sn) {
                 if (sn_to_node_id.count(dep_sn)) {
@@ -281,29 +365,16 @@ cudaGraph_t create_multi_gpu_sptrsv_graph_for_part(
         sn_to_node_id[sn_id] = node_id;
     }
 
-    // 3. Send Node (to next rank)
+    // 3. Send Node — Optimization 3: depend only on sink nodes
     if (rank < n_ranks - 1) {
         auto send_op = [=](cudaStream_t s) {
-            // Send entire X (updated) to next rank
             NCCLCHECK(ncclSend(d_x, n, ncclFloat, rank + 1, comm, s));
         };
 
-        // Send depends on ALL local computations
-        // We can create a "Barrier" node or just add dependencies from all leaves.
-        // Or simpler: Make it depend on the last few nodes?
-        // Correctness: Must depend on ANY node that writes to X.
-        // For simplicity: Add explicit dependencies from ALL local nodes? That's too many edges.
-        // Better: CudaDagBuilder doesn't have a "Global Barrier".
-        // Alternative: Create a dummy node that depends on everything?
-        // Let's iterate and find nodes with 0 children? Or just all nodes?
-        // Optimization: Just ensure it runs after the LAST scheduled logical node.
+        std::vector<int> sink_nodes = find_sink_node_ids(
+            my_start_sn, my_end_sn, deps, sn_to_node_id);
 
-        std::vector<int> all_local_nodes;
-        for(auto& p : sn_to_node_id) all_local_nodes.push_back(p.second);
-
-        // Ideally we only depend on sinks. But finding sinks requires parsing deps.
-        // Let's try adding all. CudaGraph can handle it.
-        builder.addNode("NCCL_Send", send_op, all_local_nodes);
+        builder.addNode("NCCL_Send", send_op, sink_nodes);
     }
 
     return builder.captureGraph();
@@ -345,16 +416,6 @@ cudaGraph_t create_single_gpu_sptrsv_graph_for_part(
         int part_row_idx_start = Lip[my_start_sn];
         int part_row_idx_end = Lip[my_end_sn];
         int part_Li_count = part_row_idx_end - part_row_idx_start;
-
-        // Determine dependencies from previous ranks
-        // Ideally, we find exactly which *values* we need.
-        // For this prototype:
-        // - Rank K receives the Full X vector updates from Rank 0...K-1.
-        // - Rank K computes.
-        // - Rank K sends its updates to Rank K+1...N-1.
-        // This serializes the blocks but uses DAG locally.
-
-        // Note: To make this "Graph compliant", we encapsulate NCCL in nodes.
 
         // 1. Receive Node (from previous rank)
         int mem_load_node_id = -1;
@@ -440,8 +501,6 @@ cudaGraph_t create_single_gpu_sptrsv_graph_for_part(
             std::vector<int> all_local_nodes;
             for (auto &p: sn_to_node_id) all_local_nodes.push_back(p.second);
 
-            // Ideally we only depend on sinks. But finding sinks requires parsing deps.
-            // Let's try adding all. CudaGraph can handle it.
             end_node_id = builder.addNode("Part_finish", send_op, all_local_nodes);
         }
     }

@@ -75,14 +75,16 @@ int main(int argc, char* argv[]) {
     // Prepare Device Memory
     float *d_x, *d_b;
 
-    int my_start_sn, my_end_sn;
-    get_partition_range(snMat.nSuper, rank, n_ranks, my_start_sn, my_end_sn);
-
     auto *sn_begin = snMat.supernodes.data();
     auto *Lp = snMat.p.data();
     auto *Lip = snMat.ip.data();
     auto *Lx = snMat.x.data();
     auto *Li = snMat.i.data();
+
+    int my_start_sn, my_end_sn;
+    get_weighted_partition_range(snMat.nSuper, rank, n_ranks,
+                                sn_begin, Lip, Lp,
+                                my_start_sn, my_end_sn);
     int part_col_b = sn_begin[my_start_sn];
     int part_col_e = sn_begin[my_end_sn];
 

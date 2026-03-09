@@ -12,7 +12,7 @@ set(CMAKE_CUDA_FLAGS "-g -G")
 
 
 # Enable modern CUDA features
-set(CMAKE_CUDA_ARCHITECTURES 50 61 75 80 86)
+set(CMAKE_CUDA_ARCHITECTURES 50 61 75 80 86 90)
 
 # FetchContent NVBench
 include(FetchContent)
