@@ -13,22 +13,33 @@ for col in df.columns:
 
 x = np.arange(len(df))
 
-def best_of_prefixes(dataframe, prefixes):
+def optimized_of_prefixes(dataframe, prefixes):
     cols = [c for c in dataframe.columns if any(c.startswith(p) for p in prefixes)]
     return dataframe[cols].max(axis=1)
 
 yy_values = df["YY"]
+yy_gmean = yy_values.prod() ** (1.0 / len(yy_values))
+print(f"YY Geometric Mean: {yy_gmean:.2f} GFLOP/s")
 ag_values = df["AG-Sptrsv"]
+ag_gmean = ag_values.prod() ** (1.0 / len(ag_values))
+print(f"AG-Sptrsv Geometric Mean: {ag_gmean:.2f} GFLOP/s")
 
 # CSC
 csc_wf_base = df["csc-wf-base"]
 csc_sf_base = df["csc-sf-base"]
-csc_best_opt = best_of_prefixes(df, ["csc-wf", "csc-sf", "csc-h"])
+csc_optimized_opt = optimized_of_prefixes(df, ["csc-wf", "csc-sf", "csc-h"])
+csc_optimized_gmean = csc_optimized_opt.prod() ** (1.0 / len(csc_optimized_opt))
+print(f"optimized CSC Geometric Mean: {csc_optimized_gmean:.2f} GFLOP/s")
+
 
 # CSR
 csr_wf_base = df["csr-wf-base"]
 csr_sf_base = df["csr-sf-base"]
-csr_best_opt = best_of_prefixes(df, ["csr-wf", "csr-sf", "csr-h"])
+csr_optimized_opt = optimized_of_prefixes(df, ["csr-wf", "csr-sf", "csr-h"])
+csr_optimized_gmean = csr_optimized_opt.prod() ** (1.0 / len(csr_optimized_opt))
+print(f"optimized CSR Geometric Mean: {csr_optimized_gmean:.2f} GFLOP/s")
+
+
 
 
 def make_plot(x, y1, y2, y3, title, out_file):
@@ -65,7 +76,7 @@ make_plot(
     x,
     yy_values,
     ag_values,
-    csr_best_opt,
+    csr_optimized_opt,
     "CSC SpTRSV Throughput",
     "csr_plot_sota.png"
 )

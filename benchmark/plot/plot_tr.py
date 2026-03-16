@@ -13,7 +13,7 @@ for col in df.columns:
 
 x = np.arange(len(df))
 
-def best_of_prefixes(dataframe, prefixes):
+def optimized_of_prefixes(dataframe, prefixes):
     cols = [c for c in dataframe.columns if any(c.startswith(p) for p in prefixes)]
     return dataframe[cols].max(axis=1)
 
@@ -22,13 +22,13 @@ cusparse_vals = df["cusparse-new"]
 # # CSC
 # csc_wf_base = df["csc-wf-base"]
 # csc_sf_base = df["csc-sf-base"]
-tr_csc_best_opt = best_of_prefixes(df, ["tr_csc"])
+tr_csc_optimized_opt = optimized_of_prefixes(df, ["tr_csc"])
 #
 # # CSR
 # csr_wf_base = df["csr-wf-base"]
 # csr_sf_base = df["csr-sf-base"]
-# csr_best_opt = best_of_prefixes(df, ["csr-wf", "csr-sf", "csr-h"])
-tr_csr_best_opt = best_of_prefixes(df, ["tr_csr"])
+# csr_optimized_opt = optimized_of_prefixes(df, ["csr-wf", "csr-sf", "csr-h"])
+tr_csr_optimized_opt = optimized_of_prefixes(df, ["tr_csr"])
 
 
 
@@ -65,7 +65,7 @@ def make_plot(x, y1, y2, title, out_file):
 make_plot(
     x,
     cusparse_vals,
-    tr_csc_best_opt,
+    tr_csc_optimized_opt,
     "CSC SpTRSV Throughput",
     "csc_plot_TR.png"
 )
@@ -73,7 +73,7 @@ make_plot(
 make_plot(
     x,
     cusparse_vals,
-    tr_csr_best_opt,
+    tr_csr_optimized_opt,
     "CSR SpTRSV Throughput",
     "csr_plot_TR.png"
 )

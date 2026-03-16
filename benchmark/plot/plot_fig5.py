@@ -13,7 +13,7 @@ for col in df.columns:
 
 x = np.arange(len(df))
 
-def best_of_prefixes(dataframe, prefixes):
+def optimized_of_prefixes(dataframe, prefixes):
     cols = [c for c in dataframe.columns if any(c.startswith(p) for p in prefixes)]
     return dataframe[cols].max(axis=1)
 
@@ -25,46 +25,43 @@ print(f"cuSPARSE Geometric Mean: {cusparse_gmean:.2f} GFLOP/s")
 # CSC
 csc_wf_base = df["csc-wf-base"]
 csc_sf_base = df["csc-sf-base"]
-csc_best_opt = best_of_prefixes(df, ["csc-wf", "csc-sf", "csc-h"])
-csc_best_gmean = csc_best_opt.prod() ** (1.0 / len(csc_best_opt))
-print(f"Best CSC Geometric Mean: {csc_best_gmean:.2f} GFLOP/s")
+csc_optimized_opt = optimized_of_prefixes(df, ["csc-wf", "csc-sf", "csc-h"])
+csc_optimized_gmean = csc_optimized_opt.prod() ** (1.0 / len(csc_optimized_opt))
+print(f"optimized CSC Geometric Mean: {csc_optimized_gmean:.2f} GFLOP/s")
 
 # CSR
 csr_wf_base = df["csr-wf-base"]
 csr_sf_base = df["csr-sf-base"]
-csr_best_opt = best_of_prefixes(df, ["csr-wf", "csr-sf", "csr-h"])
-csr_best_gmean = csr_best_opt.prod() ** (1.0 / len(csr_best_opt))
-print(f"Best CSR Geometric Mean: {csr_best_gmean:.2f} GFLOP/s")
+csr_optimized_opt = optimized_of_prefixes(df, ["csr-wf", "csr-sf", "csr-h"])
+csr_optimized_gmean = csr_optimized_opt.prod() ** (1.0 / len(csr_optimized_opt))
+print(f"optimized CSR Geometric Mean: {csr_optimized_gmean:.2f} GFLOP/s")
 
-print("CSC Speedup over cuSPARSE (Geometric Mean): {:.2f}x".format(csc_best_gmean / cusparse_gmean))
-print("CSR Speedup over cuSPARSE (Geometric Mean): {:.2f}x".format(csr_best_gmean / cusparse_gmean))
+print("CSC Speedup over cuSPARSE (Geometric Mean): {:.2f}x".format(csc_optimized_gmean / cusparse_gmean))
+print("CSR Speedup over cuSPARSE (Geometric Mean): {:.2f}x".format(csr_optimized_gmean / cusparse_gmean))
 
 cusparse_avg = cusparse_vals.mean()
-csc_wf_avg = csc_best_opt.mean()
-csr_wf_avg = csr_best_opt.mean()
+csc_wf_avg = csc_optimized_opt.mean()
+csr_wf_avg = csr_optimized_opt.mean()
 print(f"cuSPARSE Average: {cusparse_avg:.2f} GFLOP/s")
-print(f"Best CSC Average: {csc_wf_avg:.2f} GFLOP/s")
-print(f"Best CSR Average: {csr_wf_avg:.2f} GFLOP/s")
+print(f"optimized CSC Average: {csc_wf_avg:.2f} GFLOP/s")
+print(f"optimized CSR Average: {csr_wf_avg:.2f} GFLOP/s")
 print("CSC Speedup over cuSPARSE (Average): {:.2f}x".format(csc_wf_avg / cusparse_avg))
 
 cusparse_median = cusparse_vals.median()
-csc_wf_median = csc_best_opt.median()
-csr_wf_median = csr_best_opt.median()
+csc_wf_median = csc_optimized_opt.median()
+csr_wf_median = csr_optimized_opt.median()
 print(f"cuSPARSE Median: {cusparse_median:.2f} GFLOP/s")
-print(f"Best CSC Median: {csc_wf_median:.2f} GFLOP/s")
-print(f"Best CSR Median: {csr_wf_median:.2f} GFLOP/s")
+print(f"optimized CSC Median: {csc_wf_median:.2f} GFLOP/s")
+print(f"optimized CSR Median: {csr_wf_median:.2f} GFLOP/s")
 
 
-csc_speedups = csc_best_opt / cusparse_vals
-csr_speedups = csr_best_opt / cusparse_vals
+csc_speedups = csc_optimized_opt / cusparse_vals
+csr_speedups = csr_optimized_opt / cusparse_vals
 
 gmean_speedup_csc = csc_speedups.prod() ** (1.0 / len(csc_speedups))
 gmean_speedup_csr = csr_speedups.prod() ** (1.0 / len(csr_speedups))
-print(f"Geometric Mean Speedup of Best CSC over cuSPARSE: {gmean_speedup_csc:.2f}x")
-print(f"Geometric Mean Speedup of Best CSR over cuSPARSE: {gmean_speedup_csr:.2f}x")
-
-csc_tp_1 = csc_best_opt > 1.0
-csr_tp_1 = csr_best_opt > 1.0
+print(f"Geometric Mean Speedup of optimized CSC over cuSPARSE: {gmean_speedup_csc:.2f}x")
+print(f"Geometric Mean Speedup of optimized CSR over cuSPARSE: {gmean_speedup_csr:.2f}x")
 
 
 
@@ -103,7 +100,7 @@ make_plot(
     cusparse_vals,
     csc_wf_base,
     csc_sf_base,
-    csc_best_opt,
+    csc_optimized_opt,
     "CSC SpTRSV Throughput",
     "csc_plot_updated_cusparse.png"
 )
@@ -113,7 +110,7 @@ make_plot(
     cusparse_vals,
     csr_wf_base,
     csr_sf_base,
-    csr_best_opt,
+    csr_optimized_opt,
     "CSR SpTRSV Throughput",
     "csr_plot_updated_cusparse.png"
 )
