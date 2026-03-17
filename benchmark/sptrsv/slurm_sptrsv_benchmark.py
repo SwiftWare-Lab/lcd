@@ -9,6 +9,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 from bench_utils import *
 from spmv import *
+from external_helper import *
 
 import triton
 import triton.language as tl
@@ -105,6 +106,8 @@ method_list = []
 # ----------------------------------------------------------------------------
 method_list.extend([
     "cusparse",
+    "cusparse-wrapper",
+    "yysptrsv",
     "csc-wf-base",
     "csc-sf-base",
     "csr-wf-base",
@@ -1936,7 +1939,14 @@ def benchmark(matrices, provider):
         wave_start_loc, waves, level_boundaries = compact_coarsened_wavefronts(wavefronts, coarsening_factor)
         waves_gpu = cuda.to_device(waves)
         ms, min_ms, max_ms = triton.testing.do_bench(lambda: sptrsv_numba_csr_coarsened_mapping(d_data, d_indices, d_indptr, d_x, A.shape[0], A.shape[1], A_csr.nnz, wave_start_loc, waves_gpu, coarsening_factor, threads_per_block, thread_coarsening_factor=thread_coarsening_factor, level_boundaries=level_boundaries), quantiles=quantiles, warmup=warmpup, rep=rep)
-
+    if provider == "cusparse-wrapper":
+        A_csr = A.tocsr()
+        A_csr.sort_indices()
+        ms, min_ms, max_ms = bench_cusparse_wrapper(A_csr, rep=rep, warmup=warmpup)
+    if provider == "yysptrsv":
+        A_csr = A.tocsr()
+        A_csr.sort_indices()
+        ms, min_ms, max_ms = bench_yysptrsv(A_csr, rep=rep, warmup=warmpup, border=10)
     perf = lambda ms: (A.shape[0] + 2 * A.nnz) / (ms * 1e-3) / 1e9
     #print(f"seconds: {ms}")
     #print(f"max: {perf(max_ms)}, min: {perf(min_ms)}, median: {perf(ms)}")

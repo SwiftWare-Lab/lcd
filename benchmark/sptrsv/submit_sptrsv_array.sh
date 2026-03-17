@@ -5,7 +5,7 @@
 #SBATCH --gpus-per-node=1
 #SBATCH --output="sptrsv.%A-%a.out"
 #SBATCH -t 03:59:00
-#SBATCH --array=0-7
+#SBATCH --array=0-2
 
 module load StdEnv/2023
 module load python
@@ -66,7 +66,7 @@ export CUPY_CACHE_DIR=${CUPY_CACHE_DIR:-$SCRATCH/cupy_cache}
 mkdir -p "$CUPY_CACHE_DIR"
 
 cd "$ROOT"
-source /scratch/dama/venv/bin/activate
+source $SCRATCH/projects/gpu-backend/venv/bin/activate
 
 echo "Task ${SLURM_ARRAY_TASK_ID}/${NUM_ARRAY_JOBS}: processing indices [$START_INDEX, $((END_INDEX-1))]"
 
