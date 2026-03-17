@@ -1496,11 +1496,11 @@ def benchmark(matrices, provider):
     if provider == "cusparse-wrapper":
         A_csr = A.tocsr()
         A_csr.sort_indices()
-        ms, min_ms, max_ms = bench_cusparse_wrapper(A_csr, rep=rep, warmup=warmup)
+        ms, min_ms, max_ms = bench_cusparse_wrapper(A_csr, rep=rep, warmup=warmpup)
     if provider == "yysptrsv":
         A_csr = A.tocsr()
         A_csr.sort_indices()
-        ms, min_ms, max_ms = bench_yysptrsv(A_csr, rep=rep, warmup=warmup, border=10)
+        ms, min_ms, max_ms = bench_yysptrsv(A_csr, rep=rep, warmup=warmpup, border=10)
     perf = lambda ms: (A.shape[0] + 2 * A.nnz) / (ms * 1e-3) / 1e9
     #print(f"seconds: {ms}")
     #print(f"max: {perf(max_ms)}, min: {perf(min_ms)}, median: {perf(ms)}")

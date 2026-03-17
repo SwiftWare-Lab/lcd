@@ -169,7 +169,6 @@ code_gen/mtx_matrices/
 
 *.out
 *.csv
-*.txt
 *.png
 *.html
 data/
