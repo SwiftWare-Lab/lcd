@@ -1,3 +1,4 @@
+import os
 import time
 import numpy as np
 import scipy.io
@@ -18,26 +19,24 @@ solver = cusparse_sptrsv.CuSparseSpTRSV(
     rowptr, colind, values, lower=True, unit_diag=False
 )
 
-# Benchmark analysis
+# analysis timing
 t0 = time.perf_counter()
 solver.analyze()
 t1 = time.perf_counter()
-analysis_ms = (t1 - t0) * 1e3
 
-b = np.ones(A.shape[0], dtype=np.float64)
-
-# Warmup
+# warmup
 for _ in range(10):
-    solver.solve(b)
+    solver.solve()
 
-# Benchmark solve
+# solve timing
 iters = 100
 t0 = time.perf_counter()
 for _ in range(iters):
-    x = solver.solve(b)
+    solver.solve()
 t1 = time.perf_counter()
 
-avg_ms = (t1 - t0) * 1e3 / iters
+avg_ms = (t1 - t0) * 1000.0 / iters
 gflops = 2.0 * solver.nnz / (avg_ms * 1e-3) / 1e9
 
-print(f"{matrix_path},{solver.nnz},{avg_ms:.6f},{gflops:.6f}")
+matrix_name = os.path.splitext(os.path.basename(matrix_path))[0]
+print(f"{matrix_name},{solver.nnz},{avg_ms:.6f},{gflops:.6f}")

@@ -4,6 +4,7 @@
 #include <pybind11/pybind11.h>
 #include <pybind11/numpy.h>
 
+#include <vector>
 #include <string>
 #include <stdexcept>
 #include <sstream>
@@ -73,6 +74,10 @@ public:
         CHECK_CUDA(cudaMemcpy(d_colind_, h_colind, nnz_ * sizeof(int), cudaMemcpyHostToDevice));
         CHECK_CUDA(cudaMemcpy(d_values_, h_values, nnz_ * sizeof(double), cudaMemcpyHostToDevice));
 
+        // Keep RHS on GPU permanently: initialize b = ones
+        std::vector<double> h_rhs(n_, 1.0);
+        CHECK_CUDA(cudaMemcpy(d_rhs_, h_rhs.data(), n_ * sizeof(double), cudaMemcpyHostToDevice));
+
         CHECK_CUSPARSE(cusparseCreateCsr(&matA_,
                                          n_, n_, nnz_,
                                          d_rowptr_, d_colind_, d_values_,
@@ -81,7 +86,6 @@ public:
                                          CUSPARSE_INDEX_BASE_ZERO,
                                          CUDA_R_64F));
 
-        // vecB_ is the RHS input, vecX_ is the solution output
         CHECK_CUSPARSE(cusparseCreateDnVec(&vecB_, n_, d_rhs_, CUDA_R_64F));
         CHECK_CUSPARSE(cusparseCreateDnVec(&vecX_, n_, d_sol_, CUDA_R_64F));
         CHECK_CUSPARSE(cusparseSpSV_createDescr(&spsv_descr_));
@@ -145,21 +149,8 @@ public:
         analyzed_ = true;
     }
 
-    py::array_t<double> solve(
-            py::array_t<double, py::array::c_style | py::array::forcecast> b) {
+    py::array_t<double> solve() {
         ensure_analyzed();
-
-        auto b_buf = b.request();
-        if (b_buf.ndim != 1) {
-            throw std::runtime_error("b must be a 1D array.");
-        }
-        if (static_cast<int>(b_buf.shape[0]) != n_) {
-            throw std::runtime_error("b has incorrect size.");
-        }
-
-        const double* h_b = static_cast<const double*>(b_buf.ptr);
-
-        CHECK_CUDA(cudaMemcpy(d_rhs_, h_b, n_ * sizeof(double), cudaMemcpyHostToDevice));
 
         CHECK_CUSPARSE(cusparseSpSV_solve(handle_,
                                           CUSPARSE_OPERATION_NON_TRANSPOSE,
@@ -216,22 +207,22 @@ private:
 };
 
 PYBIND11_MODULE(cusparse_sptrsv, m) {
-    m.doc() = "pybind11 wrapper for cuSPARSE SpSV";
+m.doc() = "pybind11 wrapper for cuSPARSE SpSV";
 
-    py::class_<CuSparseSpTRSV>(m, "CuSparseSpTRSV")
-            .def(py::init<
-                         py::array_t<int, py::array::c_style | py::array::forcecast>,
-                         py::array_t<int, py::array::c_style | py::array::forcecast>,
-                         py::array_t<double, py::array::c_style | py::array::forcecast>,
-                         bool,
-                         bool>(),
-                 py::arg("rowptr"),
-                 py::arg("colind"),
-                 py::arg("values"),
-                 py::arg("lower") = true,
-                 py::arg("unit_diag") = false)
-            .def("analyze", &CuSparseSpTRSV::analyze)
-            .def("solve", &CuSparseSpTRSV::solve, py::arg("b"))
-            .def_property_readonly("n", &CuSparseSpTRSV::n)
-            .def_property_readonly("nnz", &CuSparseSpTRSV::nnz);
+py::class_<CuSparseSpTRSV>(m, "CuSparseSpTRSV")
+.def(py::init<
+        py::array_t<int, py::array::c_style | py::array::forcecast>,
+        py::array_t<int, py::array::c_style | py::array::forcecast>,
+        py::array_t<double, py::array::c_style | py::array::forcecast>,
+bool,
+bool>(),
+py::arg("rowptr"),
+py::arg("colind"),
+py::arg("values"),
+py::arg("lower") = true,
+py::arg("unit_diag") = false)
+.def("analyze", &CuSparseSpTRSV::analyze)
+.def("solve", &CuSparseSpTRSV::solve)
+.def_property_readonly("n", &CuSparseSpTRSV::n)
+.def_property_readonly("nnz", &CuSparseSpTRSV::nnz);
 }
