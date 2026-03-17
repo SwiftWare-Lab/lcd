@@ -60,6 +60,7 @@ print(f"Compute Capability: {device.compute_capability}")
 
 
 mtx_list = [
+    "/scratch/msalehid/data/gpu-backend-sc-data/appu/appu.mtx"
 # "/home/salehm32/projects/fused-gnn/fusion/data/gpu-backend-data/1138_bus/1138_bus.mtx",
 # "/home/mad29/projects/testdata/matrices/2cubes_sphere.mtx",
 #"/home/mad29/projects/testdata/matrices/Chem97ZtZ.mtx",
