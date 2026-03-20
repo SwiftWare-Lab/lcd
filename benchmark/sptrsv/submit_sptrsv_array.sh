@@ -5,7 +5,7 @@
 #SBATCH --gpus-per-node=1
 #SBATCH --output="sptrsv.%A-%a.out"
 #SBATCH -t 03:59:00
-#SBATCH --array=0-2
+#SBATCH --array=0-7
 
 module load StdEnv/2023
 module load python
@@ -15,11 +15,10 @@ module load cuda
 set -euo pipefail
 
 ROOT=${ROOT:-${SLURM_SUBMIT_DIR:-$PWD}}
-PYTHON_BIN=${PYTHON_BIN:-/scratch/dama/venv/bin/python}
-MATRIX_LIST_FILE=${MATRIX_LIST_FILE:-$ROOT/matrix_list.txt}
+MATRIX_LIST_FILE=$1
 
 # Parent directory to prepend to each matrix path in MATRIX_LIST_FILE
-MATRIX_PARENT_DIR=${MATRIX_PARENT_DIR:-$ROOT}
+MATRIX_PARENT_DIR=$2
 
 # Number of array jobs to divide the matrix list into
 NUM_ARRAY_JOBS=${NUM_ARRAY_JOBS:-8}
@@ -70,11 +69,22 @@ source $SCRATCH/projects/gpu-backend/venv/bin/activate
 
 echo "Task ${SLURM_ARRAY_TASK_ID}/${NUM_ARRAY_JOBS}: processing indices [$START_INDEX, $((END_INDEX-1))]"
 
+TIMEOUT=${MATRIX_TIMEOUT:-3600}
 for (( i=START_INDEX; i<END_INDEX; i++ )); do
   MATRIX_REL_PATH="${MATRIX_REL_PATHS[$i]}"
   export SPTRSV_MATRIX="${MATRIX_PARENT_DIR}/${MATRIX_REL_PATH}"
 
   echo "Benchmarking matrix $((i+1))/$TOTAL_MATRICES: ${SPTRSV_MATRIX}"
 
-  $PYTHON_BIN slurm_sptrsv_benchmark.py
+   if timeout --kill-after=10 --signal=TERM ${TIMEOUT} \
+        python $SCRATCH/projects/gpu-backend/benchmark/sptrsv/slurm_sptrsv_benchmark.py; then
+        echo "Done: ${SPTRSV_MATRIX}"
+    else
+        EXIT_CODE=$?
+        if [[ $EXIT_CODE -eq 124 ]]; then
+            echo "Timeout: ${SPTRSV_MATRIX}"
+        else
+            echo "Error ($EXIT_CODE): ${SPTRSV_MATRIX}"
+        fi
+    fi
 done
