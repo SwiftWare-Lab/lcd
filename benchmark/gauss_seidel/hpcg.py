@@ -830,7 +830,7 @@ class SyncFreeUnrolling64DiagGSPreconditioner(LinearOperator):
 # ============================================================================
 def run_pcg_benchmark(matrix_path):
     matrix_name = os.path.basename(matrix_path).replace('.mtx', '')
-    print(f"\n[{matrix_name}]")
+    print(f"\n[{matrix_name}]", flush=True)
 
     # Load matrix
     matrix = spio.mmread(matrix_path)
@@ -849,8 +849,8 @@ def run_pcg_benchmark(matrix_path):
     
     methods = [
         ("cupy", lambda: CuPyGSPreconditioner(A_host)),
-        ("gs-wf-base", lambda: WavefrontGSPreconditioner(A_host)),
-        ("gs-wf-base-diag", lambda: WavefrontGSDiagPreconditioner(A_host)),
+        # ("gs-wf-base", lambda: WavefrontGSPreconditioner(A_host)),
+        # ("gs-wf-base-diag", lambda: WavefrontGSDiagPreconditioner(A_host)),
         ("gs-sf-base", lambda: SyncFreeGSPreconditioner(A_host)),
         ("gs-sf-base-diag", lambda: SyncFreeGSDiagPreconditioner(A_host)),
         ("gs-sf-unroll-4", lambda: SyncFreeUnrolling4GSPreconditioner(A_host)),
@@ -895,10 +895,10 @@ def run_pcg_benchmark(matrix_path):
                 'converged': info == 0
             }
             
-            print(f"{elapsed_time:.3f}s ({iter_count[0]} iters)")
+            print(f"{elapsed_time:.3f}s ({iter_count[0]} iters)", flush=True)
             
         except Exception as e:
-            print(f"FAILED: {e}")
+            print(f"FAILED: {e}", flush=True)
             results[method_name] = {'time': float('inf'), 'iters': -1, 'converged': False}
 
     return matrix_name, results
@@ -936,9 +936,9 @@ if __name__ == "__main__":
     
     if len(matrices) == 1:
         # Single matrix mode - minimal output
-        print(f"Benchmarking: {os.path.basename(matrices[0])}")
+        print(f"Benchmarking: {os.path.basename(matrices[0])}", flush=True)
     else:
-        print(f"Starting HPCG benchmark on {len(matrices)} matrices...")
+        print(f"Starting HPCG benchmark on {len(matrices)} matrices...", flush=True)
     
     for mat in matrices:
         try:
@@ -949,8 +949,10 @@ if __name__ == "__main__":
             import traceback
             traceback.print_exc()
     
-    # Export to CSV
-    all_methods = ["cupy", "gs-wf-base", "gs-wf-base-diag", "gs-sf-base", "gs-sf-base-diag",
+    # Export to CSV (only include methods that were actually benchmarked)
+    all_methods = ["cupy", 
+                   # "gs-wf-base", "gs-wf-base-diag",  # Commented out - too slow
+                   "gs-sf-base", "gs-sf-base-diag",
                    "gs-sf-unroll-4", "gs-sf-unroll-4-diag", "gs-sf-unroll-8", "gs-sf-unroll-8-diag",
                    "gs-sf-unroll-16", "gs-sf-unroll-16-diag", "gs-sf-unroll-32", "gs-sf-unroll-32-diag",
                    "gs-sf-unroll-64", "gs-sf-unroll-64-diag",
@@ -981,7 +983,7 @@ if __name__ == "__main__":
             writer.writerow(row)
     
     if len(matrices) == 1:
-        print(f"Results saved to: {csv_filename}")
+        print(f"Results saved to: {csv_filename}", flush=True)
     else:
         print(f"\n{'='*80}")
         print(f"Results exported to: {csv_filename}")

@@ -38,7 +38,7 @@ TIMEOUT_COUNT=0
 FAILED_MATRICES=()
 TIMEOUT_MATRICES=()
 
-# Timeout duration (default: 30 minutes = 1800 seconds)
+# Timeout duration (default: 10 minutes = 600 seconds)
 TIMEOUT_SECONDS=${TIMEOUT_SECONDS:-1800}
 
 # Run benchmark for each matrix
@@ -51,12 +51,14 @@ for i in "${!MATRICES[@]}"; do
   # Create log file for this matrix
   LOG_FILE="$LOG_DIR/${MATRIX_NAME}.log"
   
-  # Run benchmark and capture output
+  # Run benchmark and capture output (show in terminal + save to log)
   START_TIME=$(date +%s)
   
   # Use timeout command to limit execution time
   # timeout returns 124 if the command times out
-  if timeout $TIMEOUT_SECONDS bash -c "cd '$ROOT' && $PYTHON_BIN hpcg.py --matrix '$MATRIX' --output-dir '$OUTPUT_DIR'" > "$LOG_FILE" 2>&1; then
+  # Set PYTHONUNBUFFERED=1 to ensure output is flushed immediately
+  # Use tee to show output in terminal AND save to log file
+  if timeout $TIMEOUT_SECONDS bash -c "cd '$ROOT' && PYTHONUNBUFFERED=1 $PYTHON_BIN hpcg.py --matrix '$MATRIX' --output-dir '$OUTPUT_DIR' 2>&1 | tee '$LOG_FILE'"; then
     END_TIME=$(date +%s)
     ELAPSED=$((END_TIME - START_TIME))
     
