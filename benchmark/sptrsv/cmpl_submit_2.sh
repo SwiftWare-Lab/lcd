@@ -6,7 +6,7 @@
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=4
 #SBATCH --output="sptrsv.%A-%a.out"
-#SBATCH -t 11:59:00
+#SBATCH -t 17:59:00
 #SBATCH --array=0-49
 
 module load StdEnv/2023
@@ -121,7 +121,8 @@ cd "$ROOT"
 
 echo "Task ${SLURM_ARRAY_TASK_ID}/${NUM_ARRAY_JOBS}: processing indices [$START_INDEX, $((END_INDEX-1))]"
 
-TIMEOUT=${MATRIX_TIMEOUT:-14340}
+# Default ~5h59m per matrix (scaled with walltime: 3h59m at 11h59 -> 5h59m at 17h59)
+TIMEOUT=${MATRIX_TIMEOUT:-21540}
 for (( i=START_INDEX; i<END_INDEX; i++ )); do
   export SPTRSV_MATRIX="${MATRIX_PATHS[$i]}"
 
