@@ -9,7 +9,31 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 from bench_utils import *
 from spmv import *
-from external_helper import *
+
+# External baselines (yysptrsv_wrapper, cusparse_sptrsv) must import unless opted out.
+_SKIP_EXTERNAL = os.environ.get("SPTRSV_SKIP_EXTERNAL", "0") == "1"
+if _SKIP_EXTERNAL:
+    _HAS_EXTERNAL = False
+    print(
+        "WARNING: SPTRSV_SKIP_EXTERNAL=1 — cusparse-wrapper and yysptrsv are omitted from method_list. "
+        "Result CSVs will not include those columns. Unset SPTRSV_SKIP_EXTERNAL and build the "
+        "pybind modules in benchmark/sptrsv/ for a full benchmark.",
+        file=sys.stderr,
+    )
+else:
+    try:
+        from external_helper import *
+    except (ImportError, ModuleNotFoundError) as _ext_err:
+        print(
+            "ERROR: Could not import external_helper (yysptrsv_wrapper / cusparse_sptrsv).\n"
+            f"  Underlying error: {_ext_err!r}\n"
+            "  Fix: from benchmark/sptrsv run:  ./build_external_modules.sh\n"
+            "  (requires cmake, CUDA toolkit, pybind11, and a GPU for arch detection)\n"
+            "  Or set SPTRSV_SKIP_EXTERNAL=1 to omit these baselines.",
+            file=sys.stderr,
+        )
+        raise SystemExit(1) from _ext_err
+    _HAS_EXTERNAL = True
 
 import triton
 import triton.language as tl
@@ -50,6 +74,20 @@ from kernels.sptrsv_hlevel import (
     sptrsv_numba_csr_syncfree_persistent_graph, sptrsv_numba_csr_syncfree_persistent_solve,
     sptrsv_numba_csc_syncfree_persistent_graph, sptrsv_numba_csc_syncfree_persistent_solve,
 )
+from kernels.sptrsv_parallel import (
+    sptrsv_parallel_csc_wf_graph,
+    sptrsv_parallel_csr_wf_graph,
+    sptrsv_parallel_csc_sf,
+    sptrsv_parallel_csr_sf,
+    sptrsv_parallel_csc_hlevel_solve,
+    sptrsv_parallel_csr_hlevel_solve,
+)
+from kernels.sptrsv_loadbalanced import (
+    CsrSfLoadbalancedGraphSolver,
+    prepare_csr_syncfree_hybrid_persistent_assets,
+    prepare_hlevel_loadbalanced_host,
+    sptrsv_csr_hlevel_loadbalanced_solve,
+)
 
 import warnings
 from numba.core.errors import NumbaPerformanceWarning
@@ -80,9 +118,9 @@ def matrix_basename(path: str) -> str:
     return stem.replace(" ", "_")
 
 QUICK = os.environ.get("SPTRSV_QUICK", "1") != "0"
-WARMUP = int(os.environ.get("SPTRSV_WARMUP", "2" if QUICK else "25"))
-REP = int(os.environ.get("SPTRSV_REP", "5" if QUICK else "100"))
-PROVIDER_FILTER = os.environ.get("SPTRSV_PROVIDERS")
+WARMUP = int(os.environ.get("SPTRSV_WARMUP") or ("2" if QUICK else "25"))
+REP = int(os.environ.get("SPTRSV_REP") or ("5" if QUICK else "100"))
+PROVIDER_FILTER = os.environ.get("SPTRSV_PROVIDERS") or None
 # ============================================================================
 # Benchmark Configuration
 # ============================================================================
@@ -94,6 +132,8 @@ sync_free_block_factors = [1, 2, 4]
 thread_coarsening_factors = [1, 2, 4]
 wavefront_coarsening_factors = [1, 2, 4, 8]
 band_widths = [1, 2, 4, 8, 16]
+# Warps per thread block for kernels.sptrsv_loadbalanced (CSR sync-free persistent, h-level hybrid)
+loadbalanced_warps = [4, 8, 16]
 
 # ============================================================================
 # Method List Construction
@@ -106,93 +146,113 @@ method_list = []
 # ----------------------------------------------------------------------------
 method_list.extend([
     "cusparse",
-    "cusparse-wrapper",
-    "yysptrsv",
+    *((["cusparse-wrapper", "yysptrsv"]) if _HAS_EXTERNAL else []),
     "csc-wf-base",
     "csc-sf-base",
     "csr-wf-base",
     "csr-sf-base",
 ])
 
-# ----------------------------------------------------------------------------
-# TEST CANDIDATES - WAVEFRONT - UNROLLED
-# ----------------------------------------------------------------------------
-# Unroll factor 1 (mapping variants)
-for threads in thread_counts:
+# Thread-parallel kernels (1 thread / row or chain; see kernels/sptrsv_parallel.py)
+for _tpb in thread_counts:
     method_list.extend([
-        f"csc-wf-u1-t{threads}",
-        f"csr-wf-u1-t{threads}",
+        f"csc-wf-parallel-t{_tpb}",
+        f"csr-wf-parallel-t{_tpb}",
+        f"csc-sf-parallel-t{_tpb}",
+        f"csr-sf-parallel-t{_tpb}",
+    ])
+for _bw in band_widths:
+    method_list.extend([
+        f"csc-h-parallel-bw{_bw}",
+        f"csr-h-parallel-bw{_bw}",
     ])
 
-# Explicit unrolling with factors 4-64
-for factor in unroll_factors:
-    for threads in thread_counts:
-        method_list.extend([
-            f"csc-wf-u{factor}-t{threads}",
-            f"csr-wf-u{factor}-t{threads}",
-        ])
+# Load-balanced hybrid (kernels/sptrsv_loadbalanced.py): CSR sync-free persistent + bundled h-level
+for _w in loadbalanced_warps:
+    method_list.append(f"csr-sf-loadbalanced-w{_w}")
+for _bw in band_widths:
+    for _w in loadbalanced_warps:
+        method_list.append(f"csr-h-loadbalanced-bw{_bw}-w{_w}")
 
-# ----------------------------------------------------------------------------
-# TEST CANDIDATES - WAVEFRONT - COARSENED
-# ----------------------------------------------------------------------------
-# Block coarsening (merge dependency levels)
-for cf in block_coarsening_factors:
-    method_list.extend([
-        f"csc-wf-coarse-block-wc{cf}",
-        f"csr-wf-coarse-block-wc{cf}",
-    ])
+# # ----------------------------------------------------------------------------
+# # TEST CANDIDATES - WAVEFRONT - UNROLLED
+# # ----------------------------------------------------------------------------
+# # Unroll factor 1 (mapping variants)
+# for threads in thread_counts:
+#     method_list.extend([
+#         f"csc-wf-u1-t{threads}",
+#         f"csr-wf-u1-t{threads}",
+#     ])
 
-# Thread coarsening
-for threads in thread_counts:
-    method_list.extend([
-        f"csc-wf-coarse-thread-tc{threads}",
-        f"csr-wf-coarse-thread-tc{threads}",
-    ])
+# # Explicit unrolling with factors 4-64
+# for factor in unroll_factors:
+#     for threads in thread_counts:
+#         method_list.extend([
+#             f"csc-wf-u{factor}-t{threads}",
+#             f"csr-wf-u{factor}-t{threads}",
+#         ])
 
-# Combined 3-level coarsening (wavefront + warp + thread)
-for cf in wavefront_coarsening_factors:
-    for threads in thread_counts:
-        warps = threads // 32
-        for tcf in thread_coarsening_factors:
-            method_list.extend([
-                f"csc-wf-coarse-comb-wc{cf}-w{warps}-tc{tcf}",
-                f"csr-wf-coarse-comb-wc{cf}-w{warps}-tc{tcf}",
-            ])
+# # ----------------------------------------------------------------------------
+# # TEST CANDIDATES - WAVEFRONT - COARSENED
+# # ----------------------------------------------------------------------------
+# # Block coarsening (merge dependency levels)
+# for cf in block_coarsening_factors:
+#     method_list.extend([
+#         f"csc-wf-coarse-block-wc{cf}",
+#         f"csr-wf-coarse-block-wc{cf}",
+#     ])
 
-# ----------------------------------------------------------------------------
-# TEST CANDIDATES - SYNC-FREE - UNROLLED
-# ----------------------------------------------------------------------------
-# Unroll factor 1 (mapping variants)
-for threads in thread_counts:
-    method_list.extend([
-        f"csc-sf-u1-t{threads}",
-        f"csr-sf-u1-t{threads}",
-    ])
+# # Thread coarsening
+# for threads in thread_counts:
+#     method_list.extend([
+#         f"csc-wf-coarse-thread-tc{threads}",
+#         f"csr-wf-coarse-thread-tc{threads}",
+#     ])
 
-# Explicit unrolling with factors 4-64
-for factor in unroll_factors:
-    for threads in thread_counts:
-        method_list.extend([
-            f"csc-sf-u{factor}-t{threads}",
-            f"csr-sf-u{factor}-t{threads}",
-        ])
+# # Combined 3-level coarsening (wavefront + warp + thread)
+# for cf in wavefront_coarsening_factors:
+#     for threads in thread_counts:
+#         warps = threads // 32
+#         for tcf in thread_coarsening_factors:
+#             method_list.extend([
+#                 f"csc-wf-coarse-comb-wc{cf}-w{warps}-tc{tcf}",
+#                 f"csr-wf-coarse-comb-wc{cf}-w{warps}-tc{tcf}",
+#             ])
 
-# ----------------------------------------------------------------------------
-# TEST CANDIDATES - SYNC-FREE - COARSENED
-# ----------------------------------------------------------------------------
-# Block coarsening
-for bcf in sync_free_block_factors:
-    method_list.extend([
-        f"csc-sf-coarse-block-bc{bcf}",
-        f"csr-sf-coarse-block-bc{bcf}",
-    ])
+# # ----------------------------------------------------------------------------
+# # TEST CANDIDATES - SYNC-FREE - UNROLLED
+# # ----------------------------------------------------------------------------
+# # Unroll factor 1 (mapping variants)
+# for threads in thread_counts:
+#     method_list.extend([
+#         f"csc-sf-u1-t{threads}",
+#         f"csr-sf-u1-t{threads}",
+#     ])
 
-# Thread coarsening
-for threads in thread_counts:
-    method_list.extend([
-        f"csc-sf-coarse-thread-tc{threads}",
-        f"csr-sf-coarse-thread-tc{threads}",
-    ])
+# # Explicit unrolling with factors 4-64
+# for factor in unroll_factors:
+#     for threads in thread_counts:
+#         method_list.extend([
+#             f"csc-sf-u{factor}-t{threads}",
+#             f"csr-sf-u{factor}-t{threads}",
+#         ])
+
+# # ----------------------------------------------------------------------------
+# # TEST CANDIDATES - SYNC-FREE - COARSENED
+# # ----------------------------------------------------------------------------
+# # Block coarsening
+# for bcf in sync_free_block_factors:
+#     method_list.extend([
+#         f"csc-sf-coarse-block-bc{bcf}",
+#         f"csr-sf-coarse-block-bc{bcf}",
+#     ])
+
+# # Thread coarsening
+# for threads in thread_counts:
+#     method_list.extend([
+#         f"csc-sf-coarse-thread-tc{threads}",
+#         f"csr-sf-coarse-thread-tc{threads}",
+#     ])
 
 # ----------------------------------------------------------------------------
 # TEST CANDIDATES - H-LEVEL
@@ -1049,6 +1109,207 @@ def benchmark(matrices, provider):
         
         ms, min_ms, max_ms = triton.testing.do_bench(lambda: sptrsv_numba_csr_sync_free(d_data, d_indices, d_indptr, d_x, A.shape[0], A.shape[1], A_csr.nnz, dep_count, succ_offsets, succ_indices), quantiles=quantiles, warmup=warmpup, rep=rep)
     
+    # ========================================================================
+    # THREAD-PARALLEL (kernels/sptrsv_parallel.py)
+    # ========================================================================
+    if provider.startswith('csc-wf-parallel-t'):
+        threads_per_block = int(provider.replace('csc-wf-parallel-t', ''))
+        d_data = cuda.to_device(A.data)
+        d_indices = cuda.to_device(A.indices)
+        d_indptr = cuda.to_device(A.indptr)
+        d_x = cuda.to_device(np.zeros(n))
+        t0 = time.perf_counter()
+        wavefronts = compute_wavefront(A)
+        wave_start_loc, waves = compact_2d_list(wavefronts)
+        waves_gpu = cuda.to_device(waves)
+        dag_creation_time = (time.perf_counter() - t0) * 1000
+        cuda.synchronize()
+        ms, min_ms, max_ms = triton.testing.do_bench(
+            lambda: sptrsv_parallel_csc_wf_graph(
+                d_data, d_indices, d_indptr, d_x, A.shape[0], A.shape[1], A.nnz,
+                wave_start_loc, waves_gpu, threads_per_block=threads_per_block),
+            quantiles=quantiles, warmup=warmpup, rep=rep)
+
+    if provider.startswith('csr-wf-parallel-t'):
+        threads_per_block = int(provider.replace('csr-wf-parallel-t', ''))
+        A_csr = A.tocsr()
+        d_data = cuda.to_device(A_csr.data)
+        d_indices = cuda.to_device(A_csr.indices)
+        d_indptr = cuda.to_device(A_csr.indptr)
+        d_x = cuda.to_device(np.zeros(n))
+        t0 = time.perf_counter()
+        wavefronts = compute_wavefront(A)
+        wave_start_loc, waves = compact_2d_list(wavefronts)
+        waves_gpu = cuda.to_device(waves)
+        dag_creation_time = (time.perf_counter() - t0) * 1000
+        cuda.synchronize()
+        ms, min_ms, max_ms = triton.testing.do_bench(
+            lambda: sptrsv_parallel_csr_wf_graph(
+                d_data, d_indices, d_indptr, d_x, A.shape[0], A.shape[1], A_csr.nnz,
+                wave_start_loc, waves_gpu, threads_per_block=threads_per_block),
+            quantiles=quantiles, warmup=warmpup, rep=rep)
+
+    if provider.startswith('csc-sf-parallel-t'):
+        threads_per_block = int(provider.replace('csc-sf-parallel-t', ''))
+        d_data = cuda.to_device(A.data)
+        d_indices = cuda.to_device(A.indices)
+        d_indptr = cuda.to_device(A.indptr)
+        d_x = cuda.to_device(np.zeros(n))
+        t0 = time.perf_counter()
+        dep_count = incoming_edge(A)
+        dag_creation_time = (time.perf_counter() - t0) * 1000
+        cuda.synchronize()
+        ms, min_ms, max_ms = triton.testing.do_bench(
+            lambda: sptrsv_parallel_csc_sf(
+                d_data, d_indices, d_indptr, d_x, A.shape[0], A.shape[1], A.nnz,
+                dep_count, threads_per_block=threads_per_block),
+            quantiles=quantiles, warmup=warmpup, rep=rep)
+
+    if provider.startswith('csr-sf-parallel-t'):
+        threads_per_block = int(provider.replace('csr-sf-parallel-t', ''))
+        A_csr = A.tocsr()
+        d_data = cuda.to_device(A_csr.data)
+        d_indices = cuda.to_device(A_csr.indices)
+        d_indptr = cuda.to_device(A_csr.indptr)
+        d_x = cuda.to_device(np.zeros(n))
+        t0 = time.perf_counter()
+        dep_count = incoming_edge_csr_rows(A_csr)
+        succ_offsets, succ_indices = build_csr_successors(A_csr)
+        dag_creation_time = (time.perf_counter() - t0) * 1000
+        cuda.synchronize()
+        ms, min_ms, max_ms = triton.testing.do_bench(
+            lambda: sptrsv_parallel_csr_sf(
+                d_data, d_indices, d_indptr, d_x, A.shape[0], A.shape[1], A_csr.nnz,
+                dep_count, succ_offsets, succ_indices, threads_per_block=threads_per_block),
+            quantiles=quantiles, warmup=warmpup, rep=rep)
+
+    if provider.startswith('csc-h-parallel-bw'):
+        band_width = int(provider.replace('csc-h-parallel-bw', ''))
+        d_data = cuda.to_device(A.data)
+        d_indices = cuda.to_device(A.indices)
+        d_indptr = cuda.to_device(A.indptr)
+        d_x = cuda.to_device(np.zeros(n))
+        t0 = time.perf_counter()
+        wavefronts = compute_wavefront(A)
+        wave_start_loc, waves = compact_2d_list(wavefronts)
+        waves_gpu = cuda.to_device(waves)
+        dag_creation_time = (time.perf_counter() - t0) * 1000
+        cuda.synchronize()
+        t0 = time.perf_counter()
+        h_level_data = sptrsv_h_level_analyze(
+            d_indptr, d_indices, waves_gpu, wave_start_loc, band_width=band_width)
+        coarsening_time = (time.perf_counter() - t0) * 1000
+        cuda.synchronize()
+        ms, min_ms, max_ms = triton.testing.do_bench(
+            lambda: sptrsv_parallel_csc_hlevel_solve(
+                d_data, d_indices, d_indptr, d_x, A.shape[0], A.shape[1], A.nnz, h_level_data),
+            quantiles=quantiles, warmup=warmpup, rep=rep)
+
+    if provider.startswith('csr-h-parallel-bw'):
+        band_width = int(provider.replace('csr-h-parallel-bw', ''))
+        A_csr = A.tocsr()
+        d_data = cuda.to_device(A_csr.data)
+        d_indices = cuda.to_device(A_csr.indices)
+        d_indptr = cuda.to_device(A_csr.indptr)
+        d_x = cuda.to_device(np.zeros(n))
+        t0 = time.perf_counter()
+        wavefronts = compute_wavefront(A)
+        wave_start_loc, waves = compact_2d_list(wavefronts)
+        waves_gpu = cuda.to_device(waves)
+        dag_creation_time = (time.perf_counter() - t0) * 1000
+        cuda.synchronize()
+        t0 = time.perf_counter()
+        h_level_data = sptrsv_h_level_analyze(
+            d_indptr, d_indices, waves_gpu, wave_start_loc, band_width=band_width)
+        coarsening_time = (time.perf_counter() - t0) * 1000
+        cuda.synchronize()
+        ms, min_ms, max_ms = triton.testing.do_bench(
+            lambda: sptrsv_parallel_csr_hlevel_solve(
+                d_data, d_indices, d_indptr, d_x, A.shape[0], A.shape[1], A_csr.nnz, h_level_data),
+            quantiles=quantiles, warmup=warmpup, rep=rep)
+
+    # ========================================================================
+    # LOAD-BALANCED HYBRID (kernels/sptrsv_loadbalanced.py)
+    # ========================================================================
+    if provider.startswith("csr-sf-loadbalanced-w"):
+        warps_per_block = int(provider.replace("csr-sf-loadbalanced-w", ""))
+        A_csr = A.tocsr()
+        d_data = cuda.to_device(A_csr.data)
+        d_indices = cuda.to_device(A_csr.indices)
+        d_indptr = cuda.to_device(A_csr.indptr)
+        d_x = cuda.to_device(np.zeros(n))
+        t0 = time.perf_counter()
+        dep_count = incoming_edge_csr_rows(A_csr)
+        succ_offsets, succ_indices = build_csr_successors(A_csr)
+        sf_schedule = prepare_csr_syncfree_hybrid_persistent_assets(
+            A_csr.indptr, A.shape[0]
+        )
+        sf_graph_solver = CsrSfLoadbalancedGraphSolver(
+            sf_schedule,
+            d_data,
+            d_indices,
+            d_indptr,
+            d_x,
+            A.shape[0],
+            dep_count,
+            succ_offsets,
+            succ_indices,
+            warps_per_block=warps_per_block,
+        )
+        dag_creation_time = (time.perf_counter() - t0) * 1000
+        cuda.synchronize()
+        ms, min_ms, max_ms = triton.testing.do_bench(
+            lambda: sf_graph_solver.run(dep_count),
+            quantiles=quantiles,
+            warmup=warmpup,
+            rep=rep,
+        )
+
+    if provider.startswith("csr-h-loadbalanced-bw"):
+        rest = provider[len("csr-h-loadbalanced-bw") :]
+        if "-w" in rest:
+            bw_str, w_str = rest.split("-w", 1)
+            band_width = int(bw_str)
+            warps_per_block = int(w_str)
+        else:
+            band_width = int(rest)
+            warps_per_block = loadbalanced_warps[0]
+        A_csr = A.tocsr()
+        d_data = cuda.to_device(A_csr.data)
+        d_indices = cuda.to_device(A_csr.indices)
+        d_indptr = cuda.to_device(A_csr.indptr)
+        d_x = cuda.to_device(np.zeros(n))
+        t0 = time.perf_counter()
+        wavefronts = compute_wavefront(A)
+        wave_start_loc, waves = compact_2d_list(wavefronts)
+        dag_creation_time = (time.perf_counter() - t0) * 1000
+        t0 = time.perf_counter()
+        lb_analysis = prepare_hlevel_loadbalanced_host(
+            A_csr.indptr.astype(np.int32, copy=False),
+            A_csr.indices.astype(np.int32, copy=False),
+            waves,
+            wave_start_loc,
+            band_width=band_width,
+        )
+        coarsening_time = (time.perf_counter() - t0) * 1000
+        cuda.synchronize()
+        ms, min_ms, max_ms = triton.testing.do_bench(
+            lambda: sptrsv_csr_hlevel_loadbalanced_solve(
+                d_data,
+                d_indices,
+                d_indptr,
+                d_x,
+                A.shape[0],
+                A.shape[1],
+                A_csr.nnz,
+                lb_analysis,
+                warps_per_block=warps_per_block,
+            ),
+            quantiles=quantiles,
+            warmup=warmpup,
+            rep=rep,
+        )
+
     # ========================================================================
     # WAVEFRONT - UNROLLED (mapping u1 + explicit unrolling)
     # ========================================================================

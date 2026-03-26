@@ -2,61 +2,39 @@
 cmake_minimum_required(VERSION 3.18)
 project(mycuda LANGUAGES CXX CUDA)
 
-# ----------------------------
-# CUDA architecture (compute_61 exactly like your nvcc)
-# ----------------------------
-set(CMAKE_CUDA_ARCHITECTURES 61)
-# ----------------------------
-# General settings
-# ----------------------------
+# GPU arch: pass -DCMAKE_CUDA_ARCHITECTURES=89 (or native) from the build script.
+if(NOT DEFINED CMAKE_CUDA_ARCHITECTURES OR CMAKE_CUDA_ARCHITECTURES STREQUAL "")
+    set(CMAKE_CUDA_ARCHITECTURES native)
+endif()
+
 set(CMAKE_CXX_STANDARD 14)
 set(CMAKE_CUDA_STANDARD 14)
-
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
-
-# ----------------------------
-# Compiler flags (match your nvcc command)
-# ----------------------------
 set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -O3 -w -m64")
 set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -Xptxas=-dlcm=cg")
 
-# Keep PTX (compute_61)
-set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} \
-    -gencode=arch=compute_61,code=sm_61 \
-    -gencode=arch=compute_61,code=compute_61")
+if(DEFINED ENV{CUDA_HOME} AND NOT "$ENV{CUDA_HOME}" STREQUAL "")
+    set(CUDAToolkit_ROOT "$ENV{CUDA_HOME}" CACHE PATH "CUDA root")
+elseif(EXISTS /usr/local/cuda)
+    set(CUDAToolkit_ROOT /usr/local/cuda CACHE PATH "CUDA root")
+endif()
 
-# ----------------------------
-# Find CUDA toolkit (10.2)
-# ----------------------------
-set(CUDA_TOOLKIT_ROOT_DIR /usr/local/cuda-10.2)
 find_package(CUDAToolkit REQUIRED)
+# With -DPython3_EXECUTABLE / INCLUDE_DIR / LIBRARY from build_external_modules.sh, venv + Ubuntu work without guesswork.
+find_package(Python3 REQUIRED COMPONENTS Interpreter Development.Module)
+find_package(pybind11 CONFIG REQUIRED)
 
-# ----------------------------
-# Find pybind11
-# ----------------------------
-find_package(pybind11 REQUIRED)
-
-# ----------------------------
-# Create Python module (shared library)
-# ----------------------------
 pybind11_add_module(yysptrsv_wrapper pybind_yysptrsv.cu)
 
-# Enable separable compilation (needed for kernels)
 set_target_properties(yysptrsv_wrapper PROPERTIES
         CUDA_SEPARABLE_COMPILATION ON
 )
 
-# ----------------------------
-# Include directories
-# ----------------------------
 target_include_directories(yysptrsv_wrapper PRIVATE
         ${CUDAToolkit_INCLUDE_DIRS}
 )
 
-# ----------------------------
-# Link libraries (match -lcusparse -lcudart)
-# ----------------------------
 target_link_libraries(yysptrsv_wrapper PRIVATE
         CUDA::cudart
         CUDA::cusparse

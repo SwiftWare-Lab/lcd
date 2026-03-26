@@ -7,9 +7,9 @@ set -euo pipefail
 # Configuration
 ROOT=${ROOT:-$(pwd)}
 PYTHON_BIN=${PYTHON_BIN:-python}
-MATRIX_LIST_FILE=${MATRIX_LIST_FILE:-$ROOT/matrix_list.txt}
-OUTPUT_DIR=${OUTPUT_DIR:-$ROOT/results_local}
-LOG_DIR=${LOG_DIR:-$OUTPUT_DIR/logs}
+MATRIX_LIST_FILE=${MATRIX_LIST_FILE:-$ROOT/matrix_list_3.txt}
+OUTPUT_DIR=${OUTPUT_DIR:-$ROOT/results_local_3}
+LOG_DIR=${LOG_DIR:-$OUTPUT_DIR/logs_3}
 
 # Create output directories
 mkdir -p "$OUTPUT_DIR"
@@ -28,14 +28,46 @@ echo "Output directory: $OUTPUT_DIR"
 echo "Log directory: $LOG_DIR"
 echo ""
 
-# Export environment variables for benchmark script
+# Benchmark configuration (override via environment variables)
 export SPTRSV_SKIP_CORRECTNESS=${SPTRSV_SKIP_CORRECTNESS:-1}
 export SPTRSV_QUICK=${SPTRSV_QUICK:-1}
 export SPTRSV_VERBOSE=${SPTRSV_VERBOSE:-1}
+export SPTRSV_WARMUP=${SPTRSV_WARMUP:-}    # empty = use benchmark default (2 if QUICK, 25 otherwise)
+export SPTRSV_REP=${SPTRSV_REP:-}          # empty = use benchmark default (5 if QUICK, 100 otherwise)
+export SPTRSV_PROVIDERS=${SPTRSV_PROVIDERS:-}  # empty = all; e.g. "cusparse,csc-sf-base"
+# Default: require cusparse-wrapper + yysptrsv (pybind .so next to slurm_sptrsv_benchmark.py).
+# Set to 1 only if those modules are unavailable (CSV will omit those baselines; stderr warns).
+export SPTRSV_SKIP_EXTERNAL=${SPTRSV_SKIP_EXTERNAL:-0}
+
+echo "Benchmark config:"
+echo "  SPTRSV_SKIP_CORRECTNESS=$SPTRSV_SKIP_CORRECTNESS"
+echo "  SPTRSV_QUICK=$SPTRSV_QUICK"
+echo "  SPTRSV_VERBOSE=$SPTRSV_VERBOSE"
+echo "  SPTRSV_SKIP_EXTERNAL=$SPTRSV_SKIP_EXTERNAL"
+[[ -n "$SPTRSV_WARMUP" ]] && echo "  SPTRSV_WARMUP=$SPTRSV_WARMUP"
+[[ -n "$SPTRSV_REP" ]] && echo "  SPTRSV_REP=$SPTRSV_REP"
+[[ -n "$SPTRSV_PROVIDERS" ]] && echo "  SPTRSV_PROVIDERS=$SPTRSV_PROVIDERS"
+echo ""
 
 # Optional: Set CUPY cache directory to avoid conflicts
 if [[ -n "${CUPY_CACHE_DIR:-}" ]]; then
   mkdir -p "$CUPY_CACHE_DIR"
+fi
+
+# Ensure YY / cuSPARSE-wrapper pybind modules exist (they are gitignored .so files).
+if [[ "${SPTRSV_SKIP_EXTERNAL:-0}" != "1" ]]; then
+  shopt -s nullglob
+  _yy_so=( "${ROOT}"/yysptrsv_wrapper*.so )
+  _cs_so=( "${ROOT}"/cusparse_sptrsv*.so )
+  shopt -u nullglob
+  if [[ ${#_yy_so[@]} -eq 0 || ${#_cs_so[@]} -eq 0 ]]; then
+    echo "External baseline .so modules missing under $ROOT; running build_external_modules.sh ..."
+    export PYTHON_BIN
+    if ! bash "${ROOT}/build_external_modules.sh"; then
+      echo "ERROR: build_external_modules.sh failed. Install cmake, CUDA, pybind11, or set SPTRSV_SKIP_EXTERNAL=1." >&2
+      exit 1
+    fi
+  fi
 fi
 
 # Track results
