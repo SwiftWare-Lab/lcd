@@ -49,6 +49,8 @@ from kernels.sptrsv_hlevel import (
     sptrsv_numba_csr_syncfree_persistent_graph, sptrsv_numba_csr_syncfree_persistent_solve,
     sptrsv_numba_csc_syncfree_persistent_graph, sptrsv_numba_csc_syncfree_persistent_solve,
 )
+from kernels.sptrsv_warpspecialized import bench_sptrsv_warpspecialized_cuda
+from kernels.sptrsv_warpspecialized_numba import bench_sptrsv_warpspecialized_numba
 
 import warnings
 from numba.core.errors import NumbaPerformanceWarning
@@ -227,6 +229,8 @@ method_list.extend([
     "cusparse",
     "cusparse-wrapper",
     "yysptrsv",
+    "sptrsv_warpspecialized_cuda",
+    "sptrsv_warpspecialized_numba",
     "csc-wf-base",
     "csc-sf-base",
     "csr-wf-base",
@@ -1501,6 +1505,18 @@ def benchmark(matrices, provider):
         A_csr = A.tocsr()
         A_csr.sort_indices()
         ms, min_ms, max_ms = bench_yysptrsv(A_csr, rep=rep, warmup=warmpup, border=10)
+    if provider == "sptrsv_warpspecialized_cuda":
+        A_csr = A.tocsr()
+        A_csr.sort_indices()
+        ms, min_ms, max_ms = bench_sptrsv_warpspecialized_cuda(
+            A_csr, rep=rep, warmup=warmpup, border=10
+        )
+    if provider == "sptrsv_warpspecialized_numba":
+        A_csr = A.tocsr()
+        A_csr.sort_indices()
+        ms, min_ms, max_ms = bench_sptrsv_warpspecialized_numba(
+            A_csr, rep=rep, warmup=warmpup, border=10
+        )
     perf = lambda ms: (A.shape[0] + 2 * A.nnz) / (ms * 1e-3) / 1e9
     #print(f"seconds: {ms}")
     #print(f"max: {perf(max_ms)}, min: {perf(min_ms)}, median: {perf(ms)}")
