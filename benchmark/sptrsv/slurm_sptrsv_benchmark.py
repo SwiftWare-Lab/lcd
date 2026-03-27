@@ -151,10 +151,10 @@ method_list.extend([
     *((["cusparse-wrapper", "yysptrsv"]) if _HAS_EXTERNAL else []),
     "sptrsv_warpspecialized_cuda",
     "sptrsv_warpspecialized_numba",
-    # "csc-wf-base",
-    # "csc-sf-base",
-    # "csr-wf-base",
-    # "csr-sf-base",
+    "csc-wf-base",
+    "csc-sf-base",
+    "csr-wf-base",
+    "csr-sf-base",
 ])
 
 # # Thread-parallel kernels (1 thread / row or chain; see kernels/sptrsv_parallel.py)
@@ -178,98 +178,98 @@ method_list.extend([
 #     for _w in loadbalanced_warps:
 #         method_list.append(f"csr-h-loadbalanced-bw{_bw}-w{_w}")
 
-# # ----------------------------------------------------------------------------
-# # TEST CANDIDATES - WAVEFRONT - UNROLLED
-# # ----------------------------------------------------------------------------
-# # Unroll factor 1 (mapping variants)
-# for threads in thread_counts:
-#     method_list.extend([
-#         f"csc-wf-u1-t{threads}",
-#         f"csr-wf-u1-t{threads}",
-#     ])
+# ----------------------------------------------------------------------------
+# TEST CANDIDATES - WAVEFRONT - UNROLLED
+# ----------------------------------------------------------------------------
+# Unroll factor 1 (mapping variants)
+for threads in thread_counts:
+    method_list.extend([
+        f"csc-wf-u1-t{threads}",
+        f"csr-wf-u1-t{threads}",
+    ])
 
-# # Explicit unrolling with factors 4-64
-# for factor in unroll_factors:
-#     for threads in thread_counts:
-#         method_list.extend([
-#             f"csc-wf-u{factor}-t{threads}",
-#             f"csr-wf-u{factor}-t{threads}",
-#         ])
+# Explicit unrolling with factors 4-64
+for factor in unroll_factors:
+    for threads in thread_counts:
+        method_list.extend([
+            f"csc-wf-u{factor}-t{threads}",
+            f"csr-wf-u{factor}-t{threads}",
+        ])
 
-# # ----------------------------------------------------------------------------
-# # TEST CANDIDATES - WAVEFRONT - COARSENED
-# # ----------------------------------------------------------------------------
-# # Block coarsening (merge dependency levels)
-# for cf in block_coarsening_factors:
-#     method_list.extend([
-#         f"csc-wf-coarse-block-wc{cf}",
-#         f"csr-wf-coarse-block-wc{cf}",
-#     ])
+# ----------------------------------------------------------------------------
+# TEST CANDIDATES - WAVEFRONT - COARSENED
+# ----------------------------------------------------------------------------
+# Block coarsening (merge dependency levels)
+for cf in block_coarsening_factors:
+    method_list.extend([
+        f"csc-wf-coarse-block-wc{cf}",
+        f"csr-wf-coarse-block-wc{cf}",
+    ])
 
-# # Thread coarsening
-# for threads in thread_counts:
-#     method_list.extend([
-#         f"csc-wf-coarse-thread-tc{threads}",
-#         f"csr-wf-coarse-thread-tc{threads}",
-#     ])
+# Thread coarsening
+for threads in thread_counts:
+    method_list.extend([
+        f"csc-wf-coarse-thread-tc{threads}",
+        f"csr-wf-coarse-thread-tc{threads}",
+    ])
 
-# # Combined 3-level coarsening (wavefront + warp + thread)
-# for cf in wavefront_coarsening_factors:
-#     for threads in thread_counts:
-#         warps = threads // 32
-#         for tcf in thread_coarsening_factors:
-#             method_list.extend([
-#                 f"csc-wf-coarse-comb-wc{cf}-w{warps}-tc{tcf}",
-#                 f"csr-wf-coarse-comb-wc{cf}-w{warps}-tc{tcf}",
-#             ])
+# Combined 3-level coarsening (wavefront + warp + thread)
+for cf in wavefront_coarsening_factors:
+    for threads in thread_counts:
+        warps = threads // 32
+        for tcf in thread_coarsening_factors:
+            method_list.extend([
+                f"csc-wf-coarse-comb-wc{cf}-w{warps}-tc{tcf}",
+                f"csr-wf-coarse-comb-wc{cf}-w{warps}-tc{tcf}",
+            ])
 
-# # ----------------------------------------------------------------------------
-# # TEST CANDIDATES - SYNC-FREE - UNROLLED
-# # ----------------------------------------------------------------------------
-# # Unroll factor 1 (mapping variants)
-# for threads in thread_counts:
-#     method_list.extend([
-#         f"csc-sf-u1-t{threads}",
-#         f"csr-sf-u1-t{threads}",
-#     ])
+# ----------------------------------------------------------------------------
+# TEST CANDIDATES - SYNC-FREE - UNROLLED
+# ----------------------------------------------------------------------------
+# Unroll factor 1 (mapping variants)
+for threads in thread_counts:
+    method_list.extend([
+        f"csc-sf-u1-t{threads}",
+        f"csr-sf-u1-t{threads}",
+    ])
 
-# # Explicit unrolling with factors 4-64
-# for factor in unroll_factors:
-#     for threads in thread_counts:
-#         method_list.extend([
-#             f"csc-sf-u{factor}-t{threads}",
-#             f"csr-sf-u{factor}-t{threads}",
-#         ])
+# Explicit unrolling with factors 4-64
+for factor in unroll_factors:
+    for threads in thread_counts:
+        method_list.extend([
+            f"csc-sf-u{factor}-t{threads}",
+            f"csr-sf-u{factor}-t{threads}",
+        ])
 
-# # ----------------------------------------------------------------------------
-# # TEST CANDIDATES - SYNC-FREE - COARSENED
-# # ----------------------------------------------------------------------------
-# # Block coarsening
-# for bcf in sync_free_block_factors:
-#     method_list.extend([
-#         f"csc-sf-coarse-block-bc{bcf}",
-#         f"csr-sf-coarse-block-bc{bcf}",
-#     ])
+# ----------------------------------------------------------------------------
+# TEST CANDIDATES - SYNC-FREE - COARSENED
+# ----------------------------------------------------------------------------
+# Block coarsening
+for bcf in sync_free_block_factors:
+    method_list.extend([
+        f"csc-sf-coarse-block-bc{bcf}",
+        f"csr-sf-coarse-block-bc{bcf}",
+    ])
 
-# # Thread coarsening
-# for threads in thread_counts:
-#     method_list.extend([
-#         f"csc-sf-coarse-thread-tc{threads}",
-#         f"csr-sf-coarse-thread-tc{threads}",
-#     ])
+# Thread coarsening
+for threads in thread_counts:
+    method_list.extend([
+        f"csc-sf-coarse-thread-tc{threads}",
+        f"csr-sf-coarse-thread-tc{threads}",
+    ])
 
-# # ----------------------------------------------------------------------------
-# # TEST CANDIDATES - H-LEVEL
-# # ----------------------------------------------------------------------------
-# for bw in band_widths:
-#     method_list.extend([
-#         # f"csc-h-bw{bw}",
-#         # f"csr-h-bw{bw}",
-#         # f"csc-h-sf-bw{bw}",
-#         # f"csr-h-sf-bw{bw}",
-#         f"csc-h-sf-persist-bw{bw}",
-#         f"csr-h-sf-persist-bw{bw}",
-#         ])
+# ----------------------------------------------------------------------------
+# TEST CANDIDATES - H-LEVEL
+# ----------------------------------------------------------------------------
+for bw in band_widths:
+    method_list.extend([
+        # f"csc-h-bw{bw}",
+        # f"csr-h-bw{bw}",
+        # f"csc-h-sf-bw{bw}",
+        # f"csr-h-sf-bw{bw}",
+        f"csc-h-sf-persist-bw{bw}",
+        f"csr-h-sf-persist-bw{bw}",
+        ])
 
 provider_whitelist = None
 if PROVIDER_FILTER:
