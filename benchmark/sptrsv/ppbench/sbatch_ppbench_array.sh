@@ -14,8 +14,8 @@ module load gcc
 
 set -euo pipefail
 
-PPBENCH_DIR="$(cd "$(dirname "$0")" && pwd)"
 ROOT=${ROOT:-${SLURM_SUBMIT_DIR:-$PWD}}
+PPBENCH_DIR=${PPBENCH_DIR:-$ROOT}
 
 MATRIX_LIST_FILE=${1:-matrix_list_orig.txt}
 MATRIX_ROOT=${2:-}
@@ -36,6 +36,12 @@ export PYTHON_BIN="${PYTHON_BIN:-python}"
 
 if ! "${PYTHON_BIN}" -c "import numpy, scipy, numba" 2>/dev/null; then
   echo "ERROR: numpy/scipy/numba not available in $(${PYTHON_BIN} -c 'import sys; print(sys.executable)')" >&2
+  exit 1
+fi
+
+if [[ ! -f "${PPBENCH_DIR}/benchmark_numba_preprocess.py" ]]; then
+  echo "ERROR: benchmark_numba_preprocess.py not found under PPBENCH_DIR=${PPBENCH_DIR}" >&2
+  echo "  Submit from the ppbench directory or set PPBENCH_DIR explicitly." >&2
   exit 1
 fi
 

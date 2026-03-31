@@ -40,7 +40,15 @@ python benchmark_numba_preprocess.py \
 ## Array run
 
 ```bash
+cd ppbench
 sbatch sbatch_ppbench_array.sh matrix_list_orig.txt /path/to/matrices
+```
+
+The launcher assumes `benchmark_numba_preprocess.py` lives in the submit directory.
+If you submit from somewhere else, set `PPBENCH_DIR` explicitly:
+
+```bash
+PPBENCH_DIR=/path/to/ppbench sbatch /path/to/ppbench/sbatch_ppbench_array.sh matrix_list_orig.txt /path/to/matrices
 ```
 
 Useful environment variables:
