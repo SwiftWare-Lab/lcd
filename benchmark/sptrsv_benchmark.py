@@ -24,10 +24,9 @@ print(f"Using GPU: {device.name}")
 print(f"Compute Capability: {device.compute_capability}")
 
 
-
 mtx_list = [
-"/home/mad29/projects/testdata/matrices/1138_bus.mtx",
-"/home/mad29/projects/testdata/matrices/2cubes_sphere.mtx",
+"/home/salehm32/projects/gpu-backend/data/gpu-backend-data/1138_bus/1138_bus.mtx",
+# "/home/salehm32/projects/gpu-backend/data/gpu-backend-data/1138_bus.mtx",
 ]
 method_list = [
     "triton", "triton-sync-free", "triton-csc-mapping",
@@ -133,10 +132,8 @@ def correctness_test():
         waves_gpu = cuda.to_device(waves)
         y_numba_gpu = sptrsv_numba_csc(d_data, d_indices, d_indptr, d_b, A.shape[0], A.shape[1], A.nnz, wave_start_loc, waves_gpu)
         y_numba_cpu = y_numba_gpu.copy_to_host()
-
         #d_in_edges = cuda.to_device(in_edge)
         y_numba_gpu_sync_free = sptrsv_numba_csc_sync_free(d_data, d_indices, d_indptr, d_b, A.shape[0], A.shape[1], A.nnz, in_edge)
-
         # dep_count_csc1 = (A.indptr[1:] - A.indptr[:-1]).astype(np.int32)
         # dep_count_csc1[dep_count_csc1 == 0] = 1
         # y_numba_gpu_sync_free = sptrsv_numba_csc_sync_free(

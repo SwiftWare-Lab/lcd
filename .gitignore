@@ -166,3 +166,9 @@ cython_debug/
 # datasets
 code_gen/cfmtx_matrices/
 code_gen/mtx_matrices/
+*.csv
+*.png 
+*.html
+data/
+.agents/
+.codex/

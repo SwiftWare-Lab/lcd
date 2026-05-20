@@ -4,7 +4,6 @@ from numba import njit
 import sys
 import os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
-from compiler.loop_carried_compiler import MyCompiler
 
 import numpy as np
 from scipy.sparse.linalg import spsolve_triangular  # CPU sparse solver
