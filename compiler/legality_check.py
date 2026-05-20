@@ -89,7 +89,15 @@ def extract_fusion_illegality_constraint(targeted_iters: tuple[str, str], depend
     for dep in dependences:
         # assert dep.to_si.occurs_in(i2) and dep.from_si.occurs_in(i1), "Dependences should be defined between given loops only"
         new_sched = transform_sched(dep.from_si, dep.to_si, i1, i2)
-        new_dep = DataDependence(dep.from_si, new_sched, dep.data, dep.premises, dep.type)
+        new_dep = DataDependence(
+            dep.from_si,
+            new_sched,
+            dep.data,
+            dep.premises,
+            dep.type,
+            from_domain=dep.from_domain,
+            to_domain=dep.to_domain,
+        )
         fusion_constraint_for_dependence = extract_fusion_constraint_for_dependence(new_dep)
         condition_stmt, known_funcs_new = dep.get_condition_statement_sympy()
         #TODO: Change how this behaves
@@ -140,18 +148,19 @@ def extract_latest_write_access_in_loop(loop_node):
 
 # Works based on iter var to node data map.
 def extract_raw_data_dependencies(node_data, last_write_accesses):
-    schedule_to_reads = {}
-    schedule_to_write = {}
+    schedule_to_read_node = {}
+    schedule_to_write_node = {}
     dependences = []
     for cur_node in node_data.values():
         if isinstance(cur_node, AssignNode):
-            schedule_to_reads[cur_node.schedule] = cur_node.read_accesses
+            schedule_to_read_node[cur_node.schedule] = cur_node
     for last_write_access in last_write_accesses.values():
         for s_node in last_write_access:
-            schedule_to_write[s_node.schedule] = s_node.write_access
-    for ri, r_accesses in schedule_to_reads.items():
-        for wi, w_access in schedule_to_write.items():
-            for r_access in r_accesses:
+            schedule_to_write_node[s_node.schedule] = s_node
+    for ri, read_node in schedule_to_read_node.items():
+        for wi, write_node in schedule_to_write_node.items():
+            for r_access in read_node.read_accesses:
+                w_access = write_node.write_access
                 r_arr = r_access.get_data_array()
                 w_arr = w_access.get_data_array()
                 r_index = r_access.get_index()
@@ -160,7 +169,15 @@ def extract_raw_data_dependencies(node_data, last_write_accesses):
                     #TODO: Fix for multiple dimension arrays
                     if r_index != w_index or isinstance(r_index[0], Access):
                         premises = [Equality(w_index[i], r_index[i]) for i in range(len(r_index))]
-                        raw_dependence = DataDependence(wi, ri, r_arr, premises, 'RAW')
+                        raw_dependence = DataDependence(
+                            wi,
+                            ri,
+                            r_arr,
+                            premises,
+                            'RAW',
+                            from_domain=deepcopy(write_node.loop_domain + write_node.domain),
+                            to_domain=deepcopy(read_node.loop_domain + read_node.domain),
+                        )
                         dependences.append(raw_dependence)
     return dependences
 
@@ -229,6 +246,10 @@ def subscript_dependence(dependence):
     for j, s in enumerate(to_sched.schedule):
         if not s.isnumeric():
             new_to_sched.schedule[j] = s + "2"
+    for premise in dependence.from_domain:
+        premise.subscript("1")
+    for premise in dependence.to_domain:
+        premise.subscript("2")
     for premise in dependence.premises:
         premise.subscript()
     dependence.from_si = new_from_sched

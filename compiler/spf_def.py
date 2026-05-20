@@ -2,22 +2,88 @@ from copy import deepcopy
 
 import sympy
 
-class DependencePremise:
+
+def _is_access(value):
+    from compiler.spf_raising import Access
+
+    return isinstance(value, Access)
+
+
+def _is_expression(value):
+    from compiler.spf_raising import Expression
+
+    return isinstance(value, Expression)
+
+
+def _subscript_value(value, suffix):
+    if _is_access(value):
+        return value.subscript_index(suffix)
+    if _is_expression(value):
+        return value.subscript(suffix)
+    if isinstance(value, str) and value.isidentifier():
+        return value + suffix
+    return value
+
+
+def _sympy_value(value):
+    known_funcs = set()
+    if _is_access(value):
+        funcs, expr = value.get_sympy_expr()
+        known_funcs.update(funcs)
+        return expr, known_funcs
+    if _is_expression(value):
+        return value.get_sympy_expr(), known_funcs
+    if isinstance(value, str):
+        if value.isnumeric():
+            return int(value), known_funcs
+        return sympy.Symbol(value.replace(".", "")), known_funcs
+    return value, known_funcs
+
+
+def _collect_read_accesses(value, reads):
+    if _is_access(value):
+        reads.append(value)
+        return
+    if _is_expression(value):
+        for element in value.elements:
+            _collect_read_accesses(element, reads)
+
+
+def _replace_value(value, replacements):
+    if _is_access(value):
+        return type(value)(_replace_value(value.var, replacements), _replace_value(value.index, replacements))
+    if _is_expression(value):
+        return type(value)([_replace_value(element, replacements) for element in value.elements])
+    if isinstance(value, str) and value in replacements:
+        return replacements[value]
+    return value
+
+
+class Premise:
+    def subscript(self, suffix=None):
+        raise NotImplementedError("Subclasses must implement subscript.")
+
+    def get_sympy_expression(self):
+        raise NotImplementedError("Subclasses must implement get_sympy_expression.")
+
+    def read_accesses(self):
+        return []
+
+    def copy(self):
+        return deepcopy(self)
+
+
+class DependencePremise(Premise):
     def __init__(self, left, right):
         self.left = left
         self.right = right
 
-    def subscript(self):
-        if isinstance(self.left, Access):
-            self.left = self.left.subscript_index("1")
-        else:
-            self.left = str(self.left) + "1"
-        if isinstance(self.right, Access):
-            self.right = self.right.subscript_index("2")
-        else:
-            self.right = str(self.right) + "2"
-        # return DependencePremise(left, right)
-
+    def subscript(self, suffix=None):
+        left_suffix = suffix or "1"
+        right_suffix = suffix or "2"
+        self.left = _subscript_value(self.left, left_suffix)
+        self.right = _subscript_value(self.right, right_suffix)
+        return self
 
     def __eq__(self, other):
         if type(other) == type(self):
@@ -29,18 +95,16 @@ class DependencePremise:
         raise NotImplementedError("This functionality is only implemented for subclass objects.")
 
     def get_sympy_expressions(self, func):
-        known_funcs = set()
-        if isinstance(self.left, Access):
-            left_sym = self.left.get_sympy_expr()[1]
-            known_funcs.update(self.left.get_sympy_expr()[0])
-        else:
-            left_sym = sympy.Symbol(str(self.left))
-        if isinstance(self.right, Access):
-            right_sym = self.right.get_sympy_expr()[1]
-            known_funcs.update(self.right.get_sympy_expr()[0])
-        else:
-            right_sym = sympy.Symbol(str(self.right))
+        left_sym, known_funcs = _sympy_value(self.left)
+        right_sym, right_funcs = _sympy_value(self.right)
+        known_funcs.update(right_funcs)
         return func(left_sym, right_sym), known_funcs
+
+    def read_accesses(self):
+        reads = []
+        _collect_read_accesses(self.left, reads)
+        _collect_read_accesses(self.right, reads)
+        return reads
 
     def __repr__(self):
         raise NotImplementedError("This functionality is only implemented for subclass objects.")
@@ -57,7 +121,7 @@ class Equality(DependencePremise):
 
     def __eq__(self, other):
         if type(other) == type(self):
-            return (other.left == self.left and other.right == self.right) and \
+            return (other.left == self.left and other.right == self.right) or \
                 (other.left == self.right and other.right == self.left)
         else:
             return False
@@ -69,6 +133,7 @@ class GreaterThanOrEqual(DependencePremise):
     def __repr__(self):
         return str(self.left) + ' >= ' + str(self.right)
 
+
 class GreaterThan(DependencePremise):
     def get_sympy_expression(self):
         return self.get_sympy_expressions(sympy.Gt)
@@ -76,52 +141,232 @@ class GreaterThan(DependencePremise):
     def __repr__(self):
         return str(self.left) + ' > ' + str(self.right)
 
-class LoopBound:
-    def __init__(self, start, end):
-        self.start = start
-        self.end = end
 
-    def subscript_iteration_vars(self, subscript):
-        if isinstance(self.start, Expression):
-            new_start = self.start.subscript(subscript)
-        elif isinstance(self.start, Access):
-            new_start = self.start.subscript_index(subscript)
-        else:
-            new_start = self.start
-        if isinstance(self.end, Expression):
-            new_end = self.end.subscript(subscript)
-        elif isinstance(self.end, Access):
-            new_end = self.end.subscript_index(subscript)
-        else:
-            new_end = self.end
-        return LoopBound(new_start, new_end)
-
-    def get_sympy_expr(self, iter_var):
-        f1 = []
-        f2 = []
-        consts = []
-        if isinstance(self.start, Access):
-            f1, start = self.start.get_sympy_expr()
-        elif isinstance(self.start, Expression):
-            start = self.start.get_sympy_expr()
-        elif self.start.isnumeric():
-            start = int(self.start)
-        else:
-            start = sympy.Symbol(self.start)
-            consts.append(start)
-        if isinstance(self.end, Access):
-            f2, end = self.end.get_sympy_expr()
-        elif isinstance(self.end, Expression):
-            end = self.end.get_sympy_expr()
-        elif self.end.isnumeric():
-            end = int(self.end)
-        else:
-            end = sympy.Symbol(self.end)
-            consts.append(end)
-        return consts, f1 + f2, sympy.And(sympy.GreaterThan(sympy.Symbol(iter_var), start), sympy.Lt(sympy.Symbol(iter_var), end))
+class LessThanOrEqual(DependencePremise):
+    def get_sympy_expression(self):
+        return self.get_sympy_expressions(sympy.LessThan)
 
     def __repr__(self):
-        return '(' + str(self.start) + ', ' + str(self.end) + ')'
+        return str(self.left) + ' <= ' + str(self.right)
+
+
+class LessThan(DependencePremise):
+    def get_sympy_expression(self):
+        return self.get_sympy_expressions(sympy.Lt)
+
+    def __repr__(self):
+        return str(self.left) + ' < ' + str(self.right)
+
+
+class NotEqual(DependencePremise):
+    def get_sympy_expression(self):
+        return self.get_sympy_expressions(sympy.Ne)
+
+    def __repr__(self):
+        return str(self.left) + ' != ' + str(self.right)
+
+
+class ExpressionPremise(Premise):
+    def __init__(self, condition):
+        self.condition = condition
+
+    def subscript(self, suffix=None):
+        if suffix is not None:
+            self.condition = _subscript_value(self.condition, suffix)
+        return self
+
+    def get_sympy_expression(self):
+        return _sympy_value(self.condition)
+
+    def read_accesses(self):
+        reads = []
+        _collect_read_accesses(self.condition, reads)
+        return reads
+
+    def __repr__(self):
+        return str(self.condition)
+
+    def __str__(self):
+        return self.__repr__()
+
+
+class AndPremise(Premise):
+    def __init__(self, premises):
+        self.premises = premises
+
+    def subscript(self, suffix=None):
+        for premise in self.premises:
+            premise.subscript(suffix)
+        return self
+
+    def get_sympy_expression(self):
+        condition = sympy.true
+        known_funcs = set()
+        for premise in self.premises:
+            premise_expr, premise_funcs = premise.get_sympy_expression()
+            known_funcs.update(premise_funcs)
+            condition = sympy.And(condition, premise_expr)
+        return condition, known_funcs
+
+    def read_accesses(self):
+        reads = []
+        for premise in self.premises:
+            reads.extend(premise.read_accesses())
+        return reads
+
+    def __repr__(self):
+        return " and ".join(map(str, self.premises))
+
+    def __str__(self):
+        return self.__repr__()
+
+
+class OrPremise(Premise):
+    def __init__(self, premises):
+        self.premises = premises
+
+    def subscript(self, suffix=None):
+        for premise in self.premises:
+            premise.subscript(suffix)
+        return self
+
+    def get_sympy_expression(self):
+        condition = sympy.false
+        known_funcs = set()
+        for premise in self.premises:
+            premise_expr, premise_funcs = premise.get_sympy_expression()
+            known_funcs.update(premise_funcs)
+            condition = sympy.Or(condition, premise_expr)
+        return condition, known_funcs
+
+    def read_accesses(self):
+        reads = []
+        for premise in self.premises:
+            reads.extend(premise.read_accesses())
+        return reads
+
+    def __repr__(self):
+        return " or ".join(map(str, self.premises))
+
+    def __str__(self):
+        return self.__repr__()
+
+
+class NotPremise(Premise):
+    def __init__(self, premise):
+        self.premise = premise
+
+    def subscript(self, suffix=None):
+        self.premise.subscript(suffix)
+        return self
+
+    def get_sympy_expression(self):
+        premise_expr, known_funcs = self.premise.get_sympy_expression()
+        return sympy.Not(premise_expr), known_funcs
+
+    def read_accesses(self):
+        return self.premise.read_accesses()
+
+    def __repr__(self):
+        return "not (" + str(self.premise) + ")"
+
+    def __str__(self):
+        return self.__repr__()
+
+
+class SubstitutePremise(Premise):
+    def __init__(self, premise, replacements):
+        self.premise = premise
+        self.replacements = replacements
+
+    def subscript(self, suffix=None):
+        self.premise.subscript(suffix)
+        if suffix is not None:
+            self.replacements = {
+                _subscript_value(source, suffix): _subscript_value(target, suffix)
+                for source, target in self.replacements.items()
+            }
+        return self
+
+    def get_sympy_expression(self):
+        premise_expr, known_funcs = self.premise.get_sympy_expression()
+        sympy_replacements = {}
+        for source, target in self.replacements.items():
+            source_sym, source_funcs = _sympy_value(source)
+            target_sym, target_funcs = _sympy_value(target)
+            known_funcs.update(source_funcs)
+            known_funcs.update(target_funcs)
+            sympy_replacements[source_sym] = target_sym
+        return premise_expr.subs(sympy_replacements), known_funcs
+
+    def read_accesses(self):
+        substituted = self.copy()
+        substituted.premise = _replace_premise_values(substituted.premise, substituted.replacements)
+        return substituted.premise.read_accesses()
+
+    def __repr__(self):
+        mapping = ", ".join(f"{source} -> {target}" for source, target in self.replacements.items())
+        return str(self.premise) + " with " + mapping
+
+    def __str__(self):
+        return self.__repr__()
+
+
+def _replace_premise_values(premise, replacements):
+    if isinstance(premise, DependencePremise):
+        premise.left = _replace_value(premise.left, replacements)
+        premise.right = _replace_value(premise.right, replacements)
+    elif isinstance(premise, ExpressionPremise):
+        premise.condition = _replace_value(premise.condition, replacements)
+    elif isinstance(premise, (AndPremise, OrPremise)):
+        premise.premises = [_replace_premise_values(child, replacements) for child in premise.premises]
+    elif isinstance(premise, NotPremise):
+        premise.premise = _replace_premise_values(premise.premise, replacements)
+    elif isinstance(premise, ForAllPremise):
+        premise.bounds = [_replace_premise_values(bound, replacements) for bound in premise.bounds]
+        premise.premise = _replace_premise_values(premise.premise, replacements)
+    elif isinstance(premise, SubstitutePremise):
+        premise.premise = _replace_premise_values(premise.premise, replacements)
+    return premise
+
+
+class ForAllPremise(Premise):
+    def __init__(self, quantified_var, bounds, premise):
+        self.quantified_var = quantified_var
+        self.bounds = bounds
+        self.premise = premise
+
+    def subscript(self, suffix=None):
+        if suffix is not None:
+            self.quantified_var = _subscript_value(self.quantified_var, suffix)
+            self.bounds = [bound.copy().subscript(suffix) for bound in self.bounds]
+            self.premise.subscript(suffix)
+        return self
+
+    def get_sympy_expression(self):
+        body, known_funcs = AndPremise(self.bounds + [self.premise]).get_sympy_expression()
+        if not hasattr(sympy, "ForAll"):
+            raise NotImplementedError("The installed SymPy does not expose quantified formulas.")
+        return sympy.ForAll(sympy.Symbol(self.quantified_var), body), known_funcs
+
+    def read_accesses(self):
+        reads = []
+        for bound in self.bounds:
+            reads.extend(bound.read_accesses())
+        reads.extend(self.premise.read_accesses())
+        return reads
+
+    def __repr__(self):
+        bounds = " and ".join(map(str, self.bounds))
+        return "forall " + self.quantified_var + ": " + bounds + " => " + str(self.premise)
+
+    def __str__(self):
+        return self.__repr__()
+
+
+ConditionConstraint = ExpressionPremise
+AllOfConstraint = AndPremise
+NotConstraint = NotPremise
 
 
 class Schedule:
@@ -149,100 +394,16 @@ class Schedule:
         return Schedule(new_sched)
 
 
-class Access:
-    def __init__(self, var, index):
-        self.var = var
-        self.index = index
-
-    def get_sympy_expr(self):
-        func = self.get_data_array()
-        funcs = [func]
-        args_sympy = self.get_index_sympy_expr()
-        args = args_sympy[1]
-        funcs += [f for f in self.get_index_sympy_expr()[0] if f is not None]
-        func_sym = sympy.Function(func)(args)
-        return funcs, func_sym
-
-    def subscript_index(self, subscript):
-        if isinstance(self.index, Access):
-            return Access(self.index.var, self.index.subscript_index(subscript))
-        elif isinstance(self.index, Expression):
-            return Access(self.var, self.index.subscript(subscript))
-        elif self.index.isalpha():
-            return Access(self.var, self.index+subscript)
-        else:
-            return Access(self.var, self.index)
-
-
-    def __eq__(self, other):
-        if isinstance(other, Access):
-            if type(self.index) is list and type(other.index) is list:
-                self.index.sort()
-                other.index.sort()
-            return self.var == other.var and self.index == other.index
-        return False
-
-    def __str__(self):
-        return f"{self.var}[{self.index}]" if self.index is not None else self.var
-
-    def __hash__(self):
-        return hash(str(self))
-
-    def __repr__(self):
-        return str(self)
-
-    def get_data_array(self):
-        if isinstance(self.var, Access):
-            return self.var.get_data_array()
-        else:
-            return self.var
-
-    def get_index(self):
-        if isinstance(self.var, Access):
-            return self.var.get_index() + (self.index,)
-        else:
-            return (self.index,)
-
-    def get_index_sympy_expr(self):
-        if isinstance(self.index, Access):
-            return self.index.get_sympy_expr()
-        elif isinstance(self.index, Expression):
-            return [], self.index.get_sympy_expr()
-        else:
-            return [], sympy.Symbol(self.index.replace(".", ""))
-
-
-class Expression:
-    def __init__(self, elements):
-        self.elements = elements
-
-    def __str__(self):
-        return ' '.join(list(map(str, self.elements)))
-
-    def __repr__(self):
-        return str(self)
-
-    def get_sympy_expr(self):
-        return sympy.parse_expr(str(self).replace(".", "").replace('[', '(').replace(']', ')'))
-
-    def subscript(self, subscript):
-        new_expr = Expression(deepcopy(self.elements))
-        for i, e in enumerate(new_expr.elements):
-            if isinstance(e, Access):
-                new_expr.elements[i] = e.subscript_index(subscript)
-            elif e.isalpha():
-                new_expr.elements[i] = e + subscript
-        return new_expr
-
-
 class DataDependence:
-    def __init__(self, from_si, to_si, data, initial_premises, type):
+    def __init__(self, from_si, to_si, data, initial_premises, type, from_domain=None, to_domain=None):
         self.from_si = from_si
         self.to_si = to_si
         self.data = data
         # self.from_ind = from_ind
         # self.to_ind = to_ind
         self.premises = initial_premises
+        self.from_domain = from_domain or []
+        self.to_domain = to_domain or []
         self.type = type
         # assert len(from_ind) == len(to_ind)
 
@@ -252,56 +413,19 @@ class DataDependence:
     def has_premise(self, condition):
         return condition in self.premises
 
+    def all_premises(self):
+        return self.from_domain + self.to_domain + self.premises
+
     def get_condition_statement_sympy(self):
         condition = sympy.true
         known_funcs = set()
-        for premise in self.premises:
-            premise_expr = premise.get_sympy_expression()[0]
-            known_funcs.update(premise.get_sympy_expression()[1])
+        for premise in self.all_premises():
+            premise_expr, premise_known_funcs = premise.get_sympy_expression()
+            known_funcs.update(premise_known_funcs)
             condition = sympy.And(premise_expr, condition)
         return condition, known_funcs
 
     def __repr__(self):
-        condition = ' and '.join(map(str, self.premises))
+        condition = ' and '.join(map(str, self.all_premises()))
         return str(self.from_si) + '->' + str(
             self.to_si) + '\ndata: `' + self.data.__repr__() + '`\ncondition: ' + condition + '\ntype: ' + self.type
-
-
-class SPFNode:
-    def __init__(self, node_id):
-        self.id = node_id
-        self.children = []
-        self.schedule = None
-
-    def add_child(self, node):
-        self.children.append(node)
-
-    def __repr__(self):
-        return self.id
-
-    def __str__(self):
-        return self.id
-
-
-class LoopNode(SPFNode):
-    def __init__(self, node_id, iter_var, loop_bound):
-        super().__init__(node_id)
-        self.iter_var = iter_var
-        self.bound = loop_bound
-        # print(loop_bound)
-
-
-class AssignNode(SPFNode):
-    def __init__(self, node_id, target, value):
-        super().__init__(node_id)
-        self.target = target
-        self.value = value
-        self.read_accesses = []
-        self.write_access = None
-
-    def add_read_access(self, read_access):
-        self.read_accesses.append(read_access)
-
-    def __str__(self):
-        return (self.id + "\n - write: " + str(self.write_access) +
-                "\n - reads: \n" + '\n'.join(map(str, self.read_accesses)))

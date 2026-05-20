@@ -1,5 +1,5 @@
 import ast
-from compiler.lcd_def import *
+from compiler.lcd.lcd_def import *
 
 
 class LCDBuilder(ast.NodeVisitor):
