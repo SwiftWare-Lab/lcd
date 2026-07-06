@@ -15,12 +15,13 @@ def _is_expression(value):
     return isinstance(value, Expression)
 
 
-def _subscript_value(value, suffix):
+def _subscript_value(value, suffix, iteration_vars=None):
     if _is_access(value):
-        return value.subscript_index(suffix)
+        return value.subscript_index(suffix, iteration_vars)
     if _is_expression(value):
-        return value.subscript(suffix)
-    if isinstance(value, str) and value.isidentifier():
+        return value.subscript(suffix, iteration_vars)
+    if (isinstance(value, str) and value.isidentifier()
+            and (iteration_vars is None or value in iteration_vars)):
         return value + suffix
     return value
 
@@ -60,7 +61,7 @@ def _replace_value(value, replacements):
 
 
 class Premise:
-    def subscript(self, suffix=None):
+    def subscript(self, suffix=None, iteration_vars=None, right_iteration_vars=None):
         raise NotImplementedError("Subclasses must implement subscript.")
 
     def get_sympy_expression(self):
@@ -78,11 +79,13 @@ class DependencePremise(Premise):
         self.left = left
         self.right = right
 
-    def subscript(self, suffix=None):
+    def subscript(self, suffix=None, iteration_vars=None, right_iteration_vars=None):
         left_suffix = suffix or "1"
         right_suffix = suffix or "2"
-        self.left = _subscript_value(self.left, left_suffix)
-        self.right = _subscript_value(self.right, right_suffix)
+        if right_iteration_vars is None:
+            right_iteration_vars = iteration_vars
+        self.left = _subscript_value(self.left, left_suffix, iteration_vars)
+        self.right = _subscript_value(self.right, right_suffix, right_iteration_vars)
         return self
 
     def __eq__(self, other):
@@ -170,9 +173,9 @@ class ExpressionPremise(Premise):
     def __init__(self, condition):
         self.condition = condition
 
-    def subscript(self, suffix=None):
+    def subscript(self, suffix=None, iteration_vars=None, right_iteration_vars=None):
         if suffix is not None:
-            self.condition = _subscript_value(self.condition, suffix)
+            self.condition = _subscript_value(self.condition, suffix, iteration_vars)
         return self
 
     def get_sympy_expression(self):
@@ -194,9 +197,9 @@ class AndPremise(Premise):
     def __init__(self, premises):
         self.premises = premises
 
-    def subscript(self, suffix=None):
+    def subscript(self, suffix=None, iteration_vars=None, right_iteration_vars=None):
         for premise in self.premises:
-            premise.subscript(suffix)
+            premise.subscript(suffix, iteration_vars, right_iteration_vars)
         return self
 
     def get_sympy_expression(self):
@@ -225,9 +228,9 @@ class OrPremise(Premise):
     def __init__(self, premises):
         self.premises = premises
 
-    def subscript(self, suffix=None):
+    def subscript(self, suffix=None, iteration_vars=None, right_iteration_vars=None):
         for premise in self.premises:
-            premise.subscript(suffix)
+            premise.subscript(suffix, iteration_vars, right_iteration_vars)
         return self
 
     def get_sympy_expression(self):
@@ -256,8 +259,8 @@ class NotPremise(Premise):
     def __init__(self, premise):
         self.premise = premise
 
-    def subscript(self, suffix=None):
-        self.premise.subscript(suffix)
+    def subscript(self, suffix=None, iteration_vars=None, right_iteration_vars=None):
+        self.premise.subscript(suffix, iteration_vars, right_iteration_vars)
         return self
 
     def get_sympy_expression(self):
@@ -279,11 +282,12 @@ class SubstitutePremise(Premise):
         self.premise = premise
         self.replacements = replacements
 
-    def subscript(self, suffix=None):
-        self.premise.subscript(suffix)
+    def subscript(self, suffix=None, iteration_vars=None, right_iteration_vars=None):
+        self.premise.subscript(suffix, iteration_vars, right_iteration_vars)
         if suffix is not None:
             self.replacements = {
-                _subscript_value(source, suffix): _subscript_value(target, suffix)
+                _subscript_value(source, suffix, iteration_vars):
+                    _subscript_value(target, suffix, iteration_vars)
                 for source, target in self.replacements.items()
             }
         return self
@@ -336,11 +340,20 @@ class ForAllPremise(Premise):
         self.bounds = bounds
         self.premise = premise
 
-    def subscript(self, suffix=None):
+    def subscript(self, suffix=None, iteration_vars=None, right_iteration_vars=None):
         if suffix is not None:
-            self.quantified_var = _subscript_value(self.quantified_var, suffix)
-            self.bounds = [bound.copy().subscript(suffix) for bound in self.bounds]
-            self.premise.subscript(suffix)
+            scoped_iteration_vars = iteration_vars
+            if iteration_vars is not None:
+                scoped_iteration_vars = set(iteration_vars)
+                scoped_iteration_vars.add(self.quantified_var)
+            self.quantified_var = _subscript_value(
+                self.quantified_var, suffix, scoped_iteration_vars
+            )
+            self.bounds = [
+                bound.copy().subscript(suffix, scoped_iteration_vars)
+                for bound in self.bounds
+            ]
+            self.premise.subscript(suffix, scoped_iteration_vars)
         return self
 
     def get_sympy_expression(self):
@@ -395,9 +408,31 @@ class Schedule:
 
 
 class DataDependence:
-    def __init__(self, from_si, to_si, data, initial_premises, type, from_domain=None, to_domain=None):
+    def __init__(
+            self,
+            from_si,
+            to_si,
+            data,
+            initial_premises,
+            type,
+            from_domain=None,
+            to_domain=None,
+            from_statement_id=None,
+            to_statement_id=None,
+    ):
         self.from_si = from_si
         self.to_si = to_si
+        self.from_statement_id = from_statement_id
+        self.to_statement_id = to_statement_id
+        self.kind = "ordering"
+        # Keep these even if update_dep later truncates the schedules. Inner-loop
+        # iterators can still occur in access expressions and domain premises.
+        self.from_iteration_vars = {
+            value for value in from_si.schedule if not value.isnumeric()
+        }
+        self.to_iteration_vars = {
+            value for value in to_si.schedule if not value.isnumeric()
+        }
         self.data = data
         # self.from_ind = from_ind
         # self.to_ind = to_ind

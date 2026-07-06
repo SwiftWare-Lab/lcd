@@ -1,9 +1,11 @@
 import ast
 from copy import deepcopy
+import textwrap
 
 import sympy
 
 from compiler.lcd.lcd_def import *
+from compiler.lcd.lcd_raising import LCDBuilder
 from compiler.spf_def import *
 
 
@@ -17,17 +19,17 @@ class LoopBound:
         self.start = start
         self.end = end
 
-    def subscript_iteration_vars(self, subscript):
+    def subscript_iteration_vars(self, subscript, iteration_vars=None):
         if isinstance(self.start, Expression):
-            new_start = self.start.subscript(subscript)
+            new_start = self.start.subscript(subscript, iteration_vars)
         elif isinstance(self.start, Access):
-            new_start = self.start.subscript_index(subscript)
+            new_start = self.start.subscript_index(subscript, iteration_vars)
         else:
             new_start = self.start
         if isinstance(self.end, Expression):
-            new_end = self.end.subscript(subscript)
+            new_end = self.end.subscript(subscript, iteration_vars)
         elif isinstance(self.end, Access):
-            new_end = self.end.subscript_index(subscript)
+            new_end = self.end.subscript_index(subscript, iteration_vars)
         else:
             new_end = self.end
         return LoopBound(new_start, new_end)
@@ -82,12 +84,13 @@ class Access:
         func_sym = sympy.Function(func)(args)
         return funcs, func_sym
 
-    def subscript_index(self, subscript):
+    def subscript_index(self, subscript, iteration_vars=None):
         if isinstance(self.index, Access):
-            return Access(self.index.var, self.index.subscript_index(subscript))
+            return Access(self.var, self.index.subscript_index(subscript, iteration_vars))
         if isinstance(self.index, Expression):
-            return Access(self.var, self.index.subscript(subscript))
-        if isinstance(self.index, str) and self.index.isidentifier():
+            return Access(self.var, self.index.subscript(subscript, iteration_vars))
+        if (isinstance(self.index, str) and self.index.isidentifier()
+                and (iteration_vars is None or self.index in iteration_vars)):
             return Access(self.var, self.index + subscript)
         return Access(self.var, self.index)
 
@@ -139,12 +142,15 @@ class Expression:
     def get_sympy_expr(self):
         return sympy.parse_expr(str(self).replace(".", "").replace("[", "(").replace("]", ")"))
 
-    def subscript(self, subscript):
+    def subscript(self, subscript, iteration_vars=None):
         new_expr = Expression(deepcopy(self.elements))
         for i, element in enumerate(new_expr.elements):
             if isinstance(element, Access):
-                new_expr.elements[i] = element.subscript_index(subscript)
-            elif isinstance(element, str) and element.isidentifier():
+                new_expr.elements[i] = element.subscript_index(subscript, iteration_vars)
+            elif isinstance(element, Expression):
+                new_expr.elements[i] = element.subscript(subscript, iteration_vars)
+            elif (isinstance(element, str) and element.isidentifier()
+                  and (iteration_vars is None or element in iteration_vars)):
                 new_expr.elements[i] = element + subscript
         return new_expr
 
@@ -173,10 +179,19 @@ class LoopNode(SPFNode):
 
 
 class AssignNode(SPFNode):
-    def __init__(self, node_id, target, value):
+    def __init__(
+            self,
+            node_id,
+            target,
+            value,
+            update_op=None,
+            source_statement=None,
+    ):
         super().__init__(node_id)
         self.target = target
         self.value = value
+        self.update_op = update_op
+        self.source_statement = source_statement
         self.read_accesses = []
         self.write_access = None
         self.domain = []
@@ -218,8 +233,22 @@ class _SPFBuilderBase:
         self.stmt_counter += 1
         return stmt_id
 
-    def create_assign_node(self, target, value, is_augmented=False, domain=None):
-        assign_node = AssignNode(self.next_stmt_id(), target, value)
+    def create_assign_node(
+            self,
+            target,
+            value,
+            is_augmented=False,
+            update_op=None,
+            domain=None,
+            source_statement=None,
+    ):
+        assign_node = AssignNode(
+            self.next_stmt_id(),
+            target,
+            value,
+            update_op=update_op,
+            source_statement=source_statement,
+        )
         assign_node.write_access = self.convert_write_target(target)
         if is_augmented and assign_node.write_access is not None:
             assign_node.add_read_access(assign_node.write_access)
@@ -407,12 +436,22 @@ class SPFBuilder(ast.NodeVisitor, _SPFBuilderBase):
         assert len(node.targets) == 1, "Tuple assignment is not supported."
         target = self.convert_target(node.targets[0])
         value = self.visit(node.value)
-        return self.create_assign_node(target, value)
+        return self.create_assign_node(
+            target,
+            value,
+            source_statement=node,
+        )
 
     def visit_AugAssign(self, node):
         target = self.convert_target(node.target)
         value = self.visit(node.value)
-        return self.create_assign_node(target, value, is_augmented=True)
+        return self.create_assign_node(
+            target,
+            value,
+            is_augmented=True,
+            update_op=self.symbolize_operator(node.op),
+            source_statement=node,
+        )
 
     def visit_For(self, node):
         iter_var = self.visit(node.target)
@@ -509,6 +548,9 @@ class SPFBuilder(ast.NodeVisitor, _SPFBuilderBase):
             ast.Mult: '*',
             ast.Div: '/',
             ast.Mod: '%',
+            ast.BitAnd: '&',
+            ast.BitOr: '|',
+            ast.BitXor: '^',
         }
         if type(fn) not in operator_to_string:
             raise NotImplementedError(f"Operator {fn} is not supported.")
@@ -559,10 +601,12 @@ class LCDToSPFConverter(_SPFBuilderBase):
         target = self.convert_target(node.target)
         value = self.convert_value(node.value)
         is_augmented = isinstance(node.value, LCDBin) and self._same_storage(node.target, node.value.left)
+        update_op = node.value.op if is_augmented else None
         return self.create_assign_node(
             target,
             value,
             is_augmented=is_augmented,
+            update_op=update_op,
             domain=domain,
         )
 
@@ -738,29 +782,67 @@ def extract_node_data(spf_node):
     return node_data
 
 
-
 test_code = """
-n = len(A_indptr) - 1
-for i in range(n):
-    row_start = A_indptr[i]
-    row_end = A_indptr[i + 1]
-    for k_ptr in range(row_start, row_end):
-        k = A_indices[k_ptr]
-        if k >= i:
-            break
-        diag_val = 0.0
-        for diag_ptr in range(A_indptr[k], A_indptr[k + 1]):
-            if A_indices[diag_ptr] == k:
-                diag_val = A_data[diag_ptr]
+def ilu0_csr_numba(A_data, A_indices, A_indptr, n):
+    for i in range(n):
+        row_start = A_indptr[i]
+        row_end = A_indptr[i + 1]
+        for k_ptr in range(row_start, row_end):
+            k = A_indices[k_ptr]
+            if k >= i:
                 break
-        if diag_val != 0.0:
-            A_data[k_ptr] = A_data[k_ptr] / diag_val
-            l_ik = A_data[k_ptr]
-            for j_ptr in range(k_ptr + 1, row_end):
-                j = A_indices[j_ptr]
-                for kj_ptr in range(A_indptr[k], A_indptr[k + 1]):
-                    if A_indices[kj_ptr] == j:
-                        u_kj = A_data[kj_ptr]
-                        A_data[j_ptr] = A_data[j_ptr] - l_ik * u_kj
-                        break
+            diag_val = 0.0
+            for diag_ptr in range(A_indptr[k], A_indptr[k + 1]):
+                if A_indices[diag_ptr] == k:
+                    diag_val = A_data[diag_ptr]
+                    break
+            if diag_val != 0.0:
+                A_data[k_ptr] = A_data[k_ptr] / diag_val
+                l_ik = A_data[k_ptr]
+                for j_ptr in range(k_ptr + 1, row_end):
+                    j = A_indices[j_ptr]
+                    for kj_ptr in range(A_indptr[k], A_indptr[k + 1]):
+                        if A_indices[kj_ptr] == j:
+                            u_kj = A_data[kj_ptr]
+                            A_data[j_ptr] = A_data[j_ptr] - l_ik * u_kj
+                            break
 """
+
+
+def print_spf_nodes(node_data):
+    for node_id in sorted(node_data):
+        node = node_data[node_id]
+        if isinstance(node, LoopNode):
+            print(f"{node_id}: LoopNode")
+            print(f"  iter_var: {node.iter_var}")
+            print(f"  bound: {node.bound}")
+            print(f"  schedule: {node.schedule}")
+            print(f"  children: {[child.id for child in node.children]}")
+        elif isinstance(node, AssignNode):
+            print(f"{node_id}: AssignNode")
+            print(f"  write_access: {node.write_access}")
+            print(f"  read_accesses: {node.read_accesses}")
+            print(f"  schedule: {node.schedule}")
+            print(f"  domain: {node.domain}")
+            print(f"  loop_domain: {node.loop_domain}")
+        else:
+            print(f"{node_id}: {type(node).__name__}")
+        print()
+
+
+def demo_lcd_to_spf_converter():
+    module = ast.parse(test_code)
+    lcd_ir = LCDBuilder().visit(module)
+    spf_root = LCDToSPFConverter().convert(lcd_ir)
+    node_data = extract_node_data(spf_root)
+
+    print("LCD representation")
+    print(lcd_ir)
+    print()
+    print("SPF nodes")
+    print_spf_nodes(node_data)
+    return lcd_ir, spf_root, node_data
+
+
+if __name__ == "__main__":
+    demo_lcd_to_spf_converter()

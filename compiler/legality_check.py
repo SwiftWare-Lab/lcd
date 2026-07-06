@@ -1,11 +1,41 @@
 import sympy
 
 from copy import deepcopy
+from dataclasses import dataclass, field
 from sympy import Symbol, Eq, GreaterThan, And, Or, Not, StrictGreaterThan
 from compiler.spf_raising import *
 from compiler.SMT_Generator import generate_smt_file
 from z3 import Solver, CheckSatResult, Z3_L_FALSE, Z3_L_TRUE
 import multiprocessing
+
+
+ASSOCIATIVE_UPDATE_OPERATIONS = frozenset({"+", "*", "&", "|", "^", "min", "max"})
+
+
+@dataclass
+class ReductionInfo:
+    statement_id: str
+    statement: AssignNode
+    operator: str
+    dependences: list[DataDependence] = field(default_factory=list)
+
+
+@dataclass
+class DependenceAnalysis:
+    ordering_dependences: list[DataDependence] = field(default_factory=list)
+    reductions: dict[str, ReductionInfo] = field(default_factory=dict)
+
+    @property
+    def reduction_dependences(self):
+        return [
+            dependence
+            for reduction in self.reductions.values()
+            for dependence in reduction.dependences
+        ]
+
+    @property
+    def atomic_statements(self):
+        return [reduction.statement for reduction in self.reductions.values()]
 
 
 def check_bound_equivalency(b1, b2):
@@ -97,6 +127,8 @@ def extract_fusion_illegality_constraint(targeted_iters: tuple[str, str], depend
             dep.type,
             from_domain=dep.from_domain,
             to_domain=dep.to_domain,
+            from_statement_id=dep.from_statement_id,
+            to_statement_id=dep.to_statement_id,
         )
         fusion_constraint_for_dependence = extract_fusion_constraint_for_dependence(new_dep)
         condition_stmt, known_funcs_new = dep.get_condition_statement_sympy()
@@ -135,7 +167,8 @@ def check_legality_of_fusion(mapping: tuple[str, str],
 
 def extract_latest_write_access_in_loop(loop_node):
     last_write_access = {}
-    # BFS
+    # Visit statements in source order. Reassigning an access keeps its latest
+    # occurrence in the loop.
     stack = [loop_node]
     while len(stack) > 0:
         cur_node = stack.pop()
@@ -146,39 +179,77 @@ def extract_latest_write_access_in_loop(loop_node):
     return last_write_access
 
 
+def extract_first_read_access_in_loop(loop_node):
+    first_read_access = {}
+    reduction_read_accesses = {}
+    # Visit statements in source order. Unlike writes, an access is recorded
+    # only once so that the first read in a loop iteration is retained.
+    stack = [loop_node]
+    while len(stack) > 0:
+        cur_node = stack.pop()
+        if isinstance(cur_node, AssignNode):
+            for read_access in cur_node.read_accesses:
+                if read_access not in first_read_access:
+                    first_read_access[read_access] = cur_node
+            # First-read filtering must not hide the self-dependence of an
+            # associative augmented update whose target was read earlier.
+            if cur_node.update_op in ASSOCIATIVE_UPDATE_OPERATIONS:
+                reduction_read_accesses[(cur_node.id, cur_node.write_access)] = (
+                    cur_node.write_access,
+                    cur_node,
+                )
+        for child in reversed(cur_node.children):
+            stack.append(child)
+    selected_reads = list(first_read_access.items())
+    selected_occurrences = {
+        (read_node.id, read_access)
+        for read_access, read_node in selected_reads
+    }
+    selected_reads.extend(
+        occurrence
+        for key, occurrence in reduction_read_accesses.items()
+        if key not in selected_occurrences
+    )
+    return selected_reads
+
+
+
 # Works based on iter var to node data map.
-def extract_raw_data_dependencies(node_data, last_write_accesses):
-    schedule_to_read_node = {}
+def extract_raw_data_dependencies(first_read_accesses, last_write_accesses):
+    read_access_to_node = {}
     schedule_to_write_node = {}
     dependences = []
-    for cur_node in node_data.values():
-        if isinstance(cur_node, AssignNode):
-            schedule_to_read_node[cur_node.schedule] = cur_node
+    for loop_read_accesses in first_read_accesses.values():
+        for read_access, read_node in loop_read_accesses:
+            # Keep the access that survived first-read filtering. A node can
+            # contain several reads, including later reads filtered out above.
+            read_access_to_node[(read_node.schedule, read_access)] = read_node
     for last_write_access in last_write_accesses.values():
         for s_node in last_write_access:
             schedule_to_write_node[s_node.schedule] = s_node
-    for ri, read_node in schedule_to_read_node.items():
+    for (ri, r_access), read_node in read_access_to_node.items():
         for wi, write_node in schedule_to_write_node.items():
-            for r_access in read_node.read_accesses:
-                w_access = write_node.write_access
-                r_arr = r_access.get_data_array()
-                w_arr = w_access.get_data_array()
-                r_index = r_access.get_index()
-                w_index = w_access.get_index()
-                if r_arr == w_arr:
-                    #TODO: Fix for multiple dimension arrays
-                    if r_index != w_index or isinstance(r_index[0], Access):
-                        premises = [Equality(w_index[i], r_index[i]) for i in range(len(r_index))]
-                        raw_dependence = DataDependence(
-                            wi,
-                            ri,
-                            r_arr,
-                            premises,
-                            'RAW',
-                            from_domain=deepcopy(write_node.loop_domain + write_node.domain),
-                            to_domain=deepcopy(read_node.loop_domain + read_node.domain),
-                        )
-                        dependences.append(raw_dependence)
+            w_access = write_node.write_access
+            r_arr = r_access.get_data_array()
+            w_arr = w_access.get_data_array()
+            r_index = r_access.get_index()
+            w_index = w_access.get_index()
+            if r_arr == w_arr:
+                #TODO: Fix for multiple dimension arrays
+                if r_index != w_index or isinstance(r_index[0], Access):
+                    premises = [Equality(w_index[i], r_index[i]) for i in range(len(r_index))]
+                    raw_dependence = DataDependence(
+                        wi,
+                        ri,
+                        r_arr,
+                        premises,
+                        'RAW',
+                        from_domain=deepcopy(write_node.loop_domain + write_node.domain),
+                        to_domain=deepcopy(read_node.loop_domain + read_node.domain),
+                        from_statement_id=write_node.id,
+                        to_statement_id=read_node.id,
+                    )
+                    dependences.append(raw_dependence)
     return dependences
 
 
@@ -236,10 +307,10 @@ def subscript_fused_vars(fused_vars):
 def subscript_dependence(dependence):
     from_sched = dependence.from_si
     to_sched = dependence.to_si
+    from_iteration_vars = dependence.from_iteration_vars
+    to_iteration_vars = dependence.to_iteration_vars
     new_from_sched = deepcopy(from_sched)
     new_to_sched = deepcopy(to_sched)
-    new_from_ind = []
-    new_to_ind = []
     for i, s in enumerate(from_sched.schedule):
         if not s.isnumeric():
             new_from_sched.schedule[i] = s + "1"
@@ -247,11 +318,14 @@ def subscript_dependence(dependence):
         if not s.isnumeric():
             new_to_sched.schedule[j] = s + "2"
     for premise in dependence.from_domain:
-        premise.subscript("1")
+        premise.subscript("1", from_iteration_vars)
     for premise in dependence.to_domain:
-        premise.subscript("2")
+        premise.subscript("2", to_iteration_vars)
     for premise in dependence.premises:
-        premise.subscript()
+        premise.subscript(
+            iteration_vars=from_iteration_vars,
+            right_iteration_vars=to_iteration_vars,
+        )
     dependence.from_si = new_from_sched
     dependence.to_si = new_to_sched
 
@@ -260,12 +334,14 @@ def subscript_dependence(dependence):
 # Works based on iter var to node data map.
 def extract_dependences(node_data, fused_iter_vars, mapping_nodes):
     last_write_accesses = {}
+    first_read_accesses = {}
     for loop_id in fused_iter_vars:
+        first_read_accesses[loop_id] = extract_first_read_access_in_loop(mapping_nodes[loop_id])
         last_write_accesses[loop_id] = []
         last_write_access = extract_latest_write_access_in_loop(mapping_nodes[loop_id])
         for s_node in last_write_access.values():
             last_write_accesses[loop_id].append(s_node)
-    dependences = extract_raw_data_dependencies(node_data, last_write_accesses)
+    dependences = extract_raw_data_dependencies(first_read_accesses, last_write_accesses)
     # print(dependences)
     # fused_iter_vars = [node_data[loop_id].iter_var for loop_id in fused_loop_ids]
     refined_dependences = refine_dependences(dependences, fused_iter_vars)
@@ -273,6 +349,34 @@ def extract_dependences(node_data, fused_iter_vars, mapping_nodes):
     #     print(dependence)
     #     print("-----------------")
     return refined_dependences
+
+
+def separate_reduction_dependences(dependences, node_data):
+    analysis = DependenceAnalysis()
+    for dependence in dependences:
+        statement_id = dependence.from_statement_id
+        statement = node_data.get(statement_id)
+        is_reduction = (
+            statement_id is not None
+            and statement_id == dependence.to_statement_id
+            and isinstance(statement, AssignNode)
+            and statement.update_op in ASSOCIATIVE_UPDATE_OPERATIONS
+        )
+        if not is_reduction:
+            analysis.ordering_dependences.append(dependence)
+            continue
+
+        dependence.kind = "reduction"
+        reduction = analysis.reductions.setdefault(
+            statement_id,
+            ReductionInfo(
+                statement_id=statement_id,
+                statement=statement,
+                operator=statement.update_op,
+            ),
+        )
+        reduction.dependences.append(dependence)
+    return analysis
 
 
 def prove_dependence(proc_num, smt_str, output):
@@ -285,9 +389,14 @@ def prove_dependence(proc_num, smt_str, output):
 
 def update_iv_node_data(iv_node_data):
     new_iv_node_data = {}
+    iteration_vars = set(iv_node_data)
     for nid, node in iv_node_data.items():
-        new_iv_node_data[nid+"1"] = node.bound.subscript_iteration_vars("1")
-        new_iv_node_data[nid+"2"] = node.bound.subscript_iteration_vars("2")
+        new_iv_node_data[nid+"1"] = node.bound.subscript_iteration_vars(
+            "1", iteration_vars
+        )
+        new_iv_node_data[nid+"2"] = node.bound.subscript_iteration_vars(
+            "2", iteration_vars
+        )
     return new_iv_node_data
 
 def finalize_legality_of_fusion(transformation, cur_ast, function_props):
@@ -321,7 +430,8 @@ def finalize_legality_of_fusion(transformation, cur_ast, function_props):
         if res == CheckSatResult(Z3_L_TRUE):
             new_constraints.append(constraint)
             new_dependencies.append(dependencies[i])
-    return new_constraints, new_dependencies
+    analysis = separate_reduction_dependences(new_dependencies, node_data)
+    return new_constraints, analysis
 
 
 def transform_ast(transformation, cur_ast):

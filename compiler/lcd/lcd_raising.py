@@ -190,6 +190,9 @@ class LCDBuilder(ast.NodeVisitor):
             ast.Mult: '*',
             ast.Div: '/',
             ast.Mod: '%',
+            ast.BitAnd: '&',
+            ast.BitOr: '|',
+            ast.BitXor: '^',
         }
         if type(fn) not in operator_to_string:
             raise NotImplementedError(f"Operator {fn} is not supported.")
