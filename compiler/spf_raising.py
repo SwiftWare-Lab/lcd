@@ -418,12 +418,8 @@ class SPFBuilder(ast.NodeVisitor, _SPFBuilderBase):
 
     def visit_FunctionDef(self, node):
         root = SPFNode("root")
-        for s in node.body:
-            assert isinstance(s, ast.For) or isinstance(s, ast.Assign) or isinstance(s, ast.Return), \
-                "Only for loops and assignments are supported for now."
-            node = self.visit(s)
-            if not isinstance(s, ast.Return):
-                root.add_child(node)
+        for child in self.convert_statement_list(node.body, []):
+            root.add_child(child)
         return root
 
     def visit_Name(self, node):
@@ -433,16 +429,23 @@ class SPFBuilder(ast.NodeVisitor, _SPFBuilderBase):
         return str(node.value)
 
     def visit_Assign(self, node):
+        return self.convert_assign(node, [])
+
+    def convert_assign(self, node, domain):
         assert len(node.targets) == 1, "Tuple assignment is not supported."
         target = self.convert_target(node.targets[0])
         value = self.visit(node.value)
         return self.create_assign_node(
             target,
             value,
+            domain=domain,
             source_statement=node,
         )
 
     def visit_AugAssign(self, node):
+        return self.convert_augassign(node, [])
+
+    def convert_augassign(self, node, domain):
         target = self.convert_target(node.target)
         value = self.visit(node.value)
         return self.create_assign_node(
@@ -450,19 +453,59 @@ class SPFBuilder(ast.NodeVisitor, _SPFBuilderBase):
             value,
             is_augmented=True,
             update_op=self.symbolize_operator(node.op),
+            domain=domain,
             source_statement=node,
         )
 
     def visit_For(self, node):
+        return self.convert_for(node, [])
+
+    def convert_for(self, node, domain):
         iter_var = self.visit(node.target)
         loop_bound = self.visit_iter(node.iter)
+        body = self.convert_statement_list(node.body, [])
+        loop_node = self.create_loop_node(iter_var, loop_bound, body)
+        self.add_domain_to_assignments(loop_node, domain)
+        return loop_node
+
+    def convert_statement_list(self, statements, domain):
         body = []
-        for s in node.body:
-            assert (isinstance(s, ast.For) or isinstance(s, ast.Assign)
-                    or isinstance(s, ast.AugAssign) or isinstance(s, ast.Return)) \
-                , "Only for loops and assignments are supported for now."
-            body.append(self.visit(s))
-        return self.create_loop_node(iter_var, loop_bound, body)
+        for statement in statements:
+            if isinstance(statement, ast.Return):
+                continue
+            if isinstance(statement, ast.Assign):
+                body.append(self.convert_assign(statement, domain))
+            elif isinstance(statement, ast.AugAssign):
+                body.append(self.convert_augassign(statement, domain))
+            elif isinstance(statement, ast.For):
+                body.append(self.convert_for(statement, domain))
+            elif isinstance(statement, ast.If):
+                body.extend(self.convert_if(statement, domain))
+            else:
+                raise NotImplementedError(
+                    f"Only for loops, if statements, assignments, and returns "
+                    f"are supported for now. Got {type(statement)}."
+                )
+        return body
+
+    def convert_if(self, node, domain):
+        condition = self.convert_condition(node.test)
+        body = self.convert_statement_list(node.body, domain + [condition])
+        if node.orelse:
+            body.extend(
+                self.convert_statement_list(
+                    node.orelse,
+                    domain + [NotPremise(condition.copy())],
+                )
+            )
+        return body
+
+    def add_domain_to_assignments(self, node, domain):
+        if isinstance(node, AssignNode):
+            self.add_domain_premises(node, domain)
+            return
+        for child in node.children:
+            self.add_domain_to_assignments(child, domain)
 
     # TODO: Iter can be subscript two
     def visit_iter(self, node):
@@ -510,6 +553,37 @@ class SPFBuilder(ast.NodeVisitor, _SPFBuilderBase):
         var = self.visit(node.value)
         index = self.visit(node.slice)
         return Access(var, index)
+
+    def convert_condition(self, node):
+        if isinstance(node, ast.Compare):
+            assert len(node.ops) == 1 and len(node.comparators) == 1, \
+                "Chained comparisons are not supported in SPF if conditions."
+            left = self.visit(node.left)
+            right = self.visit(node.comparators[0])
+            comparison_to_premise = {
+                ast.Eq: Equality,
+                ast.NotEq: NotEqual,
+                ast.Gt: GreaterThan,
+                ast.GtE: GreaterThanOrEqual,
+                ast.Lt: LessThan,
+                ast.LtE: LessThanOrEqual,
+            }
+            premise_class = comparison_to_premise.get(type(node.ops[0]))
+            if premise_class is None:
+                raise NotImplementedError(
+                    f"Unsupported comparison operator: {type(node.ops[0])}"
+                )
+            return premise_class(left, right)
+        if isinstance(node, ast.BoolOp):
+            premises = [self.convert_condition(value) for value in node.values]
+            if isinstance(node.op, ast.And):
+                return AndPremise(premises)
+            if isinstance(node.op, ast.Or):
+                return OrPremise(premises)
+            raise NotImplementedError(f"Unsupported boolean operator: {type(node.op)}")
+        if isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.Not):
+            return NotPremise(self.convert_condition(node.operand))
+        return ExpressionPremise(self.visit(node))
 
     def convert_target(self, node):
         if isinstance(node, ast.Name):

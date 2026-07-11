@@ -225,8 +225,8 @@ class CUDALoweringTests(unittest.TestCase):
             result.source,
         )
         self.assertIn(
-            "_blocks_per_grid = (_wave_size + "
-            "(_threads_per_block - 1)) // _threads_per_block",
+            "_blocks_per_grid = int((_wave_size + "
+            "(_threads_per_block - 1)) // _threads_per_block)",
             result.source,
         )
         self.assertIn("cuda.synchronize()", result.source)

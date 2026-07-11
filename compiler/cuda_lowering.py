@@ -492,27 +492,33 @@ class CUDALowerer:
                                     ctx=ast.Store(),
                                 )
                             ],
-                            value=ast.BinOp(
-                                left=ast.BinOp(
-                                    left=ast.Name(
-                                        id="_wave_size",
-                                        ctx=ast.Load(),
-                                    ),
-                                    op=ast.Add(),
-                                    right=ast.BinOp(
-                                        left=ast.Name(
+                            value=ast.Call(
+                                func=ast.Name(id="int", ctx=ast.Load()),
+                                args=[
+                                    ast.BinOp(
+                                        left=ast.BinOp(
+                                            left=ast.Name(
+                                                id="_wave_size",
+                                                ctx=ast.Load(),
+                                            ),
+                                            op=ast.Add(),
+                                            right=ast.BinOp(
+                                                left=ast.Name(
+                                                    id="_threads_per_block",
+                                                    ctx=ast.Load(),
+                                                ),
+                                                op=ast.Sub(),
+                                                right=ast.Constant(value=1),
+                                            ),
+                                        ),
+                                        op=ast.FloorDiv(),
+                                        right=ast.Name(
                                             id="_threads_per_block",
                                             ctx=ast.Load(),
                                         ),
-                                        op=ast.Sub(),
-                                        right=ast.Constant(value=1),
                                     ),
-                                ),
-                                op=ast.FloorDiv(),
-                                right=ast.Name(
-                                    id="_threads_per_block",
-                                    ctx=ast.Load(),
-                                ),
+                                ],
+                                keywords=[],
                             ),
                         ),
                         _kernel_launch(

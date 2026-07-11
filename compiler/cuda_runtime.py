@@ -62,6 +62,18 @@ class CUDAPreparedArguments:
             for name in self.lifted_variables
         }
 
+    def copy_host_visible_values_to_host(self):
+        """Copy prepared device arrays back for names visible to the epilogue."""
+        copied_values = {}
+        for name in self.host_values:
+            if name not in self.values:
+                continue
+            value = self.values[name]
+            copy_method = getattr(value, "copy_to_host", None)
+            if copy_method is not None:
+                copied_values[name] = copy_method()
+        return copied_values
+
 
 def compile_cuda_module(
         lowering,
@@ -193,6 +205,9 @@ def execute_cuda_call(
     cuda_module.synchronize()
 
     result_values = dict(prepared_arguments.host_values)
+    result_values.update(
+        prepared_arguments.copy_host_visible_values_to_host()
+    )
     result_values.update(
         prepared_arguments.copy_lifted_variables_to_host()
     )
