@@ -35,8 +35,12 @@ def _sympy_value(value):
     if _is_expression(value):
         return value.get_sympy_expr(), known_funcs
     if isinstance(value, str):
-        if value.isnumeric():
-            return int(value), known_funcs
+        try:
+            number = sympy.sympify(value)
+            if number.is_number:
+                return number, known_funcs
+        except (sympy.SympifyError, TypeError):
+            pass
         return sympy.Symbol(value.replace(".", "")), known_funcs
     return value, known_funcs
 
