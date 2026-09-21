@@ -1,5 +1,6 @@
 import ast
 from copy import deepcopy
+import re
 import textwrap
 
 import sympy
@@ -12,6 +13,27 @@ from compiler.spf_def import *
 # from sympy import Symbol, Eq, GreaterThan, Lt, And, Or, Not
 # from copy import deepcopy
 # from legality_check import check_legality_of_fusion
+
+
+_LEN_CALL = re.compile(r"\blen\(([A-Za-z_]\w*)\)")
+
+
+def _len_symbol(argument):
+    return "len_" + argument
+
+
+def _len_symbols(expression):
+    return {
+        _len_symbol(match.group(1))
+        for match in _LEN_CALL.finditer(expression)
+    }
+
+
+def _replace_len_calls_for_sympy(expression):
+    return _LEN_CALL.sub(
+        lambda match: _len_symbol(match.group(1)),
+        expression,
+    )
 
 
 class LoopBound:
@@ -42,28 +64,34 @@ class LoopBound:
             f1, start = self.start.get_sympy_expr()
         elif isinstance(self.start, Expression):
             start = self.start.get_sympy_expr()
+            consts.extend(self.start.get_symbolic_constants())
         elif self.start.isnumeric():
             start = int(self.start)
         else:
-            start = sympy.Symbol(self.start)
+            start = sympy.Symbol(
+                _replace_len_calls_for_sympy(self.start)
+            )
             consts.append(start)
         if isinstance(self.end, Access):
             f2, end = self.end.get_sympy_expr()
         elif isinstance(self.end, Expression):
             end = self.end.get_sympy_expr()
+            consts.extend(self.end.get_symbolic_constants())
         elif self.end.isnumeric():
             end = int(self.end)
         else:
-            end = sympy.Symbol(self.end)
+            end = sympy.Symbol(
+                _replace_len_calls_for_sympy(self.end)
+            )
             consts.append(end)
         return consts, f1 + f2, sympy.And(
-            sympy.Gt(sympy.Symbol(iter_var), start),
+            sympy.GreaterThan(sympy.Symbol(iter_var), start),
             sympy.LessThan(sympy.Symbol(iter_var), end),
         )
 
     def to_premises(self, iter_var):
         return [
-            GreaterThan(iter_var, self.start),
+            GreaterThanOrEqual(iter_var, self.start),
             LessThan(iter_var, self.end),
         ]
 
@@ -140,7 +168,21 @@ class Expression:
         return str(self)
 
     def get_sympy_expr(self):
-        return sympy.parse_expr(str(self).replace(".", "").replace("[", "(").replace("]", ")"))
+        expression = (
+            str(self)
+            .replace(".", "")
+            .replace("[", "(")
+            .replace("]", ")")
+        )
+        return sympy.parse_expr(
+            _replace_len_calls_for_sympy(expression)
+        )
+
+    def get_symbolic_constants(self):
+        return [
+            sympy.Symbol(name)
+            for name in _len_symbols(str(self))
+        ]
 
     def subscript(self, subscript, iteration_vars=None):
         new_expr = Expression(deepcopy(self.elements))
@@ -176,6 +218,7 @@ class LoopNode(SPFNode):
         super().__init__(node_id)
         self.iter_var = iter_var
         self.bound = loop_bound
+        self.break_conditions = []
 
 
 class AssignNode(SPFNode):
@@ -592,15 +635,27 @@ class LCDToSPFConverter(_SPFBuilderBase):
         ]
         for child in body:
             self.add_domain_to_assignments(child, break_constraints)
-        return self.create_loop_node(node.var.name, loop_bound, body)
+        loop_node = self.create_loop_node(node.var.name, loop_bound, body)
+        # Retain structured exits for inspector generation. Dependence
+        # analysis still receives the equivalent quantified prefix premises,
+        # while DAG code generation can reproduce the original ``break``.
+        loop_node.break_conditions = [
+            trigger.copy()
+            for trigger in break_triggers
+        ]
+        return loop_node
 
     def visit_LCDAssign(self, node):
         return self.convert_assign(node, [])
 
     def convert_assign(self, node, domain):
         target = self.convert_target(node.target)
-        value = self.convert_value(node.value)
-        is_augmented = isinstance(node.value, LCDBin) and self._same_storage(node.target, node.value.left)
+        is_augmented = (
+            isinstance(node.value, LCDBin)
+            and self._same_storage(node.target, node.value.left)
+        )
+        value_node = node.value.right if is_augmented else node.value
+        value = self.convert_value(value_node)
         update_op = node.value.op if is_augmented else None
         return self.create_assign_node(
             target,
@@ -608,6 +663,7 @@ class LCDToSPFConverter(_SPFBuilderBase):
             is_augmented=is_augmented,
             update_op=update_op,
             domain=domain,
+            source_statement=getattr(node, "source_statement", None),
         )
 
     def visit_LCDIf(self, node):
@@ -635,16 +691,40 @@ class LCDToSPFConverter(_SPFBuilderBase):
 
     def convert_if(self, node, domain):
         condition = self.convert_condition(node.condition)
-        body_domain = domain + [condition]
-        body, _, break_triggers = self.convert_statement_list(node.if_body, body_domain)
+        if_domain = domain + [condition]
+        body, _, break_triggers = self.convert_statement_list(
+            node.if_body,
+            if_domain,
+        )
 
-        trigger = AndPremise(body_domain)
+        if_trigger = AndPremise(if_domain)
         next_domain = list(domain)
         if node.has_break:
-            break_triggers.append(trigger)
-            next_domain.append(NotPremise(trigger))
+            break_triggers.append(if_trigger)
+            next_domain.append(NotPremise(if_trigger.copy()))
         if node.has_continue:
-            next_domain.append(NotPremise(trigger))
+            next_domain.append(NotPremise(if_trigger.copy()))
+
+        if (
+                node.else_body
+                or node.else_has_break
+                or node.else_has_continue
+        ):
+            else_condition = NotPremise(condition.copy())
+            else_domain = domain + [else_condition]
+            else_body, _, else_break_triggers = self.convert_statement_list(
+                node.else_body,
+                else_domain,
+            )
+            body.extend(else_body)
+            break_triggers.extend(else_break_triggers)
+
+            else_trigger = AndPremise(else_domain)
+            if node.else_has_break:
+                break_triggers.append(else_trigger)
+                next_domain.append(NotPremise(else_trigger.copy()))
+            if node.else_has_continue:
+                next_domain.append(NotPremise(else_trigger.copy()))
         return body, next_domain, break_triggers
 
     def create_prior_iteration_break_premise(self, loop_node, trigger):
@@ -652,7 +732,7 @@ class LCDToSPFConverter(_SPFBuilderBase):
         prior_iter_var = iter_var + "_prev"
         lower_bound = self.convert_value(loop_node.lbound)
         prior_bounds = [
-            GreaterThan(prior_iter_var, lower_bound),
+            GreaterThanOrEqual(prior_iter_var, lower_bound),
             GreaterThan(iter_var, prior_iter_var),
         ]
         prior_trigger = SubstitutePremise(trigger.copy(), {iter_var: prior_iter_var})
@@ -707,6 +787,8 @@ class LCDToSPFConverter(_SPFBuilderBase):
             return node.name
         if isinstance(node, LCDConst):
             return str(node.value)
+        if isinstance(node, LCDOpaque):
+            return str(node)
         if isinstance(node, LCDAccess):
             return self.convert_access(node)
         if isinstance(node, LCDBin):
@@ -749,6 +831,54 @@ class LCDToSPFConverter(_SPFBuilderBase):
         if isinstance(left, LCDAccess):
             return str(left) == str(right)
         return False
+
+
+class LCDBlockLoopExtractor:
+    """Keep only the LCD subtree rooted at one block-mapped loop.
+
+    Enclosing loops are executor/host loops for the generated CUDA launcher.
+    They should not appear in the SPF backend schedules used by dependence
+    analysis and DAG inspection.  If an enclosing-loop iterator is referenced
+    inside the selected loop body, it remains a normal symbolic value and is
+    therefore treated like a parameter by the backend IR.
+    """
+
+    def __init__(self, block_iterator):
+        self.block_iterator = block_iterator
+        self.matches = []
+
+    def extract(self, lcd_ir):
+        self._visit_statements(lcd_ir.body)
+        if len(self.matches) != 1:
+            raise ValueError(
+                "The block-mapped iterator must identify exactly one LCD "
+                f"for loop; found {len(self.matches)} for "
+                f"{self.block_iterator!r}."
+            )
+        pruned = LCD()
+        pruned.body.append(deepcopy(self.matches[0]))
+        return pruned
+
+    def _visit_statements(self, statements):
+        for statement in statements:
+            if isinstance(statement, LCDFor):
+                if statement.var.name == self.block_iterator:
+                    self.matches.append(statement)
+                self._visit_statements(statement.body)
+            elif isinstance(statement, LCDIf):
+                self._visit_statements(statement.if_body)
+                self._visit_statements(statement.else_body)
+
+
+def build_spf_from_ast(module, block_iterator=None):
+    """Raise Python AST through LCD into the SPF backend IR."""
+    from compiler.ast_normalization import normalize_aliases
+
+    module = normalize_aliases(module)
+    lcd_ir = LCDBuilder().visit(module)
+    if block_iterator is not None:
+        lcd_ir = LCDBlockLoopExtractor(block_iterator).extract(lcd_ir)
+    return LCDToSPFConverter().convert(lcd_ir)
 
 
 # DFS Algorithm on DFS tree

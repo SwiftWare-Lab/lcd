@@ -1,23 +1,21 @@
 """Numerical end-to-end tests for generated sparse triangular solvers."""
 
+from contextlib import redirect_stdout
+import io
 import unittest
 
 import numpy as np
 from scipy.sparse import csc_matrix, csr_matrix
+from scipy.sparse import tril
 from scipy.sparse.linalg import spsolve_triangular
 
-
-def _cuda_status():
-    try:
-        from numba import cuda
-        if cuda.is_available():
-            return True, ""
-        return False, "Numba CUDA is unavailable."
-    except Exception as error:
-        return False, f"Numba CUDA could not be imported: {error}"
+from compiler.demo.gpu_test_utils import physical_cuda_status
+from compiler.demo.suitesparse_test_matrix import (
+    load_suitesparse_test_matrix,
+)
 
 
-CUDA_AVAILABLE, CUDA_SKIP_REASON = _cuda_status()
+CUDA_AVAILABLE, CUDA_SKIP_REASON = physical_cuda_status()
 
 
 @unittest.skipUnless(CUDA_AVAILABLE, CUDA_SKIP_REASON)
@@ -26,22 +24,24 @@ class SpTRSVEndToEndTests(unittest.TestCase):
     def setUpClass(cls):
         # Importing this module runs the compiler pipeline and binds the
         # generated Numba-CUDA kernels.
-        from compiler.transform_tests.sptrsv import (
-            simple_sptrsv_csc,
-            simple_sptrsv_csr,
-        )
+        with redirect_stdout(io.StringIO()):
+            from compiler.demo.sptrsv import (
+                simple_sptrsv_csc,
+                simple_sptrsv_csr,
+            )
 
         cls.csc_solver = staticmethod(simple_sptrsv_csc)
         cls.csr_solver = staticmethod(simple_sptrsv_csr)
 
     def setUp(self):
-        self.lower_triangular = np.array([
-            [2.0, 0.0, 0.0, 0.0],
-            [3.0, 1.0, 0.0, 0.0],
-            [1.0, -1.0, 2.0, 0.0],
-            [0.0, 2.0, 1.0, 1.0],
-        ])
-        expected_solution = np.array([1.0, 2.0, 3.0, 4.0])
+        source_matrix = load_suitesparse_test_matrix()
+        self.lower_triangular = tril(source_matrix, format="csr")
+        self.lower_triangular.sort_indices()
+        expected_solution = np.linspace(
+            1.0,
+            2.0,
+            self.lower_triangular.shape[0],
+        )
         self.right_hand_side = (
             self.lower_triangular @ expected_solution
         )

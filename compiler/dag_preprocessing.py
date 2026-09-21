@@ -16,6 +16,7 @@ class SyncFreeExecutionData:
     dep_count: np.ndarray
     dag_ptr: np.ndarray
     dag_index: np.ndarray
+    initial_dep_count: np.ndarray | None = None
 
     @property
     def launcher_arguments(self):
@@ -68,6 +69,7 @@ def preprocess_sync_free(dag_successors, dep_count):
     return SyncFreeExecutionData(
         # The kernel mutates this data, so preserve the generated counts.
         dep_count=dep_count.copy(),
+        initial_dep_count=dep_count.copy(),
         dag_ptr=dag_ptr,
         dag_index=dag_index,
     )

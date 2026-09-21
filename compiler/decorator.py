@@ -4,6 +4,7 @@ import functools
 
 import types
 import ast
+from compiler.ast_normalization import normalize_aliases
 from compiler.dag_codegen import (
     compile_dag_builder,
     create_dag_plan,
@@ -12,6 +13,7 @@ from compiler.dag_codegen import (
 from compiler.cuda_lowering import lower_to_numba_cuda
 from compiler.cuda_runtime import (
     compile_cuda_module,
+    evaluate_host_prelude,
     execute_cuda_call,
     prepare_cuda_arguments,
 )
@@ -19,7 +21,7 @@ from compiler.dag_preprocessing import preprocess_dag_output
 from compiler.legality_check import finalize_legality_of_fusion, transform_ast, generate_dag_generation_code, \
     extract_dependences
 from compiler.legality_check import extract_node_data, extract_dag_creation_components
-from compiler.spf_raising import SPFBuilder, SparseFusionTransformer
+from compiler.spf_raising import build_spf_from_ast, SparseFusionTransformer
 import os
 from compiler.spf_raising import LoopNode
 
@@ -53,8 +55,7 @@ def fusion(**kwargs):
                 signature = inspect.signature(function)
                 parameters = signature.parameters
                 arg_names = [param.name for param in parameters.values()]
-                spf_builder = SPFBuilder()
-                root_node = spf_builder.visit(cur_ast)
+                root_node = build_spf_from_ast(cur_ast)
                 node_data = extract_node_data(root_node)
                 iter_list = extract_dag_creation_components(transformation, dependencies[0], node_data)
                 dag_code = generate_dag_generation_code(arg_names, iter_list, node_data, {'j1': 'm'})
@@ -107,16 +108,27 @@ def generate_executer_code(arg_names, loop_body_1, loop_body_2, ret_stmnt, trans
 
 def parallel(**kwargs):
     def decorator(function: types.FunctionType):
-        loop = kwargs['loop']
+        loop = kwargs.get(
+            'loop',
+            kwargs.get('block_map', kwargs.get('block_loop', None)),
+        )
+        if loop is None:
+            raise ValueError(
+                "parallel requires a block-mapped iterator via `loop`, "
+                "`block_map`, or `block_loop`."
+            )
         function_props = kwargs.get('function_props', {})
         num_threads = kwargs.get('num_threads', 8)
         source = inspect.getsource(function)
         source = '\n'.join([l for l in source.splitlines() if not l.startswith("@")])
         print(source)
         old_code_obj = function.__code__
-        cur_ast = ast.parse(source)
+        cur_ast = normalize_aliases(ast.parse(source))
         constraints, dependence_analysis = finalize_legality_of_fusion(
-            (loop, loop), cur_ast, function_props
+            (loop, loop),
+            cur_ast,
+            function_props,
+            block_iterator=loop,
         )
         print('\n-----------------------------------------------\n'.join(
             map(str, dependence_analysis.ordering_dependences)
@@ -128,31 +140,24 @@ def parallel(**kwargs):
 
         signature = inspect.signature(function)
         argument_names = list(signature.parameters)
-        spf_builder = SPFBuilder()
-        root_node = spf_builder.visit(cur_ast)
+        root_node = build_spf_from_ast(
+            cur_ast,
+            block_iterator=loop,
+        )
         node_data = extract_node_data(root_node)
-        dag_plan = create_dag_plan(
-            dependence_analysis.ordering_dependences,
-            node_data,
-            parallel_iterator=loop,
-            arguments=argument_names,
-        )
-        validate_endpoints = kwargs.get("validate_dag_endpoints", False)
         execution_mode = kwargs.get("execution_mode", "sync_free")
-        dag_source = generate_dag_source(
-            dag_plan,
-            validate_endpoints=validate_endpoints,
-            execution_mode=execution_mode,
-        )
-        dag_builder = compile_dag_builder(
-            dag_plan,
-            validate_endpoints=validate_endpoints,
-            execution_mode=execution_mode,
-        )
         cuda_execution_mode = (
             "sync_free"
             if execution_mode.replace("-", "_") == "sync_free"
             else "wavefront"
+        )
+        thread_loop = kwargs.get(
+            "thread_loop",
+            kwargs.get("thread_map", None),
+        )
+        thread_unroll = kwargs.get(
+            "thread_unroll",
+            kwargs.get("thread_unroll_factor", 1),
         )
         cuda_lowering = lower_to_numba_cuda(
             cur_ast,
@@ -167,6 +172,31 @@ def parallel(**kwargs):
                 "threads_per_block",
                 128,
             ),
+            thread_loop_iterator=thread_loop,
+            thread_unroll_factor=thread_unroll,
+        )
+        dag_argument_names = argument_names + [
+            name
+            for name in cuda_lowering.lifted_loop_parameters
+            if name not in argument_names
+        ]
+        dag_plan = create_dag_plan(
+            dependence_analysis.ordering_dependences,
+            node_data,
+            parallel_iterator=loop,
+            arguments=dag_argument_names,
+            function_props=function_props,
+        )
+        validate_endpoints = kwargs.get("validate_dag_endpoints", False)
+        dag_source = generate_dag_source(
+            dag_plan,
+            validate_endpoints=validate_endpoints,
+            execution_mode=execution_mode,
+        )
+        dag_builder = compile_dag_builder(
+            dag_plan,
+            validate_endpoints=validate_endpoints,
+            execution_mode=execution_mode,
         )
         compiled_cuda_module = compile_cuda_module(
             cuda_lowering,
@@ -176,9 +206,17 @@ def parallel(**kwargs):
         def build_dag(*args, **call_kwargs):
             bound_arguments = signature.bind(*args, **call_kwargs)
             bound_arguments.apply_defaults()
+            dag_values = dict(bound_arguments.arguments)
+            dag_values.update(
+                evaluate_host_prelude(
+                    lowering=cuda_lowering,
+                    argument_values=dag_values,
+                    function_globals=function.__globals__,
+                )
+            )
             return dag_builder(*[
-                bound_arguments.arguments[name]
-                for name in argument_names
+                dag_values[name]
+                for name in dag_argument_names
             ])
 
         def build_execution_data(*args, **call_kwargs):

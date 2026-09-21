@@ -1,3 +1,4 @@
+import ast
 from copy import deepcopy
 
 import sympy
@@ -37,6 +38,12 @@ def _sympy_value(value):
     if isinstance(value, str):
         if value.isnumeric():
             return int(value), known_funcs
+        try:
+            literal = ast.literal_eval(value)
+        except (SyntaxError, ValueError):
+            literal = None
+        if isinstance(literal, (int, float)) and not isinstance(literal, bool):
+            return sympy.sympify(literal), known_funcs
         return sympy.Symbol(value.replace(".", "")), known_funcs
     return value, known_funcs
 
@@ -357,10 +364,17 @@ class ForAllPremise(Premise):
         return self
 
     def get_sympy_expression(self):
-        body, known_funcs = AndPremise(self.bounds + [self.premise]).get_sympy_expression()
+        bounds, known_funcs = AndPremise(
+            self.bounds
+        ).get_sympy_expression()
+        body, body_funcs = self.premise.get_sympy_expression()
+        known_funcs.update(body_funcs)
         if not hasattr(sympy, "ForAll"):
             raise NotImplementedError("The installed SymPy does not expose quantified formulas.")
-        return sympy.ForAll(sympy.Symbol(self.quantified_var), body), known_funcs
+        return sympy.ForAll(
+            sympy.Symbol(self.quantified_var),
+            sympy.Implies(bounds, body),
+        ), known_funcs
 
     def read_accesses(self):
         reads = []

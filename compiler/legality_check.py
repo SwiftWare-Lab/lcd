@@ -131,10 +131,14 @@ def extract_fusion_illegality_constraint(targeted_iters: tuple[str, str], depend
             to_statement_id=dep.to_statement_id,
         )
         fusion_constraint_for_dependence = extract_fusion_constraint_for_dependence(new_dep)
-        condition_stmt, known_funcs_new = dep.get_condition_statement_sympy()
-        #TODO: Change how this behaves
-        dependence_constraint = And(condition_stmt,
-                                    fusion_constraint_for_dependence)
+        condition_stmt = AndPremise(dep.all_premises())
+        known_funcs_new = set()
+        for access in condition_stmt.read_accesses():
+            access_funcs, _ = access.get_sympy_expr()
+            known_funcs_new.update(access_funcs)
+        # TODO: Incorporate fusion_constraint_for_dependence when legality
+        # checking begins filtering transformed schedules rather than only
+        # testing whether the dependence domain is feasible.
         known_funcs.update(known_funcs_new)
         constraints.append(condition_stmt)
     return constraints, known_funcs
@@ -399,9 +403,16 @@ def update_iv_node_data(iv_node_data):
         )
     return new_iv_node_data
 
-def finalize_legality_of_fusion(transformation, cur_ast, function_props):
-    spf_builder = SPFBuilder()
-    root_node = spf_builder.visit(cur_ast)
+def finalize_legality_of_fusion(
+        transformation,
+        cur_ast,
+        function_props,
+        block_iterator=None,
+):
+    root_node = build_spf_from_ast(
+        cur_ast,
+        block_iterator=block_iterator,
+    )
     node_data = extract_node_data(root_node)
     iv_node_data = {}
     for nid, node in node_data.items():

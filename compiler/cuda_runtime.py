@@ -177,6 +177,24 @@ def prepare_cuda_arguments(
     )
 
 
+def evaluate_host_prelude(
+        lowering,
+        argument_values,
+        function_globals=None,
+):
+    """Evaluate removed host statements and return their named values.
+
+    This is shared by DAG preprocessing and CUDA argument preparation so a
+    locally derived size such as ``n = len(indptr) - 1`` has one consistent
+    value in both generated functions.
+    """
+    return _evaluate_host_prelude(
+        lowering,
+        argument_values,
+        function_globals or {},
+    )
+
+
 def execute_cuda_call(
         compiled_module,
         lowering,
@@ -193,6 +211,9 @@ def execute_cuda_call(
     cuda_module.synchronize()
 
     result_values = dict(prepared_arguments.host_values)
+    result_values.update(
+        _copy_returned_values_to_host(lowering, prepared_arguments)
+    )
     result_values.update(
         prepared_arguments.copy_lifted_variables_to_host()
     )
@@ -271,6 +292,30 @@ def _evaluate_host_epilogue(lowering, result_values, function_globals):
     return namespace[helper_name]()
 
 
+def _copy_returned_values_to_host(lowering, prepared_arguments):
+    return {
+        name: prepared_arguments.copy_to_host(name)
+        for name in _returned_names(lowering.host_epilogue)
+        if name in prepared_arguments.values
+    }
+
+
+def _returned_names(statements):
+    names = []
+    for statement in statements:
+        for node in ast.walk(statement):
+            if not isinstance(node, ast.Return) or node.value is None:
+                continue
+            for value_node in ast.walk(node.value):
+                if (
+                        isinstance(value_node, ast.Name)
+                        and isinstance(value_node.ctx, ast.Load)
+                        and value_node.id not in names
+                ):
+                    names.append(value_node.id)
+    return names
+
+
 def _stored_names(statements):
     names = []
     for statement in statements:
@@ -291,8 +336,12 @@ def _execution_values(execution_mode, execution_data):
             raise CUDARuntimePreparationError(
                 "Sync-free lowering requires SyncFreeExecutionData."
             )
+        initial_dep_count = execution_data.initial_dep_count
+        if initial_dep_count is None:
+            initial_dep_count = execution_data.dep_count.copy()
         return {
             "dep_count": execution_data.dep_count,
+            "initial_dep_count": initial_dep_count,
             "dag_ptr": execution_data.dag_ptr,
             "dag_index": execution_data.dag_index,
         }

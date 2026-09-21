@@ -32,7 +32,7 @@ class LCDBuilder(ast.NodeVisitor):
         assert len(node.targets) == 1, "Tuple assignment is not supported."
         target = self.visit_expression(node.targets[0])
         value = self.visit_expression(node.value)
-        return LCDAssign(target, value)
+        return LCDAssign(target, value, source_statement=node)
 
     def visit_AugAssign(self, node):
         # Convert AugAssign to regular assignment with binary operation
@@ -41,15 +41,32 @@ class LCDBuilder(ast.NodeVisitor):
         op = self.symbolize_operator(node.op)
         # Create binary operation: target = target op value
         bin_op = LCDBin(op, target, value)
-        return LCDAssign(target, bin_op)
+        return LCDAssign(target, bin_op, source_statement=node)
 
     def visit_If(self, node):
         condition = self.visit_expression(node.test)
-        if_body = []
+        if_body, has_break, has_continue = self.visit_statement_list(
+            node.body,
+        )
+        else_body, else_has_break, else_has_continue = (
+            self.visit_statement_list(node.orelse)
+        )
+
+        return LCDIf(
+            condition,
+            if_body,
+            has_break,
+            has_continue,
+            else_body=else_body,
+            else_has_break=else_has_break,
+            else_has_continue=else_has_continue,
+        )
+
+    def visit_statement_list(self, statements):
+        body = []
         has_break = False
         has_continue = False
-        
-        for s in node.body:
+        for s in statements:
             if isinstance(s, ast.Break):
                 has_break = True
                 continue
@@ -60,9 +77,8 @@ class LCDBuilder(ast.NodeVisitor):
                 continue
             stmt = self.visit(s)
             if stmt is not None:
-                if_body.append(stmt)
-        
-        return LCDIf(condition, if_body, has_break, has_continue)
+                body.append(stmt)
+        return body, has_break, has_continue
 
     def visit_Break(self, node):
         # Break is handled within If nodes
@@ -180,6 +196,8 @@ class LCDBuilder(ast.NodeVisitor):
             return self.visit_BoolOp(node)
         elif isinstance(node, ast.UnaryOp):
             return self.visit_UnaryOp(node)
+        elif isinstance(node, ast.Call):
+            return LCDOpaque(ast.unparse(node))
         else:
             raise NotImplementedError(f"Unsupported expression type: {type(node)}")
 

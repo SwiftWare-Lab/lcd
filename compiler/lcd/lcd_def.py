@@ -16,11 +16,23 @@ if condition{
 }
 """
 class LCDIf(LCDStatement):
-    def __init__(self, condition, if_body, has_break, has_continue):
+    def __init__(
+            self,
+            condition,
+            if_body,
+            has_break,
+            has_continue,
+            else_body=None,
+            else_has_break=False,
+            else_has_continue=False,
+    ):
         self.condition = condition # CompareExpression
         self.if_body = if_body
+        self.else_body = else_body or []
         self.has_break =  has_break
         self.has_continue = has_continue
+        self.else_has_break = else_has_break
+        self.else_has_continue = else_has_continue
     
     def __str__(self):
         result = f"if ({self.condition}){{\n"
@@ -34,6 +46,17 @@ class LCDIf(LCDStatement):
         elif self.has_continue:
             result += "    continue\n"
         result += "}"
+        if self.else_body or self.else_has_break or self.else_has_continue:
+            result += " else{\n"
+            for stmt in self.else_body:
+                stmt_str = str(stmt)
+                for line in stmt_str.split('\n'):
+                    result += f"    {line}\n"
+            if self.else_has_break:
+                result += "    break\n"
+            elif self.else_has_continue:
+                result += "    continue\n"
+            result += "}"
         return result
 
 """
@@ -63,10 +86,11 @@ target = value
 """
 
 class LCDAssign(LCDStatement):
-    def __init__(self, target, value):
+    def __init__(self, target, value, source_statement=None):
         super().__init__()
         self.target = target # ValExpr
         self.value = value
+        self.source_statement = source_statement
     
     def __str__(self):
         return f"{self.target} = {self.value}"
@@ -141,3 +165,14 @@ class LCDConst(LCDExpression):
 
     def __str__(self):
         return str(self.value)
+
+
+class LCDOpaque(LCDExpression):
+    """Expression kept as text when the SPF backend only needs a placeholder."""
+
+    def __init__(self, text):
+        super().__init__()
+        self.text = text
+
+    def __str__(self):
+        return self.text

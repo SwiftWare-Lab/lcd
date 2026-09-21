@@ -15,10 +15,10 @@ from compiler.dag_preprocessing import (
     preprocess_dag_output,
 )
 from compiler.spf_def import DataDependence, Equality, GreaterThan
-from compiler.spf_raising import Access, SPFBuilder, extract_node_data
+from compiler.spf_raising import Access, build_spf_from_ast, extract_node_data
 
 
-SPTRSV_SOURCE = Path(__file__).with_name("sptrsv.py")
+SPTRSV_SOURCE = Path(__file__).parents[1] / "demo" / "sptrsv.py"
 
 
 def _load_function(function_name):
@@ -29,7 +29,7 @@ def _load_function(function_name):
         if isinstance(node, ast.FunctionDef) and node.name == function_name
     )
     function_module = ast.Module(body=[function], type_ignores=[])
-    node_data = extract_node_data(SPFBuilder().visit(function_module))
+    node_data = extract_node_data(build_spf_from_ast(function_module))
     arguments = [argument.arg for argument in function.args.args]
     return node_data, arguments
 
