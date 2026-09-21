@@ -320,6 +320,3 @@ NUMBA_CUDA_USE_NVIDIA_BINDING=1 \
 | `cuda_lowering.py` | Numba-CUDA kernel and host-launcher generation. |
 | `cuda_runtime.py` | Module binding, transfers, execution, and returned-value restoration. |
 
-The older `fusion` decorator and scheduler modules are separate experimental
-paths. The loop-carried CUDA pipeline described here is implemented by
-`parallel`.

@@ -1,3 +1,0 @@
-[submodule "numba"]
-	path = numba
-	url = https://github.com/mmsalehid/numba
