@@ -1,0 +1,175 @@
+{
+  "python": "3.11.15",
+  "platform": "macOS-26.3.1-arm64-arm-64bit",
+  "numpy": "2.1.3",
+  "scipy": "1.15.1",
+  "numba": "0.61.0",
+  "seed": 42,
+  "sizes": [
+    32,
+    128,
+    256,
+    512
+  ],
+  "repeats": 7,
+  "blas_pools": [],
+  "library_build_info": {
+    "numpy": {
+      "Compilers": {
+        "c": {
+          "name": "clang",
+          "linker": "ld64",
+          "version": "15.0.0",
+          "commands": "cc"
+        },
+        "cython": {
+          "name": "cython",
+          "linker": "cython",
+          "version": "3.0.11",
+          "commands": "cython"
+        },
+        "c++": {
+          "name": "clang",
+          "linker": "ld64",
+          "version": "15.0.0",
+          "commands": "c++"
+        }
+      },
+      "Machine Information": {
+        "host": {
+          "cpu": "aarch64",
+          "family": "aarch64",
+          "endian": "little",
+          "system": "darwin"
+        },
+        "build": {
+          "cpu": "aarch64",
+          "family": "aarch64",
+          "endian": "little",
+          "system": "darwin"
+        }
+      },
+      "Build Dependencies": {
+        "blas": {
+          "name": "accelerate",
+          "found": true,
+          "version": "unknown",
+          "detection method": "system",
+          "include directory": "unknown",
+          "lib directory": "unknown",
+          "openblas configuration": "unknown",
+          "pc file directory": "unknown"
+        },
+        "lapack": {
+          "name": "accelerate",
+          "found": true,
+          "version": "unknown",
+          "detection method": "system",
+          "include directory": "unknown",
+          "lib directory": "unknown",
+          "openblas configuration": "unknown",
+          "pc file directory": "unknown"
+        }
+      },
+      "Python Information": {
+        "path": "/private/var/folders/g6/rgtlsw6n123b0gt5483s5_cm0000gn/T/build-env-66yva2l8/bin/python",
+        "version": "3.11"
+      },
+      "SIMD Extensions": {
+        "baseline": [
+          "NEON",
+          "NEON_FP16",
+          "NEON_VFPV4",
+          "ASIMD"
+        ],
+        "found": [
+          "ASIMDHP"
+        ],
+        "not found": [
+          "ASIMDFHM"
+        ]
+      }
+    },
+    "scipy": {
+      "Compilers": {
+        "c": {
+          "name": "clang",
+          "linker": "ld64",
+          "version": "15.0.0",
+          "commands": "cc"
+        },
+        "cython": {
+          "name": "cython",
+          "linker": "cython",
+          "version": "3.0.11",
+          "commands": "cython"
+        },
+        "c++": {
+          "name": "clang",
+          "linker": "ld64",
+          "version": "15.0.0",
+          "commands": "c++"
+        },
+        "fortran": {
+          "name": "gcc",
+          "linker": "ld64",
+          "version": "13.3.0",
+          "commands": "gfortran"
+        },
+        "pythran": {
+          "version": "0.17.0",
+          "include directory": "../../../../../../private/var/folders/ml/x_tvfgn50_s7p67dm1ypcqqm0000gn/T/pip-build-env-hvo3qr6q/overlay/lib/python3.11/site-packages/pythran"
+        }
+      },
+      "Machine Information": {
+        "host": {
+          "cpu": "aarch64",
+          "family": "aarch64",
+          "endian": "little",
+          "system": "darwin"
+        },
+        "build": {
+          "cpu": "aarch64",
+          "family": "aarch64",
+          "endian": "little",
+          "system": "darwin"
+        },
+        "cross-compiled": false
+      },
+      "Build Dependencies": {
+        "blas": {
+          "name": "Accelerate",
+          "found": true,
+          "version": "unknown",
+          "detection method": "extraframeworks",
+          "include directory": "unknown",
+          "lib directory": "unknown",
+          "openblas configuration": "unknown",
+          "pc file directory": "unknown"
+        },
+        "lapack": {
+          "name": "Accelerate",
+          "found": true,
+          "version": "unknown",
+          "detection method": "extraframeworks",
+          "include directory": "unknown",
+          "lib directory": "unknown",
+          "openblas configuration": "unknown",
+          "pc file directory": "unknown"
+        },
+        "pybind11": {
+          "name": "pybind11",
+          "version": "2.13.6",
+          "detection method": "config-tool",
+          "include directory": "unknown"
+        }
+      },
+      "Python Information": {
+        "path": "/private/var/folders/ml/x_tvfgn50_s7p67dm1ypcqqm0000gn/T/cibw-run-uttu27rb/cp311-macosx_arm64/build/venv/bin/python",
+        "version": "3.11"
+      }
+    }
+  },
+  "thread_policy": "Numba serial; detected BLAS pools limited to 1; undetected backends unverified",
+  "timing": "median; allocation included; JIT, generation and residual checks excluded"
+}
