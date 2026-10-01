@@ -1,0 +1,5 @@
+matrices,Wavefront E2E (Rows/s),Wavefront Prepared (Rows/s),Sync-free E2E (Rows/s),Sync-free Prepared (Rows/s),CPU Row Dependencies (Rows/s),CPU Prepared (Rows/s)
+/home/daniel/gpu-backend/benchmark/matrices/suitesparse/1138_bus/1138_bus.mtx,388702.555448,910224.872249,558571.744866,8961229.873354,857103.585336,841763.603506
+/home/daniel/gpu-backend/benchmark/matrices/suitesparse/bcsstk08/bcsstk08.mtx,139680.825387,231418.585213,277528.845942,2521890.433939,485047.638899,486548.011924
+/home/daniel/gpu-backend/benchmark/matrices/suitesparse/bcsstk09/bcsstk09.mtx,120768.872846,208554.549535,250104.874133,2866831.290725,417485.269653,415927.767284
+/home/daniel/gpu-backend/benchmark/matrices/suitesparse/bcsstk36/bcsstk36.mtx,45475.761675,84917.647105,94072.727284,1052691.785871,183696.155759,183431.946302

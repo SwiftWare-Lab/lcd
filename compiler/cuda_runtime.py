@@ -62,10 +62,12 @@ class CUDAPreparedArguments:
             for name in self.lifted_variables
         }
 
-    def copy_host_visible_values_to_host(self):
+    def copy_host_visible_values_to_host(self, names):
         """Copy prepared device arrays back for names visible to the epilogue."""
         copied_values = {}
-        for name in self.host_values:
+        for name in names:
+            if name not in self.host_values:
+                continue
             if name not in self.values:
                 continue
             value = self.values[name]
@@ -206,7 +208,9 @@ def execute_cuda_call(
 
     result_values = dict(prepared_arguments.host_values)
     result_values.update(
-        prepared_arguments.copy_host_visible_values_to_host()
+        prepared_arguments.copy_host_visible_values_to_host(
+            _kernel_written_array_names(lowering)
+        )
     )
     result_values.update(
         prepared_arguments.copy_lifted_variables_to_host()
@@ -297,6 +301,29 @@ def _stored_names(statements):
             ):
                 names.append(node.id)
     return names
+
+
+def _kernel_written_array_names(lowering):
+    names = []
+    for statement in lowering.kernel_ast.body:
+        for node in ast.walk(statement):
+            if (
+                    isinstance(node, ast.Subscript)
+                    and isinstance(node.ctx, ast.Store)
+            ):
+                base = _subscript_base_name(node)
+                if base is not None and base not in names:
+                    names.append(base)
+    return names
+
+
+def _subscript_base_name(node):
+    value = node.value
+    while isinstance(value, ast.Subscript):
+        value = value.value
+    if isinstance(value, ast.Name):
+        return value.id
+    return None
 
 
 def _execution_values(execution_mode, execution_data):

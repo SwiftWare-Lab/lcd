@@ -145,6 +145,15 @@ class CUDALoweringTests(unittest.TestCase):
             "cuda.atomic.add(dep_count, _dag_successor, -1)",
             result.source,
         )
+        self.assertEqual(result.source.count("cuda.threadfence()"), 2)
+        self.assertLess(
+            result.source.index("while cuda.atomic.add(dep_count, i, 0) != 0:"),
+            result.source.index("cuda.threadfence()"),
+        )
+        self.assertLess(
+            result.source.rindex("cuda.threadfence()"),
+            result.source.index("cuda.atomic.add(dep_count, _dag_successor, -1)"),
+        )
         self.assertIn(
             "cuda.atomic.add(x, Ai[j], Ax[j] * x[i])",
             result.source,

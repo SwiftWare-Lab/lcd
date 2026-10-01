@@ -66,7 +66,7 @@ class GaussSeidelEndToEndTests(unittest.TestCase):
             [0.0, 2.0, 1.0, 6.0],
         ])
         self.b = np.array([8.0, 7.0, 4.0, 3.0])
-        self.initial_x = np.array([0.25, -0.5, 0.75, 1.0])
+        self.initial_x = np.array([1.0, 2.0, 3.0, 4.0])
 
     def test_csr_sweep_matches_cpu_reference(self):
         matrix = csr_matrix(self.matrix)

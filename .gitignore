@@ -167,3 +167,4 @@ cython_debug/
 code_gen/cfmtx_matrices/
 code_gen/mtx_matrices/
 data/
+benchmark/matrices/

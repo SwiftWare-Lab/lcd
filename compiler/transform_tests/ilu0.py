@@ -11,9 +11,22 @@ function_props_csr = {
 def ilu0_csr_row_dependencies(Ap, Ai, row_done, n):
     for i in range(n):
         row_accum = 0.0
+        scale = 0.5 / (Ap[i + 1] - Ap[i] + 1)
         for k_ptr in range(Ap[i], Ap[i + 1]):
             if Ai[k_ptr] < i:
-                row_accum += row_done[Ai[k_ptr]]
+                row_accum += scale * row_done[Ai[k_ptr]]
+        row_done[i] = row_accum + 1.0
+    return row_done
+
+
+@parallel(loop="i", function_props=function_props_csr, execution_mode="sync_free")
+def ilu0_csr_row_dependencies_sync_free(Ap, Ai, row_done, n):
+    for i in range(n):
+        row_accum = 0.0
+        scale = 0.5 / (Ap[i + 1] - Ap[i] + 1)
+        for k_ptr in range(Ap[i], Ap[i + 1]):
+            if Ai[k_ptr] < i:
+                row_accum += scale * row_done[Ai[k_ptr]]
         row_done[i] = row_accum + 1.0
     return row_done
 

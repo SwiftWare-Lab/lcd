@@ -249,6 +249,8 @@ class CUDALowerer:
             kernel_body = [self._block_iterator_assignment()]
             if self.execution_mode == "sync_free":
                 kernel_body.append(self._sync_free_wait())
+                # Acquire predecessor outputs after observing the ready count.
+                kernel_body.append(self._device_fence())
             kernel_body.extend(lowered_loop_body)
         if self.execution_mode == "sync_free":
             kernel_body.extend(self._sync_free_release())
@@ -720,11 +722,27 @@ class CUDALowerer:
             orelse=[],
         )
 
+    @staticmethod
+    def _device_fence():
+        return ast.Expr(
+            value=ast.Call(
+                func=ast.Attribute(
+                    value=ast.Name(id="cuda", ctx=ast.Load()),
+                    attr="threadfence",
+                    ctx=ast.Load(),
+                ),
+                args=[],
+                keywords=[],
+            )
+        )
+
     def _sync_free_release(self):
         # Do not reuse the task iterator as the adjacency-list iterator: the
         # task ID is still needed to select its successor-list bounds.
         task = ast.Name(id=self.loop_iterator, ctx=ast.Load())
         return [
+            # Publish the row output before successors see a ready count.
+            self._device_fence(),
             ast.Assign(
                 targets=[ast.Name(id="_dag_start", ctx=ast.Store())],
                 value=ast.Subscript(
