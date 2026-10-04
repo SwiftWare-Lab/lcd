@@ -95,3 +95,12 @@ def compile_ilu0_csc(execution_mode="wavefront", threads_per_block=128):
         threads_per_block=threads_per_block,
     )(ilu0_csc)
 
+
+def main():
+    """Compile both ILU0 demo operations through the complete pipeline."""
+    compile_ilu0_csr()
+    compile_ilu0_csc()
+
+
+if __name__ == "__main__":
+    main()
