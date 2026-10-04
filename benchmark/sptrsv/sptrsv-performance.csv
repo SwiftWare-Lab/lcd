@@ -1,2 +1,0 @@
-matrices,tr_csr_syncfree_baseline,tr_csc_syncfree_baseline,tr_csr_wavefront_baseline,tr_csc_wavefront_baseline
-/home/salehm32/projects/fused-gnn/fusion/data/gpu-backend-data/1138_bus/1138_bus.mtx,0.106637,0.137370,0.081337,0.064392
