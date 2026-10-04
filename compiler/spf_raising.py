@@ -1,10 +1,334 @@
 import ast
+from copy import deepcopy
+import re
+import textwrap
+
+import sympy
+
+from compiler.lcd.lcd_def import *
+from compiler.lcd.lcd_raising import LCDBuilder
 from compiler.spf_def import *
 
 
 # from sympy import Symbol, Eq, GreaterThan, Lt, And, Or, Not
 # from copy import deepcopy
 # from legality_check import check_legality_of_fusion
+
+
+_LEN_CALL = re.compile(r"\blen\(([A-Za-z_]\w*)\)")
+
+
+def _len_symbol(argument):
+    return "len_" + argument
+
+
+def _len_symbols(expression):
+    return {
+        _len_symbol(match.group(1))
+        for match in _LEN_CALL.finditer(expression)
+    }
+
+
+def _replace_len_calls_for_sympy(expression):
+    return _LEN_CALL.sub(
+        lambda match: _len_symbol(match.group(1)),
+        expression,
+    )
+
+
+class LoopBound:
+    def __init__(self, start, end):
+        self.start = start
+        self.end = end
+
+    def subscript_iteration_vars(self, subscript, iteration_vars=None):
+        if isinstance(self.start, Expression):
+            new_start = self.start.subscript(subscript, iteration_vars)
+        elif isinstance(self.start, Access):
+            new_start = self.start.subscript_index(subscript, iteration_vars)
+        else:
+            new_start = self.start
+        if isinstance(self.end, Expression):
+            new_end = self.end.subscript(subscript, iteration_vars)
+        elif isinstance(self.end, Access):
+            new_end = self.end.subscript_index(subscript, iteration_vars)
+        else:
+            new_end = self.end
+        return LoopBound(new_start, new_end)
+
+    def get_sympy_expr(self, iter_var):
+        f1 = []
+        f2 = []
+        consts = []
+        if isinstance(self.start, Access):
+            f1, start = self.start.get_sympy_expr()
+        elif isinstance(self.start, Expression):
+            start = self.start.get_sympy_expr()
+            consts.extend(self.start.get_symbolic_constants())
+        elif self.start.isnumeric():
+            start = int(self.start)
+        else:
+            start = sympy.Symbol(
+                _replace_len_calls_for_sympy(self.start)
+            )
+            consts.append(start)
+        if isinstance(self.end, Access):
+            f2, end = self.end.get_sympy_expr()
+        elif isinstance(self.end, Expression):
+            end = self.end.get_sympy_expr()
+            consts.extend(self.end.get_symbolic_constants())
+        elif self.end.isnumeric():
+            end = int(self.end)
+        else:
+            end = sympy.Symbol(
+                _replace_len_calls_for_sympy(self.end)
+            )
+            consts.append(end)
+        return consts, f1 + f2, sympy.And(
+            sympy.GreaterThan(sympy.Symbol(iter_var), start),
+            sympy.LessThan(sympy.Symbol(iter_var), end),
+        )
+
+    def to_premises(self, iter_var):
+        return [
+            GreaterThanOrEqual(iter_var, self.start),
+            LessThan(iter_var, self.end),
+        ]
+
+    def __repr__(self):
+        return "(" + str(self.start) + ", " + str(self.end) + ")"
+
+
+class Access:
+    def __init__(self, var, index):
+        self.var = var
+        self.index = index
+
+    def get_sympy_expr(self):
+        func = self.get_data_array()
+        funcs = [func]
+        index_funcs, args = self.get_index_sympy_expr()
+        funcs += [f for f in index_funcs if f is not None]
+        func_sym = sympy.Function(func)(args)
+        return funcs, func_sym
+
+    def subscript_index(self, subscript, iteration_vars=None):
+        if isinstance(self.index, Access):
+            return Access(self.var, self.index.subscript_index(subscript, iteration_vars))
+        if isinstance(self.index, Expression):
+            return Access(self.var, self.index.subscript(subscript, iteration_vars))
+        if (isinstance(self.index, str) and self.index.isidentifier()
+                and (iteration_vars is None or self.index in iteration_vars)):
+            return Access(self.var, self.index + subscript)
+        return Access(self.var, self.index)
+
+    def __eq__(self, other):
+        if isinstance(other, Access):
+            if type(self.index) is list and type(other.index) is list:
+                self.index.sort()
+                other.index.sort()
+            return self.var == other.var and self.index == other.index
+        return False
+
+    def __str__(self):
+        return f"{self.var}[{self.index}]" if self.index is not None else self.var
+
+    def __hash__(self):
+        return hash(str(self))
+
+    def __repr__(self):
+        return str(self)
+
+    def get_data_array(self):
+        if isinstance(self.var, Access):
+            return self.var.get_data_array()
+        return self.var
+
+    def get_index(self):
+        if isinstance(self.var, Access):
+            return self.var.get_index() + (self.index,)
+        return (self.index,)
+
+    def get_index_sympy_expr(self):
+        if isinstance(self.index, Access):
+            return self.index.get_sympy_expr()
+        if isinstance(self.index, Expression):
+            return [], self.index.get_sympy_expr()
+        return [], sympy.Symbol(str(self.index).replace(".", ""))
+
+
+class Expression:
+    def __init__(self, elements):
+        self.elements = elements
+
+    def __str__(self):
+        return " ".join(list(map(str, self.elements)))
+
+    def __repr__(self):
+        return str(self)
+
+    def get_sympy_expr(self):
+        expression = (
+            str(self)
+            .replace(".", "")
+            .replace("[", "(")
+            .replace("]", ")")
+        )
+        return sympy.parse_expr(
+            _replace_len_calls_for_sympy(expression)
+        )
+
+    def get_symbolic_constants(self):
+        return [
+            sympy.Symbol(name)
+            for name in _len_symbols(str(self))
+        ]
+
+    def subscript(self, subscript, iteration_vars=None):
+        new_expr = Expression(deepcopy(self.elements))
+        for i, element in enumerate(new_expr.elements):
+            if isinstance(element, Access):
+                new_expr.elements[i] = element.subscript_index(subscript, iteration_vars)
+            elif isinstance(element, Expression):
+                new_expr.elements[i] = element.subscript(subscript, iteration_vars)
+            elif (isinstance(element, str) and element.isidentifier()
+                  and (iteration_vars is None or element in iteration_vars)):
+                new_expr.elements[i] = element + subscript
+        return new_expr
+
+
+class SPFNode:
+    def __init__(self, node_id):
+        self.id = node_id
+        self.children = []
+        self.schedule = None
+
+    def add_child(self, node):
+        self.children.append(node)
+
+    def __repr__(self):
+        return self.id
+
+    def __str__(self):
+        return self.id
+
+
+class LoopNode(SPFNode):
+    def __init__(self, node_id, iter_var, loop_bound):
+        super().__init__(node_id)
+        self.iter_var = iter_var
+        self.bound = loop_bound
+        self.break_conditions = []
+
+
+class AssignNode(SPFNode):
+    def __init__(
+            self,
+            node_id,
+            target,
+            value,
+            update_op=None,
+            source_statement=None,
+    ):
+        super().__init__(node_id)
+        self.target = target
+        self.value = value
+        self.update_op = update_op
+        self.source_statement = source_statement
+        self.read_accesses = []
+        self.write_access = None
+        self.domain = []
+        self.loop_domain = []
+
+    def add_read_access(self, read_access):
+        self.read_accesses.append(read_access)
+
+    def add_domain_premise(self, premise):
+        self.domain.append(premise)
+
+    def __str__(self):
+        return (
+            self.id
+            + "\n - write: "
+            + str(self.write_access)
+            + "\n - reads: \n"
+            + "\n".join(map(str, self.read_accesses))
+            + "\n - domain: \n"
+            + "\n".join(map(str, self.domain))
+            + "\n - loop domain: \n"
+            + "\n".join(map(str, self.loop_domain))
+        )
+
+
+class _SPFBuilderBase:
+    def __init__(self):
+        self.loop_counter = 0
+        self.stmt_counter = 0
+        self.fused_loop_ids = []
+
+    def next_loop_id(self):
+        loop_id = "F" + str(self.loop_counter)
+        self.loop_counter += 1
+        return loop_id
+
+    def next_stmt_id(self):
+        stmt_id = "S" + str(self.stmt_counter)
+        self.stmt_counter += 1
+        return stmt_id
+
+    def create_assign_node(
+            self,
+            target,
+            value,
+            is_augmented=False,
+            update_op=None,
+            domain=None,
+            source_statement=None,
+    ):
+        assign_node = AssignNode(
+            self.next_stmt_id(),
+            target,
+            value,
+            update_op=update_op,
+            source_statement=source_statement,
+        )
+        assign_node.write_access = self.convert_write_target(target)
+        if is_augmented and assign_node.write_access is not None:
+            assign_node.add_read_access(assign_node.write_access)
+        for read_access in self.extract_read_accesses(value):
+            assign_node.add_read_access(read_access)
+        self.add_domain_premises(assign_node, domain or [])
+        return assign_node
+
+    def create_loop_node(self, iter_var, loop_bound, body):
+        loop_node = LoopNode(self.next_loop_id(), iter_var, loop_bound)
+        for stmt in body:
+            loop_node.add_child(stmt)
+        return loop_node
+
+    def convert_write_target(self, target):
+        raise NotImplementedError
+
+    def extract_read_accesses(self, value):
+        reads = []
+        self._collect_accesses(value, reads)
+        return reads
+
+    def _collect_accesses(self, value, reads):
+        if isinstance(value, Access):
+            reads.append(value)
+            return
+        if isinstance(value, Expression):
+            for element in value.elements:
+                self._collect_accesses(element, reads)
+
+    def add_domain_premises(self, assign_node, domain):
+        for premise in domain:
+            assign_node.add_domain_premise(premise)
+            for read_access in premise.read_accesses():
+                if read_access not in assign_node.read_accesses:
+                    assign_node.add_read_access(read_access)
+
 
 class SparseFusionTransformer(ast.NodeTransformer):
     def __init__(self, directives):
@@ -125,18 +449,11 @@ class LegalFusionTransformer(ast.NodeTransformer):
             return node
 
 
-class SPFBuilder(ast.NodeVisitor):
+class SPFBuilder(ast.NodeVisitor, _SPFBuilderBase):
 
     def __init__(self):
-        # self.spf_tree = []
-        # self.statements = []
-        # self.schedules = [-1]
-        # self.statements = []
-        # self.current_schedule = []
-        # self.loop_bounds = {}  # Maps loop variable names to their bounds
-        self.loop_counter = 0
-        self.stmt_counter = 0
-        self.fused_loop_ids = []
+        ast.NodeVisitor.__init__(self)
+        _SPFBuilderBase.__init__(self)
 
     def visit_Module(self, node):
         assert len(node.body) == 1 and isinstance(node.body[0], ast.FunctionDef), "Wrong usage."
@@ -160,60 +477,35 @@ class SPFBuilder(ast.NodeVisitor):
 
     def visit_Assign(self, node):
         assert len(node.targets) == 1, "Tuple assignment is not supported."
-        target = node.targets[0]
-        stmt_id = "S" + str(self.stmt_counter)
-        self.stmt_counter += 1
-        assign_node = AssignNode(stmt_id, target, node.value)
-        if isinstance(target, ast.Name):
-            assign_node.write_access = Access(target.id, None)
-        elif isinstance(target, ast.Subscript):
-            assign_node.write_access = self.visit(target)
-        else:
-            raise NotImplementedError(f"Unsupported assign target type: {type(target)}")
+        target = self.convert_target(node.targets[0])
         value = self.visit(node.value)
-        if isinstance(value, Expression):
-            for el in value.elements:
-                if isinstance(el, Access):
-                    assign_node.add_read_access(el)
-        elif isinstance(value, Access):
-            assign_node.add_read_access(value)
-        return assign_node
+        return self.create_assign_node(
+            target,
+            value,
+            source_statement=node,
+        )
 
     def visit_AugAssign(self, node):
-        target = node.target
-        stmt_id = "S" + str(self.stmt_counter)
-        self.stmt_counter += 1
-        assign_node = AssignNode(stmt_id, target, node.value)
-        if isinstance(target, ast.Name):
-            assign_node.write_access = Access(target.id, None)
-        elif isinstance(target, ast.Subscript):
-            assign_node.write_access = self.visit(target)
-        else:
-            raise NotImplementedError(f"Unsupported assign target type: {type(target)}")
+        target = self.convert_target(node.target)
         value = self.visit(node.value)
-        if isinstance(value, Expression):
-            for el in value.elements:
-                if isinstance(el, Access):
-                    assign_node.add_read_access(el)
-        elif isinstance(value, Access):
-            assign_node.add_read_access(value)
-        return assign_node
+        return self.create_assign_node(
+            target,
+            value,
+            is_augmented=True,
+            update_op=self.symbolize_operator(node.op),
+            source_statement=node,
+        )
 
     def visit_For(self, node):
         iter_var = self.visit(node.target)
         loop_bound = self.visit_iter(node.iter)
-        loop_id = "F" + str(self.loop_counter)
-        # if isinstance(node.iter, ast.Call) and node.iter.func.id == 'frange':
-        #     self.fused_loop_ids.append(loop_id)
-        self.loop_counter += 1
-        loop_node = LoopNode(loop_id, iter_var, loop_bound)
+        body = []
         for s in node.body:
             assert (isinstance(s, ast.For) or isinstance(s, ast.Assign)
                     or isinstance(s, ast.AugAssign) or isinstance(s, ast.Return)) \
                 , "Only for loops and assignments are supported for now."
-            node = self.visit(s)
-            loop_node.add_child(node)
-        return loop_node
+            body.append(self.visit(s))
+        return self.create_loop_node(iter_var, loop_bound, body)
 
     # TODO: Iter can be subscript two
     def visit_iter(self, node):
@@ -233,10 +525,10 @@ class SPFBuilder(ast.NodeVisitor):
         else:
             start = node.args[0]
             end = node.args[1]
-        assert ((isinstance(start, ast.Constant) or isinstance(start, ast.Name)) and
-                (isinstance(end, ast.Constant) or isinstance(end, ast.Name))) or \
-               (isinstance(start, ast.Subscript) and isinstance(end, ast.Subscript)), \
-            "This functionality is not supported yet."
+        # assert ((isinstance(start, ast.Constant) or isinstance(start, ast.Name)) and
+        #         (isinstance(end, ast.Constant) or isinstance(end, ast.Name))) or \
+        #        (isinstance(start, ast.Subscript) and isinstance(end, ast.Subscript)), \
+        #     "This functionality is not supported yet."
 
         start_sym = self.visit_loop_bound(start)
         end_sym = self.visit_loop_bound(end)
@@ -251,6 +543,8 @@ class SPFBuilder(ast.NodeVisitor):
         elif isinstance(node, ast.Subscript):
             # Handle subscripted access to arrays or lists
             return self.visit_Subscript(node)
+        elif isinstance(node, ast.BinOp):
+            return self.visit_BinOp(node)
         else:
             raise NotImplementedError(f"Unsupported loop bound type: {type(node)}")
 
@@ -259,6 +553,20 @@ class SPFBuilder(ast.NodeVisitor):
         var = self.visit(node.value)
         index = self.visit(node.slice)
         return Access(var, index)
+
+    def convert_target(self, node):
+        if isinstance(node, ast.Name):
+            return node.id
+        if isinstance(node, ast.Subscript):
+            return self.visit(node)
+        raise NotImplementedError(f"Unsupported assign target type: {type(node)}")
+
+    def convert_write_target(self, target):
+        if isinstance(target, str):
+            return Access(target, None)
+        if isinstance(target, Access):
+            return target
+        raise NotImplementedError(f"Unsupported write target type: {type(target)}")
 
     def visit_BinOp(self, node):
         expr = []
@@ -283,10 +591,294 @@ class SPFBuilder(ast.NodeVisitor):
             ast.Mult: '*',
             ast.Div: '/',
             ast.Mod: '%',
+            ast.BitAnd: '&',
+            ast.BitOr: '|',
+            ast.BitXor: '^',
         }
         if type(fn) not in operator_to_string:
             raise NotImplementedError(f"Operator {fn} is not supported.")
         return operator_to_string[type(fn)]
+
+
+class LCDToSPFConverter(_SPFBuilderBase):
+    """Converts the LCD IR into the SPF loop/statement tree."""
+
+    def __init__(self):
+        super().__init__()
+
+    def convert(self, lcd_ir):
+        return self.visit(lcd_ir)
+
+    def visit(self, node):
+        method_name = f"visit_{type(node).__name__}"
+        visitor = getattr(self, method_name, None)
+        if visitor is None:
+            raise NotImplementedError(f"Unsupported LCD node type: {type(node)}")
+        return visitor(node)
+
+    def visit_LCD(self, node):
+        root = SPFNode("root")
+        body, _, _ = self.convert_statement_list(node.body, [])
+        for stmt in body:
+            root.add_child(stmt)
+        return root
+
+    def visit_LCDFor(self, node):
+        loop_bound = LoopBound(
+            self.convert_value(node.lbound),
+            self.convert_value(node.ubound),
+        )
+        body, _, break_triggers = self.convert_statement_list(node.body, [])
+        break_constraints = [
+            self.create_prior_iteration_break_premise(node, trigger)
+            for trigger in break_triggers
+        ]
+        for child in body:
+            self.add_domain_to_assignments(child, break_constraints)
+        loop_node = self.create_loop_node(node.var.name, loop_bound, body)
+        # Retain structured exits for inspector generation. Dependence
+        # analysis still receives the equivalent quantified prefix premises,
+        # while DAG code generation can reproduce the original ``break``.
+        loop_node.break_conditions = [
+            trigger.copy()
+            for trigger in break_triggers
+        ]
+        return loop_node
+
+    def visit_LCDAssign(self, node):
+        return self.convert_assign(node, [])
+
+    def convert_assign(self, node, domain):
+        target = self.convert_target(node.target)
+        is_augmented = (
+            isinstance(node.value, LCDBin)
+            and self._same_storage(node.target, node.value.left)
+        )
+        value_node = node.value.right if is_augmented else node.value
+        value = self.convert_value(value_node)
+        update_op = node.value.op if is_augmented else None
+        return self.create_assign_node(
+            target,
+            value,
+            is_augmented=is_augmented,
+            update_op=update_op,
+            domain=domain,
+            source_statement=getattr(node, "source_statement", None),
+        )
+
+    def visit_LCDIf(self, node):
+        body, _, _ = self.convert_if(node, [])
+        return body
+
+    def convert_statement_list(self, statements, domain):
+        body = []
+        active_domain = list(domain)
+        break_triggers = []
+        for stmt in statements:
+            if isinstance(stmt, LCDIf):
+                if_body, active_domain, if_break_triggers = self.convert_if(stmt, active_domain)
+                body.extend(if_body)
+                break_triggers.extend(if_break_triggers)
+            elif isinstance(stmt, LCDAssign):
+                body.append(self.convert_assign(stmt, active_domain))
+            elif isinstance(stmt, LCDFor):
+                loop_node = self.visit_LCDFor(stmt)
+                self.add_domain_to_assignments(loop_node, active_domain)
+                body.append(loop_node)
+            else:
+                raise NotImplementedError(f"Unsupported LCD statement type: {type(stmt)}")
+        return body, active_domain, break_triggers
+
+    def convert_if(self, node, domain):
+        condition = self.convert_condition(node.condition)
+        if_domain = domain + [condition]
+        body, _, break_triggers = self.convert_statement_list(
+            node.if_body,
+            if_domain,
+        )
+
+        if_trigger = AndPremise(if_domain)
+        next_domain = list(domain)
+        if node.has_break:
+            break_triggers.append(if_trigger)
+            next_domain.append(NotPremise(if_trigger.copy()))
+        if node.has_continue:
+            next_domain.append(NotPremise(if_trigger.copy()))
+
+        if (
+                node.else_body
+                or node.else_has_break
+                or node.else_has_continue
+        ):
+            else_condition = NotPremise(condition.copy())
+            else_domain = domain + [else_condition]
+            else_body, _, else_break_triggers = self.convert_statement_list(
+                node.else_body,
+                else_domain,
+            )
+            body.extend(else_body)
+            break_triggers.extend(else_break_triggers)
+
+            else_trigger = AndPremise(else_domain)
+            if node.else_has_break:
+                break_triggers.append(else_trigger)
+                next_domain.append(NotPremise(else_trigger.copy()))
+            if node.else_has_continue:
+                next_domain.append(NotPremise(else_trigger.copy()))
+        return body, next_domain, break_triggers
+
+    def create_prior_iteration_break_premise(self, loop_node, trigger):
+        iter_var = loop_node.var.name
+        prior_iter_var = iter_var + "_prev"
+        lower_bound = self.convert_value(loop_node.lbound)
+        prior_bounds = [
+            GreaterThanOrEqual(prior_iter_var, lower_bound),
+            GreaterThan(iter_var, prior_iter_var),
+        ]
+        prior_trigger = SubstitutePremise(trigger.copy(), {iter_var: prior_iter_var})
+        return ForAllPremise(prior_iter_var, prior_bounds, NotPremise(prior_trigger))
+
+    def add_domain_to_assignments(self, node, domain):
+        if isinstance(node, AssignNode):
+            self.add_domain_premises(node, domain)
+            return
+        for child in node.children:
+            self.add_domain_to_assignments(child, domain)
+
+    def convert_target(self, node):
+        if isinstance(node, LCDVar):
+            return node.name
+        if isinstance(node, LCDAccess):
+            return self.convert_access(node)
+        raise NotImplementedError(f"Unsupported LCD assign target type: {type(node)}")
+
+    def convert_write_target(self, target):
+        if isinstance(target, str):
+            return Access(target, None)
+        if isinstance(target, Access):
+            return target
+        raise NotImplementedError(f"Unsupported LCD write target type: {type(target)}")
+
+    def convert_condition(self, node):
+        if isinstance(node, LCDCompare):
+            left = self.convert_value(node.left)
+            right = self.convert_value(node.right)
+            comparison_to_premise = {
+                "==": Equality,
+                "!=": NotEqual,
+                ">": GreaterThan,
+                ">=": GreaterThanOrEqual,
+                "<": LessThan,
+                "<=": LessThanOrEqual,
+            }
+            if node.op not in comparison_to_premise:
+                raise NotImplementedError(f"Unsupported LCD comparison operator: {node.op}")
+            return comparison_to_premise[node.op](left, right)
+        if isinstance(node, LCDBin) and node.op == "and":
+            return AndPremise([self.convert_condition(node.left), self.convert_condition(node.right)])
+        if isinstance(node, LCDBin) and node.op == "or":
+            return OrPremise([self.convert_condition(node.left), self.convert_condition(node.right)])
+        if isinstance(node, LCDUn) and node.op == "not":
+            return NotPremise(self.convert_condition(node.target))
+        return ExpressionPremise(self.convert_value(node))
+
+    def convert_value(self, node):
+        if isinstance(node, LCDVar):
+            return node.name
+        if isinstance(node, LCDConst):
+            return str(node.value)
+        if isinstance(node, LCDOpaque):
+            return str(node)
+        if isinstance(node, LCDAccess):
+            return self.convert_access(node)
+        if isinstance(node, LCDBin):
+            return self.convert_binary(node)
+        if isinstance(node, LCDUn):
+            target = self.convert_value(node.target)
+            return Expression([node.op, target])
+        if isinstance(node, LCDCompare):
+            left = self.convert_value(node.left)
+            right = self.convert_value(node.right)
+            return Expression([left, node.op, right])
+        raise NotImplementedError(f"Unsupported LCD expression type: {type(node)}")
+
+    def convert_access(self, node):
+        access = node.target.name
+        for func in node.funcs:
+            access = Access(access, self.convert_value(func))
+        return access
+
+    def convert_binary(self, node):
+        expr = []
+        left = self.convert_value(node.left)
+        right = self.convert_value(node.right)
+        if isinstance(left, Expression):
+            expr += left.elements
+        else:
+            expr.append(left)
+        expr.append(node.op)
+        if isinstance(right, Expression):
+            expr += right.elements
+        else:
+            expr.append(right)
+        return Expression(expr)
+
+    def _same_storage(self, left, right):
+        if type(left) is not type(right):
+            return False
+        if isinstance(left, LCDVar):
+            return left.name == right.name
+        if isinstance(left, LCDAccess):
+            return str(left) == str(right)
+        return False
+
+
+class LCDBlockLoopExtractor:
+    """Keep only the LCD subtree rooted at one block-mapped loop.
+
+    Enclosing loops are executor/host loops for the generated CUDA launcher.
+    They should not appear in the SPF backend schedules used by dependence
+    analysis and DAG inspection.  If an enclosing-loop iterator is referenced
+    inside the selected loop body, it remains a normal symbolic value and is
+    therefore treated like a parameter by the backend IR.
+    """
+
+    def __init__(self, block_iterator):
+        self.block_iterator = block_iterator
+        self.matches = []
+
+    def extract(self, lcd_ir):
+        self._visit_statements(lcd_ir.body)
+        if len(self.matches) != 1:
+            raise ValueError(
+                "The block-mapped iterator must identify exactly one LCD "
+                f"for loop; found {len(self.matches)} for "
+                f"{self.block_iterator!r}."
+            )
+        pruned = LCD()
+        pruned.body.append(deepcopy(self.matches[0]))
+        return pruned
+
+    def _visit_statements(self, statements):
+        for statement in statements:
+            if isinstance(statement, LCDFor):
+                if statement.var.name == self.block_iterator:
+                    self.matches.append(statement)
+                self._visit_statements(statement.body)
+            elif isinstance(statement, LCDIf):
+                self._visit_statements(statement.if_body)
+                self._visit_statements(statement.else_body)
+
+
+def build_spf_from_ast(module, block_iterator=None):
+    """Raise Python AST through LCD into the SPF backend IR."""
+    from compiler.ast_normalization import normalize_aliases
+
+    module = normalize_aliases(module)
+    lcd_ir = LCDBuilder().visit(module)
+    if block_iterator is not None:
+        lcd_ir = LCDBlockLoopExtractor(block_iterator).extract(lcd_ir)
+    return LCDToSPFConverter().convert(lcd_ir)
 
 
 # DFS Algorithm on DFS tree
@@ -295,25 +887,92 @@ def extract_node_data(spf_node):
     node_data = {}
     node_data[spf_node.id] = spf_node
     # Hold level, and statment_counter in addition to node to construct the schedule for each node correctly
-    stack = [(spf_node, 0, -1)]
+    stack = [(spf_node, 0, -1, [])]
     schedule = []
     # loop_last_statements = {}
     while len(stack) > 0:
-        cur_node, node_counter, cur_level = stack.pop()
+        cur_node, node_counter, cur_level, loop_domain = stack.pop()
         schedule = schedule[:cur_level * 2]
         level = cur_level + 1
+        child_loop_domain = loop_domain
         if isinstance(cur_node, LoopNode):
             schedule.append(str(node_counter))
             cur_node.schedule = Schedule(schedule)
             node_data[cur_node.id] = cur_node
             schedule.append(cur_node.iter_var)
+            child_loop_domain = loop_domain + cur_node.bound.to_premises(cur_node.iter_var)
         if isinstance(cur_node, AssignNode):
             schedule.append(str(node_counter))
             cur_node.schedule = Schedule(schedule)
+            cur_node.loop_domain = loop_domain
             node_data[cur_node.id] = cur_node
         for i, c in enumerate(cur_node.children[::-1]):
             counter = len(cur_node.children) - 1 - i
-            stack.append((c, counter, level))
+            stack.append((c, counter, level, child_loop_domain))
     return node_data
 
 
+test_code = """
+def ilu0_csr_numba(A_data, A_indices, A_indptr, n):
+    for i in range(n):
+        row_start = A_indptr[i]
+        row_end = A_indptr[i + 1]
+        for k_ptr in range(row_start, row_end):
+            k = A_indices[k_ptr]
+            if k >= i:
+                break
+            diag_val = 0.0
+            for diag_ptr in range(A_indptr[k], A_indptr[k + 1]):
+                if A_indices[diag_ptr] == k:
+                    diag_val = A_data[diag_ptr]
+                    break
+            if diag_val != 0.0:
+                A_data[k_ptr] = A_data[k_ptr] / diag_val
+                l_ik = A_data[k_ptr]
+                for j_ptr in range(k_ptr + 1, row_end):
+                    j = A_indices[j_ptr]
+                    for kj_ptr in range(A_indptr[k], A_indptr[k + 1]):
+                        if A_indices[kj_ptr] == j:
+                            u_kj = A_data[kj_ptr]
+                            A_data[j_ptr] = A_data[j_ptr] - l_ik * u_kj
+                            break
+"""
+
+
+def print_spf_nodes(node_data):
+    for node_id in sorted(node_data):
+        node = node_data[node_id]
+        if isinstance(node, LoopNode):
+            print(f"{node_id}: LoopNode")
+            print(f"  iter_var: {node.iter_var}")
+            print(f"  bound: {node.bound}")
+            print(f"  schedule: {node.schedule}")
+            print(f"  children: {[child.id for child in node.children]}")
+        elif isinstance(node, AssignNode):
+            print(f"{node_id}: AssignNode")
+            print(f"  write_access: {node.write_access}")
+            print(f"  read_accesses: {node.read_accesses}")
+            print(f"  schedule: {node.schedule}")
+            print(f"  domain: {node.domain}")
+            print(f"  loop_domain: {node.loop_domain}")
+        else:
+            print(f"{node_id}: {type(node).__name__}")
+        print()
+
+
+def demo_lcd_to_spf_converter():
+    module = ast.parse(test_code)
+    lcd_ir = LCDBuilder().visit(module)
+    spf_root = LCDToSPFConverter().convert(lcd_ir)
+    node_data = extract_node_data(spf_root)
+
+    print("LCD representation")
+    print(lcd_ir)
+    print()
+    print("SPF nodes")
+    print_spf_nodes(node_data)
+    return lcd_ir, spf_root, node_data
+
+
+if __name__ == "__main__":
+    demo_lcd_to_spf_converter()

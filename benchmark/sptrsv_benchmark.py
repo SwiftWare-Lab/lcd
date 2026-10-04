@@ -630,5 +630,5 @@ def benchmark(matrices, provider):
     return perf(ms), perf(min_ms), perf(max_ms)
 
 # Call the benchmark function
-benchmark.run(print_data=True, save_path=".", show_plots=True)
+# benchmark.run(print_data=True, save_path=".", show_plots=True)
 
