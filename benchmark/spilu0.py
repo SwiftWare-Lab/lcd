@@ -435,5 +435,317 @@ def prepare_for_ilu0(A):
         A = A + csr_matrix((np.full(len(missing), eps, dtype=A.dtype), (missing, missing)), shape=A.shape)
     return A
 
+def find_diagonal_positions(A):
+    n = A.shape[0]
+    diag_pos = np.zeros(n, dtype=np.int32)
+    for i in range(n):
+        row_start = A.indptr[i]
+        row_end = A.indptr[i + 1]
+        for ptr in range(row_start, row_end):
+            if A.indices[ptr] == i:
+                diag_pos[i] = ptr
+                break
+    return diag_pos
+
 def compute_ilu_dependency_graph(A):
     return compute_ilu_dependency_counts_csr(A)
+
+def compute_ilu_wavefront_csr(A):
+    n = A.shape[0]
+    dep_counts = compute_ilu_dependency_counts_csr(A)
+    
+    A_csc = A.tocsc()
+    
+    wavefront_list = []
+    remaining = set(range(n))
+    
+    while remaining:
+        wavefront = [i for i in remaining if dep_counts[i] == 0]
+        if not wavefront:
+            break
+        
+        wavefront_list.append(np.array(wavefront, dtype=np.int32))
+        
+        for i in wavefront:
+            remaining.remove(i)
+        
+        for i in wavefront:
+            col_start = A_csc.indptr[i]
+            col_end = A_csc.indptr[i + 1]
+            for ptr in range(col_start, col_end):
+                j = A_csc.indices[ptr]
+                if j > i and j in remaining:
+                    dep_counts[j] -= 1
+    
+    return wavefront_list
+
+########################################################
+########################################################
+
+
+# many alternatives to this, may choose for tradeoffs
+@cuda.jit(device=True, inline=True)
+def bin_search_col(colind, start, end, key):
+    lo = start
+    hi = end - 1
+    while lo <= hi:
+        mid = (lo + hi) >> 1
+        c = colind[mid]
+        if c < key:
+            lo = mid + 1
+        elif c > key:
+            hi = mid - 1
+        else:
+            return mid
+    return -1
+
+@cuda.jit
+def ilu0_csr_wavefront_mapping_kernel(data, indices, indptr, rows, diag_pos):
+    b = cuda.blockIdx.x
+    tid = cuda.threadIdx.x
+    if b >= rows.size:
+        return
+
+    row = rows[b]
+    row_start = indptr[row]
+    row_end   = indptr[row + 1]
+
+    sh_l = cuda.shared.array(1, dtype=float64)
+
+    k_ptr = row_start
+    while k_ptr < row_end:
+        k = indices[k_ptr]
+        if k >= row:
+            break
+
+        diag_ptr = diag_pos[k]
+        u_kk = data[diag_ptr]
+
+        if u_kk != 0.0:
+            if tid == 0:
+                l_ik = data[k_ptr] / u_kk
+                data[k_ptr] = l_ik
+                sh_l[0] = l_ik
+            cuda.syncthreads()
+            l_ik = sh_l[0]
+
+            k_row_start = indptr[k]
+            k_row_end   = indptr[k + 1]
+
+            for j_ptr in range(k_ptr + 1 + tid, row_end, cuda.blockDim.x):
+                jcol = indices[j_ptr]
+                pos = bin_search_col(indices, k_row_start, k_row_end, jcol)
+                if pos != -1:
+                    data[j_ptr] -= l_ik * data[pos]
+
+        cuda.syncthreads()
+        k_ptr += 1
+
+
+def ilu0_csr_numba_wavefront_mapping(data, indices, indptr, wave_rows, diag_pos, threads_per_block=128):
+    blocks = wave_rows.size
+    ilu0_csr_wavefront_mapping_kernel[blocks, threads_per_block](
+        data, indices, indptr, wave_rows, diag_pos
+    )
+    cuda.synchronize()
+
+
+@cuda.jit
+def ilu0_csr_sync_free_mapping_kernel(data, indices, indptr,
+                                    dep_counts, succ_offsets, succ_indices,
+                                    diag_pos):
+    i = cuda.blockIdx.x
+    tid = cuda.threadIdx.x
+    if i >= dep_counts.size:
+        return
+
+    while cuda.atomic.add(dep_counts, i, 0) > 0:
+        pass
+
+    row_start = indptr[i]
+    row_end   = indptr[i + 1]
+    sh_l = cuda.shared.array(1, dtype=float64)
+
+    k_ptr = row_start
+    while k_ptr < row_end:
+        k = indices[k_ptr]
+        if k >= i:
+            break
+
+        diag_ptr = diag_pos[k]
+        u_kk = data[diag_ptr]
+
+        if u_kk != 0.0:
+            if tid == 0:
+                l_ik = data[k_ptr] / u_kk
+                data[k_ptr] = l_ik
+                sh_l[0] = l_ik
+            cuda.syncthreads()
+            l_ik = sh_l[0]
+
+            k_row_start = indptr[k]
+            k_row_end   = indptr[k + 1]
+            for j_ptr in range(k_ptr + 1 + tid, row_end, cuda.blockDim.x):
+                jcol = indices[j_ptr]
+                pos = bin_search_col(indices, k_row_start, k_row_end, jcol)
+                if pos != -1:
+                    data[j_ptr] -= l_ik * data[pos]
+        cuda.syncthreads()
+        k_ptr += 1
+
+    s0 = succ_offsets[i]
+    s1 = succ_offsets[i + 1]
+    for p in range(s0 + tid, s1, cuda.blockDim.x):
+        s = succ_indices[p]
+        cuda.atomic.add(dep_counts, s, -1)
+
+
+def ilu0_csr_numba_sync_free_mapping(data, indices, indptr,
+                                   dep_counts, succ_offsets, succ_indices, diag_pos,
+                                   threads_per_block=128):
+    M = dep_counts.size
+    blocks = M
+    ilu0_csr_sync_free_mapping_kernel[blocks, threads_per_block](
+        data, indices, indptr, dep_counts, succ_offsets, succ_indices, diag_pos
+    )
+    cuda.synchronize()
+
+
+@cuda.jit
+def ilu0_csr_wavefront_unrolling_kernel(data, indices, indptr, rows, diag_pos):
+    b = cuda.blockIdx.x
+    tid = cuda.threadIdx.x
+    if b >= rows.size:
+        return
+
+    row = rows[b]
+    row_start = indptr[row]
+    row_end   = indptr[row + 1]
+
+    sh_l = cuda.shared.array(1, dtype=float64)
+
+    k_ptr = row_start
+    while k_ptr < row_end:
+        k = indices[k_ptr]
+        if k >= row:
+            break
+
+        diag_ptr = diag_pos[k]
+        u_kk = data[diag_ptr]
+
+        if u_kk != 0.0:
+            if tid == 0:
+                l_ik = data[k_ptr] / u_kk
+                data[k_ptr] = l_ik
+                sh_l[0] = l_ik
+            cuda.syncthreads()
+            l_ik = sh_l[0]
+
+            k_row_start = indptr[k]
+            k_row_end   = indptr[k + 1]
+
+            # Unrolled loop: process 4 elements at a time
+            j_ptr = k_ptr + 1 + tid
+            while j_ptr + 3 * cuda.blockDim.x < row_end:
+                for unroll_idx in range(4):
+                    jcol = indices[j_ptr + unroll_idx * cuda.blockDim.x]
+                    pos = bin_search_col(indices, k_row_start, k_row_end, jcol)
+                    if pos != -1:
+                        data[j_ptr + unroll_idx * cuda.blockDim.x] -= l_ik * data[pos]
+                j_ptr += 4 * cuda.blockDim.x
+            
+            # Remainder
+            while j_ptr < row_end:
+                jcol = indices[j_ptr]
+                pos = bin_search_col(indices, k_row_start, k_row_end, jcol)
+                if pos != -1:
+                    data[j_ptr] -= l_ik * data[pos]
+                j_ptr += cuda.blockDim.x
+
+        cuda.syncthreads()
+        k_ptr += 1
+
+
+def ilu0_csr_numba_wavefront_unrolling(data, indices, indptr, wave_rows, diag_pos, threads_per_block=128):
+    blocks = wave_rows.size
+    ilu0_csr_wavefront_unrolling_kernel[blocks, threads_per_block](
+        data, indices, indptr, wave_rows, diag_pos
+    )
+    cuda.synchronize()
+
+
+@cuda.jit
+def ilu0_csr_sync_free_unrolling_kernel(data, indices, indptr,
+                                    dep_counts, succ_offsets, succ_indices,
+                                    diag_pos):
+    i = cuda.blockIdx.x
+    tid = cuda.threadIdx.x
+    if i >= dep_counts.size:
+        return
+
+    while cuda.atomic.add(dep_counts, i, 0) > 0:
+        pass
+
+    row_start = indptr[i]
+    row_end   = indptr[i + 1]
+    sh_l = cuda.shared.array(1, dtype=float64)
+
+    k_ptr = row_start
+    while k_ptr < row_end:
+        k = indices[k_ptr]
+        if k >= i:
+            break
+
+        diag_ptr = diag_pos[k]
+        u_kk = data[diag_ptr]
+
+        if u_kk != 0.0:
+            if tid == 0:
+                l_ik = data[k_ptr] / u_kk
+                data[k_ptr] = l_ik
+                sh_l[0] = l_ik
+            cuda.syncthreads()
+            l_ik = sh_l[0]
+
+            k_row_start = indptr[k]
+            k_row_end   = indptr[k + 1]
+            
+            # Unrolled loop: process 4 elements at a time
+            j_ptr = k_ptr + 1 + tid
+            while j_ptr + 3 * cuda.blockDim.x < row_end:
+                for unroll_idx in range(4):
+                    jcol = indices[j_ptr + unroll_idx * cuda.blockDim.x]
+                    pos = bin_search_col(indices, k_row_start, k_row_end, jcol)
+                    if pos != -1:
+                        data[j_ptr + unroll_idx * cuda.blockDim.x] -= l_ik * data[pos]
+                j_ptr += 4 * cuda.blockDim.x
+            
+            # Remainder
+            while j_ptr < row_end:
+                jcol = indices[j_ptr]
+                pos = bin_search_col(indices, k_row_start, k_row_end, jcol)
+                if pos != -1:
+                    data[j_ptr] -= l_ik * data[pos]
+                j_ptr += cuda.blockDim.x
+        
+        cuda.syncthreads()
+        k_ptr += 1
+
+    s0 = succ_offsets[i]
+    s1 = succ_offsets[i + 1]
+    for p in range(s0 + tid, s1, cuda.blockDim.x):
+        s = succ_indices[p]
+        cuda.atomic.add(dep_counts, s, -1)
+
+
+def ilu0_csr_numba_sync_free_unrolling(data, indices, indptr,
+                                   dep_counts, succ_offsets, succ_indices, diag_pos,
+                                   threads_per_block=128):
+    M = dep_counts.size
+    blocks = M
+    ilu0_csr_sync_free_unrolling_kernel[blocks, threads_per_block](
+        data, indices, indptr, dep_counts, succ_offsets, succ_indices, diag_pos
+    )
+    cuda.synchronize()
+
+

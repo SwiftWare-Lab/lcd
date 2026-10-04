@@ -11,6 +11,9 @@ from sksparse.cholmod import cholesky, analyze
 from sympy import factor
 import matplotlib.pyplot as plt
 
+import sys, os
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+
 #from sksparse.cholmod import cholesky, analyze, Factor
 
 from utils.symbolic_cholesky_csc import etree, post_order, row_col_counts, \
@@ -47,14 +50,7 @@ os.environ['NUMBA_CUDA_PTX_VERSION'] = '84'
 Relaxtion = 8
 
 mtx_list = [
-    "/home/kazem/Downloads/LFAT5/LFAT5.mtx", "/home/kazem/Downloads/ex5/ex5.mtx", "/home/kazem/Downloads/mesh1e1/mesh1e1.mtx","/home/kazem/Downloads/nos4/nos4.mtx",
-    # "/home/kazem/Downloads/bcsstk03/bcsstk03.mtx",
-
-    "/home/kazem/Downloads/msc23052/msc23052.mtx",
-    "/home/kazem/Downloads/olafu/olafu.mtx",
-    "/home/kazem/Downloads/gyro_k/gyro_k.mtx",
-    "/home/kazem/Downloads/cant/cant.mtx",
-    #"/home/kazem/UFDB/Trefethen_20000b/Trefethen_20000b.mtx"
+    "/home/mad29/projects/testdata/matrices/1138_bus.mtx",
             ]
 method_list = ["python-sptrsv-csc-super", "numba-sptrsv-csc-super", "numba-sptrsv-csc-super-wavefront","cuda-numba-sptrsv-csc-super-syncfree", "cholmod"]
 #mtx_list = get_matrix_list("/home/kazem/UFDB/spd_list.txt", "/home/kazem/UFDB/")

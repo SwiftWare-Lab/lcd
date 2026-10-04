@@ -450,39 +450,6 @@ def transform_ast(transformation, cur_ast):
     return fusion_transformer.visit(cur_ast)
 
 
-src_spmm_spmm_v4 = """
-for i3 in frange(n):
-    for i2 in range(Ap[i1], Ap[i1 + 1]):
-        for i1 in range(m):
-            y[i1][i3] += Ax[i2] * B[Ai[i2]][i3]
-for j3 in frange(n):
-    for j2 in range(Ap[j1], Ap[j1 + 1]):
-        for j1 in range(m):
-            z[j1][j3] += Ax[j2] * y[Ai[j2]][j3]
-"""
-
-src_sddmm_spmm = """
-for i1 in frange(m):
-    for i2 in range(Ap[i1], Ap[i1 + 1]):
-        for i3 in range(k):
-            Xx[i2] += B[i1][i3] * C[Ai[i2]][i3]
-for j1 in frange(m):
-    for j2 in range(Ap[j1], Ap[j1 + 1]):
-        for j3 in range(n):
-            Y[j1][j3] += Xx[j2] * D[j1][j3]
-"""
-
-src_sddmm_spmm_v2 = """
-for i1 in range(m):
-    for i2 in frange(Ap[i1], Ap[i1 + 1]):
-        for i3 in range(k):
-            Xx[i2] += B[i1][i3] * C[Ai[i2]][i3]
-    for j2 in frange(Ap[i1], Ap[i1 + 1]):
-        for j3 in range(n):
-            Y[i1][j3] += Xx[j2] * D[i1][j3]
-"""
-
-
 # transformation: (i, j)
 # dependence: DataDependence
 
