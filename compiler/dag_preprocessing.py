@@ -37,6 +37,17 @@ class WavefrontExecutionData:
         return self.wavefronts, self.wavefront_ptr
 
 
+@dataclass(frozen=True)
+class WarpTaskExecutionData:
+    task_nodes: np.ndarray
+    task_ptr: np.ndarray
+    band_ptr: np.ndarray
+    dep_count: np.ndarray
+    dag_ptr: np.ndarray
+    dag_index: np.ndarray
+    initial_dep_count: np.ndarray | None = None
+
+
 def preprocess_dag_output(
         dag_successors,
         scheduling_data,
@@ -164,4 +175,98 @@ def preprocess_wavefront(dag_successors, wavefront_list):
     return WavefrontExecutionData(
         wavefronts=np.asarray(wavefront_values, dtype=np.int32),
         wavefront_ptr=wavefront_ptr,
+    )
+
+
+def preprocess_warp_tasks(
+        dag_successors,
+        wavefront_list,
+        band_width=1,
+        edge_count=None,
+):
+    if not isinstance(band_width, int) or band_width <= 0:
+        raise DAGPreprocessingError(
+            "The band width must be a positive integer."
+        )
+    node_count = len(dag_successors)
+    dag_ptr, dag_index = compact_successors(dag_successors)
+    wavefront_data = preprocess_wavefront(dag_successors, wavefront_list)
+    nodes = wavefront_data.wavefronts
+    level_ptr = wavefront_data.wavefront_ptr
+    if edge_count is None:
+        dep_count = np.bincount(
+            dag_index,
+            minlength=node_count,
+        ).astype(np.int32)
+    else:
+        dep_count = np.asarray(edge_count, dtype=np.int32)
+        if dep_count.shape != (node_count,):
+            raise DAGPreprocessingError(
+                "edge_count must contain one value for every DAG node."
+            )
+
+    if band_width == 1:
+        task_nodes = nodes
+        task_ptr = np.arange(node_count + 1, dtype=np.int32)
+        band_ptr = level_ptr.copy()
+    else:
+        task_nodes, task_ptr, band_ptr = _band_chains(
+            nodes,
+            level_ptr,
+            dag_ptr,
+            dag_index,
+            band_width,
+        )
+
+    return WarpTaskExecutionData(
+        task_nodes=task_nodes,
+        task_ptr=task_ptr,
+        band_ptr=band_ptr,
+        dep_count=dep_count.copy(),
+        initial_dep_count=dep_count.copy(),
+        dag_ptr=dag_ptr,
+        dag_index=dag_index,
+    )
+
+
+def _band_chains(nodes, level_ptr, dag_ptr, dag_index, band_width):
+    level_count = len(level_ptr) - 1
+    task_nodes = []
+    task_ptr = [0]
+    band_ptr = [0]
+    for first_level in range(0, level_count, band_width):
+        last_level = min(first_level + band_width, level_count)
+        band = nodes[level_ptr[first_level]:level_ptr[last_level]].tolist()
+        local = {node: position for position, node in enumerate(band)}
+        parent = list(range(len(band)))
+
+        def find(position):
+            root = position
+            while parent[root] != root:
+                root = parent[root]
+            while parent[position] != root:
+                parent[position], position = root, parent[position]
+            return root
+
+        for position, node in enumerate(band):
+            for successor in dag_index[dag_ptr[node]:dag_ptr[node + 1]]:
+                successor_position = local.get(int(successor))
+                if successor_position is not None:
+                    root = find(position)
+                    successor_root = find(successor_position)
+                    if root != successor_root:
+                        parent[successor_root] = root
+
+        chains = {}
+        for position, node in enumerate(band):
+            chains.setdefault(find(position), []).append(node)
+        for chain in chains.values():
+            task_nodes.extend(chain)
+            task_ptr.append(len(task_nodes))
+        band_ptr.append(len(task_ptr) - 1)
+
+    return (
+        np.asarray(task_nodes, dtype=np.int32),
+        np.asarray(task_ptr, dtype=np.int32),
+        np.asarray(band_ptr, dtype=np.int32),
     )

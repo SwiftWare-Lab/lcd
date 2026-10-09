@@ -18,6 +18,12 @@ import inspect
 import textwrap
 
 from compiler.ast_normalization import normalize_aliases
+from compiler.dag_codegen import (
+    COUNTER_DEPENDENCE,
+    DEPENDENCE_PROTOCOLS,
+    PULL_DEPENDENCE,
+    PUSH_DEPENDENCE,
+)
 
 
 class CUDALoweringError(Exception):
@@ -29,19 +35,34 @@ class UnsupportedAtomicOperation(CUDALoweringError):
 
 
 KNOWN_LOWERING_CHALLENGES = (
-    "Block reductions for thread-mapped loops",
     "DAG schedule-to-block mapping",
     "Host/device allocation and transfers",
     "Grid bounds checks and synchronization",
     "Atomic operation and dtype support",
     "Stable statement IDs across transformations",
-    "Busy-wait forward progress and global-memory publication ordering",
+    "Busy-wait forward progress",
 )
 
 CUDA_EXECUTION_MODES = frozenset({"plain", "sync_free", "wavefront"})
 SYNC_FREE_ARGUMENTS = ("dep_count", "dag_ptr", "dag_index")
 SYNC_FREE_RESET_ARGUMENT = "initial_dep_count"
 WAVEFRONT_ARGUMENTS = ("wavefronts", "wave_start", "wave_end")
+WARP_SYNC_FREE_ARGUMENTS = (
+    "dep_count",
+    "dag_ptr",
+    "dag_index",
+    "task_nodes",
+    "task_ptr",
+    "task_counter",
+)
+WARP_PUSH_ARGUMENTS = ("dep_count", "task_nodes", "task_ptr", "task_counter")
+WARP_PULL_ARGUMENTS = ("done", "task_nodes", "task_ptr", "task_counter")
+WARP_WAVEFRONT_ARGUMENTS = ("task_nodes", "task_ptr", "band_start", "band_end")
+WARP_SIZE = 32
+FULL_WARP_MASK = 0xFFFFFFFF
+RESIDENT_WARPS_PER_SM = 32
+_PURE_CALLS = frozenset({"abs", "float", "int", "len", "max", "min", "range"})
+NODE_LOAD_PREFIX = "_node_load_"
 
 
 @dataclass
@@ -63,6 +84,9 @@ class CUDALoweringResult:
     thread_loop_iterator: str | None = None
     thread_unroll_factor: int = 1
     host_loop_iterators: tuple[str, ...] = ()
+    n_warp: int | None = None
+    warp_mapped: bool = False
+    dependence_protocol: str = COUNTER_DEPENDENCE
     challenges: tuple[str, ...] = KNOWN_LOWERING_CHALLENGES
 
     @property
@@ -183,6 +207,105 @@ class _AtomicReductionLowerer(ast.NodeTransformer):
         return deepcopy(current), index
 
 
+THREAD_REDUCTION_DTYPE = "_thread_reduction_float64"
+
+
+@dataclass(frozen=True)
+class _ThreadReduction:
+    target: ast.expr
+    operator: ast.operator
+    partial_name: str
+    buffer_name: str
+
+
+class _ThreadReductionPrivatizer(ast.NodeTransformer):
+    REDUCTION_OPERATORS = (ast.Add, ast.Sub)
+
+    def __init__(self, loop_local_names, live_out_names, first_index):
+        self.loop_local_names = loop_local_names
+        self.live_out_names = live_out_names
+        self.next_index = first_index
+        self.reductions = []
+        self.parallel_safe = True
+        self.loop_depth = 0
+
+    def visit_AugAssign(self, node):
+        if not self._is_thread_invariant(node.target):
+            return self.generic_visit(node)
+        if not isinstance(node.op, self.REDUCTION_OPERATORS):
+            self.parallel_safe = False
+            return node
+        reduction = _ThreadReduction(
+            target=deepcopy(node.target),
+            operator=node.op,
+            partial_name=f"_thread_partial_{self.next_index}",
+            buffer_name=f"_thread_reduction_buffer_{self.next_index}",
+        )
+        self.next_index += 1
+        self.reductions.append(reduction)
+        return ast.copy_location(
+            ast.AugAssign(
+                target=ast.Name(id=reduction.partial_name, ctx=ast.Store()),
+                op=ast.Add(),
+                value=self.visit(node.value),
+            ),
+            node,
+        )
+
+    def visit_Assign(self, node):
+        if any(self._is_thread_invariant(target) for target in node.targets):
+            self.parallel_safe = False
+            return node
+        return self.generic_visit(node)
+
+    def visit_AnnAssign(self, node):
+        if self._is_thread_invariant(node.target):
+            self.parallel_safe = False
+            return node
+        return self.generic_visit(node)
+
+    def visit_For(self, node):
+        if self._is_thread_invariant(node.target):
+            self.parallel_safe = False
+            return node
+        return self._visit_nested_loop(node)
+
+    def visit_While(self, node):
+        return self._visit_nested_loop(node)
+
+    def visit_Break(self, node):
+        if self.loop_depth == 0:
+            self.parallel_safe = False
+        return node
+
+    def visit_Return(self, node):
+        self.parallel_safe = False
+        return node
+
+    def _visit_nested_loop(self, node):
+        self.loop_depth += 1
+        node = self.generic_visit(node)
+        self.loop_depth -= 1
+        return node
+
+    def _is_thread_invariant(self, target):
+        if isinstance(target, ast.Name):
+            return target.id in self.live_out_names
+        if isinstance(target, (ast.Tuple, ast.List)):
+            return any(
+                self._is_thread_invariant(element)
+                for element in target.elts
+            )
+        if isinstance(target, ast.Subscript):
+            names = {
+                node.id
+                for node in ast.walk(target)
+                if isinstance(node, ast.Name)
+            }
+            return not names & self.loop_local_names
+        return False
+
+
 class CUDALowerer:
     def __init__(
             self,
@@ -194,9 +317,13 @@ class CUDALowerer:
             wavefront_threads_per_block=128,
             thread_loop_iterator=None,
             thread_unroll_factor=1,
+            n_warp=None,
+            dependence_protocol=COUNTER_DEPENDENCE,
+            direct_dependence=None,
     ):
         self.loop_iterator = loop_iterator
         self.thread_loop_iterator = thread_loop_iterator
+        self.n_warp = n_warp
         self.reductions = _normalize_reductions(reductions)
         self.kernel_name = kernel_name
         self.execution_mode = _normalize_execution_mode(execution_mode)
@@ -227,8 +354,33 @@ class CUDALowerer:
             raise CUDALoweringError(
                 "A thread unroll factor requires a thread-mapped loop."
             )
+        if n_warp is not None and (not isinstance(n_warp, int) or n_warp <= 0):
+            raise CUDALoweringError("n_warp must be a positive integer.")
+        self.warp_mapped = (
+            n_warp == 1
+            and thread_loop_iterator is not None
+            and self.execution_mode in {"sync_free", "wavefront"}
+            and wavefront_threads_per_block % WARP_SIZE == 0
+        )
+        if dependence_protocol not in DEPENDENCE_PROTOCOLS:
+            raise CUDALoweringError(
+                f"Unknown dependence protocol {dependence_protocol!r}."
+            )
+        self.direct_dependence = direct_dependence
+        self.dependence_protocol = (
+            dependence_protocol
+            if (
+                direct_dependence is not None
+                and direct_dependence.kind == dependence_protocol
+                and self.warp_mapped
+                and self.execution_mode == "sync_free"
+                and sync_free_ready_count == 0
+            )
+            else COUNTER_DEPENDENCE
+        )
 
     def lower(self, code):
+        self.thread_reduction_count = 0
         module = normalize_aliases(_to_module(code))
         functions = [
             node for node in module.body
@@ -276,20 +428,6 @@ class CUDALowerer:
             for iterator in self.host_loop_iterators
             if iterator not in kernel_arguments
         )
-        auxiliary_arguments = []
-        if self.execution_mode == "sync_free":
-            auxiliary_arguments = list(SYNC_FREE_ARGUMENTS)
-            if self._needs_sync_free_dep_count_reset():
-                auxiliary_arguments.insert(1, SYNC_FREE_RESET_ARGUMENT)
-        elif self.execution_mode == "wavefront":
-            auxiliary_arguments = list(WAVEFRONT_ARGUMENTS)
-        if auxiliary_arguments:
-            kernel_arguments.extend(
-                name
-                for name in auxiliary_arguments
-                if name not in kernel_arguments
-            )
-
         atomic_lowerer = _AtomicReductionLowerer(self.reductions)
         lowered_loop_body = [
             atomic_lowerer.visit(deepcopy(statement))
@@ -300,7 +438,40 @@ class CUDALowerer:
                 lowered_loop_body,
             )
 
-        if self.execution_mode == "wavefront":
+        auxiliary_arguments = []
+        if self.execution_mode == "sync_free":
+            if not self.warp_mapped:
+                auxiliary_arguments = list(SYNC_FREE_ARGUMENTS)
+            elif self.dependence_protocol == PUSH_DEPENDENCE:
+                auxiliary_arguments = list(WARP_PUSH_ARGUMENTS)
+            elif self.dependence_protocol == PULL_DEPENDENCE:
+                auxiliary_arguments = list(WARP_PULL_ARGUMENTS)
+            else:
+                auxiliary_arguments = list(WARP_SYNC_FREE_ARGUMENTS)
+            if (
+                    self._needs_sync_free_dep_count_reset()
+                    and self.dependence_protocol != PULL_DEPENDENCE
+            ):
+                auxiliary_arguments.insert(1, SYNC_FREE_RESET_ARGUMENT)
+        elif self.execution_mode == "wavefront":
+            auxiliary_arguments = list(
+                WARP_WAVEFRONT_ARGUMENTS
+                if self.warp_mapped
+                else WAVEFRONT_ARGUMENTS
+            )
+        if auxiliary_arguments:
+            kernel_arguments.extend(
+                name
+                for name in auxiliary_arguments
+                if name not in kernel_arguments
+            )
+
+        if self.warp_mapped:
+            kernel_body = self._warp_kernel_body(
+                target_loop,
+                lowered_loop_body,
+            )
+        elif self.execution_mode == "wavefront":
             kernel_body = self._wavefront_body(
                 target_loop,
                 lowered_loop_body,
@@ -311,16 +482,16 @@ class CUDALowerer:
                 kernel_body.append(self._thread_index_assignment())
             if self.execution_mode == "sync_free":
                 if self.thread_loop_iterator is None:
-                    kernel_body.append(self._sync_free_wait())
+                    kernel_body.extend(self._sync_free_wait())
                 else:
                     kernel_body.append(
                         self._thread_zero_statement(
-                            self._sync_free_wait(),
+                            *self._sync_free_wait(),
                         )
                     )
                     kernel_body.append(_cuda_syncthreads())
             kernel_body.extend(lowered_loop_body)
-        if self.execution_mode == "sync_free":
+        if self.execution_mode == "sync_free" and not self.warp_mapped:
             if self.thread_loop_iterator is None:
                 kernel_body.extend(self._sync_free_release())
             else:
@@ -378,9 +549,14 @@ class CUDALowerer:
             launcher_name,
             reset_kernel_name,
         )
+        numba_names = [ast.alias(name="cuda")]
+        if self.thread_reduction_count:
+            numba_names.append(
+                ast.alias(name="float64", asname=THREAD_REDUCTION_DTYPE)
+            )
         cuda_import = ast.ImportFrom(
             module="numba",
-            names=[ast.alias(name="cuda")],
+            names=numba_names,
             level=0,
         )
         module_body = [cuda_import]
@@ -411,6 +587,9 @@ class CUDALowerer:
             thread_loop_iterator=self.thread_loop_iterator,
             thread_unroll_factor=self.thread_unroll_factor,
             host_loop_iterators=tuple(self.host_loop_iterators),
+            n_warp=self.n_warp,
+            warp_mapped=self.warp_mapped,
+            dependence_protocol=self.dependence_protocol,
         )
 
     def _launcher(
@@ -421,6 +600,19 @@ class CUDALowerer:
             launcher_name,
             reset_kernel_name=None,
     ):
+        if self.warp_mapped and self.execution_mode == "wavefront":
+            return self._warp_wavefront_launcher(
+                kernel_name,
+                kernel_arguments,
+                launcher_name,
+            )
+        if self.warp_mapped:
+            return self._warp_sync_free_launcher(
+                kernel_name,
+                kernel_arguments,
+                launcher_name,
+                reset_kernel_name,
+            )
         if self.execution_mode == "wavefront":
             return self._wavefront_launcher(
                 kernel_name,
@@ -515,8 +707,31 @@ class CUDALowerer:
             )
         return kernel_name + "_dep_count_reset"
 
-    @staticmethod
-    def _sync_free_reset_kernel(reset_kernel_name):
+    def _sync_free_reset_kernel(self, reset_kernel_name):
+        if self.dependence_protocol == PULL_DEPENDENCE:
+            return ast.parse(
+                f"""
+@cuda.jit
+def {reset_kernel_name}(done, task_counter):
+    _dep_count_index = cuda.grid(1)
+    if _dep_count_index < len(done):
+        done[_dep_count_index] = 0
+    if _dep_count_index == 0:
+        task_counter[0] = 0
+"""
+            ).body[0]
+        if self.warp_mapped:
+            return ast.parse(
+                f"""
+@cuda.jit
+def {reset_kernel_name}(dep_count, initial_dep_count, task_counter):
+    _dep_count_index = cuda.grid(1)
+    if _dep_count_index < len(dep_count):
+        dep_count[_dep_count_index] = initial_dep_count[_dep_count_index]
+    if _dep_count_index == 0:
+        task_counter[0] = 0
+"""
+            ).body[0]
         return ast.parse(
             f"""
 @cuda.jit
@@ -528,6 +743,12 @@ def {reset_kernel_name}(dep_count, initial_dep_count):
         ).body[0]
 
     def _sync_free_reset_launch(self, reset_kernel_name):
+        if self.dependence_protocol == PULL_DEPENDENCE:
+            reset_arguments = ["done", "task_counter"]
+        else:
+            reset_arguments = ["dep_count", SYNC_FREE_RESET_ARGUMENT] + (
+                ["task_counter"] if self.warp_mapped else []
+            )
         return [
             ast.Assign(
                 targets=[
@@ -551,7 +772,7 @@ def {reset_kernel_name}(dep_count, initial_dep_count):
                             func=ast.Name(id="len", ctx=ast.Load()),
                             args=[
                                 ast.Name(
-                                    id="dep_count",
+                                    id=reset_arguments[0],
                                     ctx=ast.Load(),
                                 )
                             ],
@@ -584,7 +805,7 @@ def {reset_kernel_name}(dep_count, initial_dep_count):
                     id="_reset_threads_per_block",
                     ctx=ast.Load(),
                 ),
-                ["dep_count", SYNC_FREE_RESET_ARGUMENT],
+                reset_arguments,
             ),
         ]
 
@@ -741,6 +962,109 @@ def {reset_kernel_name}(dep_count, initial_dep_count):
             ),
             wavefront_loop,
         ]
+        launcher = ast.FunctionDef(
+            name=launcher_name,
+            args=_function_arguments(launcher_arguments),
+            body=self._wrap_in_host_loops(body),
+            decorator_list=[],
+            returns=None,
+            type_comment=None,
+        )
+        return launcher, launcher_arguments
+
+    @property
+    def _warps_per_block(self):
+        return self.wavefront_threads_per_block // WARP_SIZE
+
+    def _warp_wavefront_launcher(
+            self,
+            kernel_name,
+            kernel_arguments,
+            launcher_name,
+    ):
+        band_arguments = {"band_start", "band_end"}
+        base_arguments = [
+            argument
+            for argument in kernel_arguments
+            if argument not in band_arguments
+        ]
+        launcher_arguments = (
+            self._external_launcher_arguments(base_arguments)
+            + ["band_ptr"]
+        )
+        body = ast.parse(
+            f"""
+_threads_per_block = {self.wavefront_threads_per_block}
+_warps_per_block = {self._warps_per_block}
+for _band in range(len(band_ptr) - 1):
+    _band_start = band_ptr[_band]
+    _band_end = band_ptr[_band + 1]
+    _band_size = _band_end - _band_start
+    if _band_size > 0:
+        _blocks_per_grid = (
+            (_band_size + _warps_per_block - 1) // _warps_per_block
+        )
+"""
+        ).body
+        body[-1].body[-1].body.append(
+            _kernel_launch(
+                kernel_name,
+                ast.Name(id="_blocks_per_grid", ctx=ast.Load()),
+                ast.Name(id="_threads_per_block", ctx=ast.Load()),
+                base_arguments + ["_band_start", "_band_end"],
+            )
+        )
+        launcher = ast.FunctionDef(
+            name=launcher_name,
+            args=_function_arguments(launcher_arguments),
+            body=self._wrap_in_host_loops(body),
+            decorator_list=[],
+            returns=None,
+            type_comment=None,
+        )
+        return launcher, launcher_arguments
+
+    def _warp_sync_free_launcher(
+            self,
+            kernel_name,
+            kernel_arguments,
+            launcher_name,
+            reset_kernel_name,
+    ):
+        launcher_arguments = self._external_launcher_arguments(
+            kernel_arguments,
+        )
+        resident_blocks_per_sm = max(
+            1,
+            RESIDENT_WARPS_PER_SM // self._warps_per_block,
+        )
+        body = []
+        if reset_kernel_name is not None:
+            body.extend(self._sync_free_reset_launch(reset_kernel_name))
+        body.extend(ast.parse(
+            f"""
+_threads_per_block = {self.wavefront_threads_per_block}
+_warps_per_block = {self._warps_per_block}
+_task_count = len(task_ptr) - 1
+_blocks_per_grid = min(
+    (_task_count + _warps_per_block - 1) // _warps_per_block,
+    cuda.get_current_device().MULTIPROCESSOR_COUNT
+    * {resident_blocks_per_sm},
+)
+if _blocks_per_grid > 0:
+    pass
+"""
+        ).body)
+        body[-1].body = [
+            _kernel_launch(
+                kernel_name,
+                ast.Name(id="_blocks_per_grid", ctx=ast.Load()),
+                ast.Name(id="_threads_per_block", ctx=ast.Load()),
+                kernel_arguments,
+            )
+        ]
+        if reset_kernel_name is not None:
+            body.append(_cuda_synchronize())
         launcher = ast.FunctionDef(
             name=launcher_name,
             args=_function_arguments(launcher_arguments),
@@ -944,6 +1268,150 @@ def {reset_kernel_name}(dep_count, initial_dep_count):
             ctx=ast.Load(),
         )
 
+    def _warp_kernel_body(self, target_loop, lowered_loop_body):
+        node_body = ast.If(
+            test=self._loop_bounds_guard(target_loop),
+            body=lowered_loop_body,
+            orelse=[],
+        )
+        task_loop = ast.parse(
+            f"""
+for _task_position in range(task_ptr[_task], task_ptr[_task + 1]):
+    {self.loop_iterator} = task_nodes[_task_position]
+"""
+        ).body[0]
+        if self.execution_mode == "wavefront":
+            task_loop.body.extend([node_body, self._thread_sync()])
+            body = ast.parse(
+                f"""
+_task = (
+    band_start
+    + cuda.blockIdx.x * {self._warps_per_block}
+    + cuda.threadIdx.x // {WARP_SIZE}
+)
+_thread_id = cuda.threadIdx.x % {WARP_SIZE}
+if _task < band_end:
+    pass
+"""
+            ).body
+            body[-1].body = [task_loop]
+            return body
+
+        task_loop.body.extend(self._warp_node_statements(node_body))
+        body = ast.parse(
+            f"""
+_thread_id = cuda.threadIdx.x % {WARP_SIZE}
+_task_count = len(task_ptr) - 1
+while True:
+    _task = 0
+    if _thread_id == 0:
+        _task = cuda.atomic.add(task_counter, 0, 1)
+    _task = cuda.shfl_sync({FULL_WARP_MASK:#x}, _task, 0)
+    if _task >= _task_count:
+        return
+"""
+        ).body
+        body[-1].body.append(task_loop)
+        return body
+
+    def _warp_node_statements(self, node_body):
+        task = self.loop_iterator
+        if self.dependence_protocol == PULL_DEPENDENCE:
+            return [node_body] + ast.parse(
+                f"""
+cuda.threadfence()
+cuda.syncwarp({FULL_WARP_MASK:#x})
+if _thread_id == 0:
+    cuda.atomic.exch(done, {task}, 1)
+"""
+            ).body
+        wait = ast.parse(
+            f"""
+while cuda.atomic.add(dep_count, {task}, 0) != {self.sync_free_ready_count}:
+    pass
+cuda.threadfence()
+"""
+        ).body
+        node_body = deepcopy(node_body)
+        statements = node_body.body
+        position = 0
+        while position < len(statements) and _is_node_load(
+                statements[position]
+        ):
+            position += 1
+        if position < len(statements) and self._is_thread_zero(
+                statements[position]
+        ):
+            statements[position].body = wait + statements[position].body
+        else:
+            statements.insert(position, self._thread_zero_statement(*wait))
+        if position + 1 < len(statements) and not self._is_thread_sync(
+                statements[position + 1]
+        ):
+            statements.insert(position + 1, self._thread_sync())
+        if self.dependence_protocol == PUSH_DEPENDENCE:
+            if self._is_thread_sync(statements[-1]):
+                return [node_body]
+            return [node_body, self._thread_sync()]
+        return [node_body] + ast.parse(
+            f"""
+cuda.threadfence()
+cuda.syncwarp({FULL_WARP_MASK:#x})
+for _dag_position in range(
+    dag_ptr[{task}] + _thread_id,
+    dag_ptr[{task} + 1],
+    {WARP_SIZE},
+):
+    cuda.atomic.add(dep_count, dag_index[_dag_position], -1)
+"""
+        ).body
+
+    def _thread_sync(self):
+        if self.warp_mapped:
+            return ast.Expr(
+                value=ast.Call(
+                    func=ast.Attribute(
+                        value=ast.Name(id="cuda", ctx=ast.Load()),
+                        attr="syncwarp",
+                        ctx=ast.Load(),
+                    ),
+                    args=[ast.Constant(value=FULL_WARP_MASK)],
+                    keywords=[],
+                )
+            )
+        return _cuda_syncthreads()
+
+    def _is_thread_sync(self, statement):
+        return ast.dump(statement) == ast.dump(self._thread_sync())
+
+    def _is_thread_zero(self, statement):
+        return (
+            isinstance(statement, ast.If)
+            and not statement.orelse
+            and ast.dump(statement.test)
+            == ast.dump(self._thread_zero_statement().test)
+        )
+
+    def _thread_stride(self):
+        if self.warp_mapped:
+            return ast.Constant(value=WARP_SIZE)
+        return _cuda_block_dim()
+
+    def _warp_reduction(self, reduction):
+        partial = reduction.partial_name
+        mask = f"{FULL_WARP_MASK:#x}"
+        offsets = []
+        offset = WARP_SIZE // 2
+        while offset:
+            offsets.append(offset)
+            offset //= 2
+        return ast.parse(
+            "\n".join(
+                f"{partial} += cuda.shfl_down_sync({mask}, {partial}, {offset})"
+                for offset in offsets
+            )
+        ).body
+
     def _thread_mapped_body(self, lowered_loop_body):
         matches = [
             (index, statement)
@@ -964,16 +1432,236 @@ def {reset_kernel_name}(dep_count, initial_dep_count):
         loop_index, thread_loop = matches[0]
         prelude = lowered_loop_body[:loop_index]
         epilogue = lowered_loop_body[loop_index + 1:]
+        if sum(
+                isinstance(node, ast.For)
+                and isinstance(node.target, ast.Name)
+                and node.target.id == self.thread_loop_iterator
+                for statement in lowered_loop_body
+                for node in ast.walk(statement)
+        ) != 1:
+            self.dependence_protocol = COUNTER_DEPENDENCE
+        if self.dependence_protocol == PUSH_DEPENDENCE:
+            reduction_count = self.thread_reduction_count
+            privatized = self._privatize_thread_reductions(
+                thread_loop,
+                prelude,
+                epilogue,
+            )
+            self.thread_reduction_count = reduction_count
+            if (privatized is not None and privatized[1]) or any(
+                    isinstance(node, (ast.Break, ast.Continue, ast.Return))
+                    for node in ast.walk(thread_loop)
+            ):
+                self.dependence_protocol = COUNTER_DEPENDENCE
+        if self.dependence_protocol != COUNTER_DEPENDENCE:
+            thread_loop = self._with_dependence_hooks(thread_loop)
+        privatized = self._privatize_thread_reductions(
+            thread_loop,
+            prelude,
+            epilogue,
+        )
+        if privatized is None:
+            return [
+                self._thread_zero_statement(
+                    *prelude,
+                    thread_loop,
+                    *epilogue,
+                )
+            ]
+        thread_loop, reductions = privatized
+        node_loads = []
+        if self.warp_mapped:
+            thread_loop = _cache_read_only_loads(
+                thread_loop,
+                _written_arrays([*prelude, thread_loop, *epilogue]),
+            )
+            prelude, thread_loop, epilogue, node_loads = (
+                self._prefetch_node_loads(prelude, thread_loop, epilogue)
+            )
 
-        body = []
+        body = list(node_loads)
         if prelude:
             body.append(self._thread_zero_statement(*prelude))
-        body.append(_cuda_syncthreads())
+        body.append(self._thread_sync())
+        body.extend(
+            ast.Assign(
+                targets=[
+                    ast.Name(id=reduction.partial_name, ctx=ast.Store())
+                ],
+                value=ast.Constant(value=0.0),
+            )
+            for reduction in reductions
+        )
         body.append(self._thread_stride_loop(thread_loop))
-        body.append(_cuda_syncthreads())
+        body.append(self._thread_sync())
+        for reduction in reductions:
+            if self.warp_mapped:
+                body.extend(self._warp_reduction(reduction))
+            else:
+                body.extend(self._block_reduction(reduction))
+        epilogue = [
+            ast.AugAssign(
+                target=deepcopy(reduction.target),
+                op=type(reduction.operator)(),
+                value=self._reduction_result(reduction),
+            )
+            for reduction in reductions
+        ] + epilogue
         if epilogue:
             body.append(self._thread_zero_statement(*epilogue))
         return body
+
+    def _prefetch_node_loads(self, prelude, thread_loop, epilogue):
+        node_statements = [*prelude, thread_loop, *epilogue]
+        written = _written_arrays(node_statements)
+        mutable = _stored_names(node_statements)
+        sources = []
+        for statement in prelude:
+            if _exits_early(statement):
+                break
+            sources.extend(_statement_evaluated_subscripts(statement))
+        else:
+            sources.extend(_evaluated_subscripts(thread_loop.iter))
+        names = {}
+        loads = []
+        for subscript in sources:
+            key = ast.dump(subscript)
+            if (
+                    key in names
+                    or not isinstance(subscript.value, ast.Name)
+                    or subscript.value.id in written
+                    or subscript.value.id in mutable
+                    or not _is_simple_index(subscript.slice, mutable)
+            ):
+                continue
+            names[key] = f"{NODE_LOAD_PREFIX}{len(names)}"
+            loads.append(
+                ast.Assign(
+                    targets=[ast.Name(id=names[key], ctx=ast.Store())],
+                    value=deepcopy(subscript),
+                )
+            )
+        if not loads:
+            return prelude, thread_loop, epilogue, []
+        replacer = _LoadReplacer(names)
+        return (
+            [replacer.visit(deepcopy(statement)) for statement in prelude],
+            replacer.visit(deepcopy(thread_loop)),
+            [replacer.visit(deepcopy(statement)) for statement in epilogue],
+            loads,
+        )
+
+    def _with_dependence_hooks(self, thread_loop):
+        endpoint = ast.unparse(self.direct_dependence.endpoint)
+        if self.dependence_protocol == PULL_DEPENDENCE:
+            hook = ast.parse(
+                f"""
+while cuda.atomic.add(done, {endpoint}, 0) == 0:
+    pass
+cuda.threadfence()
+"""
+            ).body
+        else:
+            hook = ast.parse(
+                f"""
+cuda.threadfence()
+cuda.atomic.add(dep_count, {endpoint}, -1)
+"""
+            ).body
+        if self.direct_dependence.guard is not None:
+            hook = [ast.If(
+                test=deepcopy(self.direct_dependence.guard),
+                body=hook,
+                orelse=[],
+            )]
+        hooked_loop = deepcopy(thread_loop)
+        if self.dependence_protocol == PULL_DEPENDENCE:
+            hooked_loop.body = hook + hooked_loop.body
+        else:
+            hooked_loop.body = hooked_loop.body + hook
+        return hooked_loop
+
+    def _privatize_thread_reductions(self, thread_loop, prelude, epilogue):
+        loop_local_names = {self.thread_loop_iterator}
+        loop_local_names.update(
+            node.id
+            for node in ast.walk(thread_loop)
+            if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store)
+        )
+        live_out_names = {
+            node.id
+            for statement in prelude + epilogue
+            for node in ast.walk(statement)
+            if isinstance(node, ast.Name)
+        }
+        prelude_locals = {
+            node.id
+            for statement in prelude
+            for node in ast.walk(statement)
+            if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store)
+        }
+        loop_loads = {
+            node.id
+            for node in ast.walk(thread_loop)
+            if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load)
+        }
+        if prelude_locals & loop_loads:
+            return None
+
+        privatizer = _ThreadReductionPrivatizer(
+            loop_local_names,
+            live_out_names,
+            self.thread_reduction_count,
+        )
+        privatized_loop = deepcopy(thread_loop)
+        privatized_loop.body = [
+            privatizer.visit(statement)
+            for statement in privatized_loop.body
+        ]
+        if not privatizer.parallel_safe:
+            return None
+        loaded_expressions = {
+            ast.unparse(node)
+            for node in ast.walk(privatized_loop)
+            if isinstance(node, (ast.Name, ast.Subscript))
+            and isinstance(node.ctx, ast.Load)
+        }
+        if any(
+                ast.unparse(reduction.target) in loaded_expressions
+                for reduction in privatizer.reductions
+        ):
+            return None
+        self.thread_reduction_count = privatizer.next_index
+        return privatized_loop, privatizer.reductions
+
+    def _reduction_result(self, reduction):
+        if self.warp_mapped:
+            return ast.Name(id=reduction.partial_name, ctx=ast.Load())
+        return ast.Subscript(
+            value=ast.Name(id=reduction.buffer_name, ctx=ast.Load()),
+            slice=ast.Constant(value=0),
+            ctx=ast.Load(),
+        )
+
+    def _block_reduction(self, reduction):
+        block_size = self.wavefront_threads_per_block
+        buffer = reduction.buffer_name
+        return ast.parse(
+            f"""
+{buffer} = cuda.shared.array({block_size}, {THREAD_REDUCTION_DTYPE})
+{buffer}[_thread_id] = {reduction.partial_name}
+cuda.syncthreads()
+_thread_reduction_stride = 1
+while _thread_reduction_stride < {block_size}:
+    if (
+        _thread_id % (2 * _thread_reduction_stride) == 0
+        and _thread_id + _thread_reduction_stride < {block_size}
+    ):
+        {buffer}[_thread_id] += {buffer}[_thread_id + _thread_reduction_stride]
+    cuda.syncthreads()
+    _thread_reduction_stride *= 2
+"""
+        ).body
 
     def _thread_stride_loop(self, thread_loop):
         if thread_loop.orelse:
@@ -992,7 +1680,7 @@ def {reset_kernel_name}(dep_count, initial_dep_count):
                             ast.Name(id="_thread_id", ctx=ast.Load()),
                         ),
                         deepcopy(end),
-                        _cuda_block_dim(),
+                        self._thread_stride(),
                     ],
                     keywords=[],
                 ),
@@ -1012,7 +1700,7 @@ def {reset_kernel_name}(dep_count, initial_dep_count):
         for offset in range(1, self.thread_unroll_factor):
             candidate = _add_expr(
                 ast.Name(id=base_name, ctx=ast.Load()),
-                _multiply_expr(_cuda_block_dim(), ast.Constant(value=offset)),
+                _multiply_expr(self._thread_stride(), ast.Constant(value=offset)),
             )
             unrolled_body.extend([
                 ast.Assign(
@@ -1043,7 +1731,7 @@ def {reset_kernel_name}(dep_count, initial_dep_count):
                     ),
                     deepcopy(end),
                     _multiply_expr(
-                        _cuda_block_dim(),
+                        self._thread_stride(),
                         ast.Constant(value=self.thread_unroll_factor),
                     ),
                 ],
@@ -1098,27 +1786,31 @@ def {reset_kernel_name}(dep_count, initial_dep_count):
         )
 
     def _sync_free_wait(self):
-        return ast.While(
-            test=ast.Compare(
-                left=_cuda_atomic_add(
-                    "dep_count",
-                    ast.Name(id=self.loop_iterator, ctx=ast.Load()),
-                    ast.Constant(value=0),
+        return [
+            ast.While(
+                test=ast.Compare(
+                    left=_cuda_atomic_add(
+                        "dep_count",
+                        ast.Name(id=self.loop_iterator, ctx=ast.Load()),
+                        ast.Constant(value=0),
+                    ),
+                    ops=[ast.NotEq()],
+                    comparators=[
+                        ast.Constant(value=self.sync_free_ready_count)
+                    ],
                 ),
-                ops=[ast.NotEq()],
-                comparators=[
-                    ast.Constant(value=self.sync_free_ready_count)
-                ],
+                body=[ast.Pass()],
+                orelse=[],
             ),
-            body=[ast.Pass()],
-            orelse=[],
-        )
+            _cuda_threadfence(),
+        ]
 
     def _sync_free_release(self):
         # Do not reuse the task iterator as the adjacency-list iterator: the
         # task ID is still needed to select its successor-list bounds.
         task = ast.Name(id=self.loop_iterator, ctx=ast.Load())
         return [
+            _cuda_threadfence(),
             ast.Assign(
                 targets=[ast.Name(id="_dag_start", ctx=ast.Store())],
                 value=ast.Subscript(
@@ -1371,6 +2063,20 @@ def _cuda_syncthreads():
     )
 
 
+def _cuda_threadfence():
+    return ast.Expr(
+        value=ast.Call(
+            func=ast.Attribute(
+                value=ast.Name(id="cuda", ctx=ast.Load()),
+                attr="threadfence",
+                ctx=ast.Load(),
+            ),
+            args=[],
+            keywords=[],
+        )
+    )
+
+
 def _cuda_synchronize():
     return ast.Expr(
         value=ast.Call(
@@ -1411,6 +2117,149 @@ def _multiply_expr(left, right):
     if isinstance(left, ast.Constant) and left.value == 1:
         return right
     return ast.BinOp(left=left, op=ast.Mult(), right=right)
+
+
+def _stored_names(statements):
+    return {
+        node.id
+        for statement in statements
+        for node in ast.walk(statement)
+        if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store)
+    }
+
+
+def _written_arrays(statements):
+    written = set()
+    for statement in statements:
+        for node in ast.walk(statement):
+            if (
+                    isinstance(node, ast.Subscript)
+                    and isinstance(node.ctx, ast.Store)
+                    and isinstance(node.value, ast.Name)
+            ):
+                written.add(node.value.id)
+            elif isinstance(node, ast.Call) and not (
+                    isinstance(node.func, ast.Name)
+                    and node.func.id in _PURE_CALLS
+            ):
+                written.update(
+                    argument.id
+                    for argument in node.args
+                    if isinstance(argument, ast.Name)
+                )
+    return written
+
+
+def _is_simple_index(index, mutable_names):
+    for node in ast.walk(index):
+        if isinstance(node, ast.Name):
+            if node.id in mutable_names:
+                return False
+        elif not isinstance(
+                node,
+                (
+                    ast.Constant,
+                    ast.BinOp,
+                    ast.UnaryOp,
+                    ast.operator,
+                    ast.unaryop,
+                    ast.expr_context,
+                ),
+        ):
+            return False
+    return True
+
+
+def _evaluated_subscripts(node):
+    if isinstance(
+            node,
+            (
+                ast.BoolOp,
+                ast.IfExp,
+                ast.Lambda,
+                ast.ListComp,
+                ast.SetComp,
+                ast.DictComp,
+                ast.GeneratorExp,
+            ),
+    ):
+        return []
+    found = []
+    if isinstance(node, ast.Subscript) and isinstance(node.ctx, ast.Load):
+        found.append(node)
+    for child in ast.iter_child_nodes(node):
+        found.extend(_evaluated_subscripts(child))
+    return found
+
+
+def _statement_evaluated_subscripts(statement):
+    if isinstance(statement, (ast.If, ast.While)):
+        return _evaluated_subscripts(statement.test)
+    if isinstance(statement, (ast.Assign, ast.AugAssign, ast.Expr)):
+        return _evaluated_subscripts(statement)
+    return []
+
+
+def _exits_early(statement):
+    return any(
+        isinstance(node, (ast.Break, ast.Continue, ast.Return))
+        for node in ast.walk(statement)
+    )
+
+
+def _is_node_load(statement):
+    return (
+        isinstance(statement, ast.Assign)
+        and len(statement.targets) == 1
+        and isinstance(statement.targets[0], ast.Name)
+        and statement.targets[0].id.startswith(NODE_LOAD_PREFIX)
+    )
+
+
+def _cache_read_only_loads(thread_loop, written_arrays):
+    rebound = _stored_names(thread_loop.body)
+    names = {}
+    body = []
+    exited = False
+    for position, statement in enumerate(thread_loop.body):
+        for node in [] if exited else _statement_evaluated_subscripts(statement):
+            key = ast.dump(node)
+            if (
+                    key in names
+                    or not isinstance(node.value, ast.Name)
+                    or node.value.id in written_arrays
+                    or node.value.id in rebound
+                    or not _is_simple_index(node.slice, rebound)
+                    or sum(
+                        ast.dump(other) == key
+                        for later in thread_loop.body[position:]
+                        for other in ast.walk(later)
+                    ) < 2
+            ):
+                continue
+            names[key] = f"_thread_load_{len(names)}"
+            body.append(
+                ast.Assign(
+                    targets=[ast.Name(id=names[key], ctx=ast.Store())],
+                    value=deepcopy(node),
+                )
+            )
+        body.append(_LoadReplacer(names).visit(deepcopy(statement)))
+        exited = exited or _exits_early(statement)
+    cached_loop = deepcopy(thread_loop)
+    cached_loop.body = body
+    return cached_loop
+
+
+class _LoadReplacer(ast.NodeTransformer):
+    def __init__(self, names):
+        self.names = names
+
+    def visit_Subscript(self, node):
+        name = self.names.get(ast.dump(node))
+        if name is not None:
+            return ast.Name(id=name, ctx=ast.Load())
+        return self.generic_visit(node)
 
 
 def _function_arguments(argument_names):
@@ -1485,6 +2334,9 @@ def lower_to_numba_cuda(
         wavefront_threads_per_block=128,
         thread_loop_iterator=None,
         thread_unroll_factor=1,
+        n_warp=None,
+        dependence_protocol=COUNTER_DEPENDENCE,
+        direct_dependence=None,
 ):
     return CUDALowerer(
         loop_iterator=loop_iterator,
@@ -1495,4 +2347,7 @@ def lower_to_numba_cuda(
         wavefront_threads_per_block=wavefront_threads_per_block,
         thread_loop_iterator=thread_loop_iterator,
         thread_unroll_factor=thread_unroll_factor,
+        n_warp=n_warp,
+        dependence_protocol=dependence_protocol,
+        direct_dependence=direct_dependence,
     ).lower(code)
