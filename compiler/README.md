@@ -13,20 +13,18 @@ integration.
 1. obtains and normalizes the Python AST;
 2. raises the operation through the LCD frontend and SPF backend IRs;
 3. extracts ordering and reduction dependences;
-4. constructs a reusable DAG plan;
-5. lowers the mapped loops to a Numba-CUDA kernel and host launcher; and
-6. compiles and binds the generated module.
+4. constructs reusable DAG and structural-lookup plans; and
+5. builds the legal schedule space and lazy lowering/compilation factories.
 
 At invocation time, the wrapper binds concrete arguments, runs the generated
-DAG inspector, constructs executor data, transfers CUDA arguments, launches
-the kernels, and restores explicitly returned values on the host.
+DAG inspector, prepares auxiliary data, asks the scheduler for an execution
+configuration, and obtains the corresponding generated CUDA module. Finally,
+it transfers CUDA arguments, launches the kernels, and restores explicitly
+returned values on the host.
 
-The current execution mode, unrolling factor, and thread-block size are
-resolved in `parallel()` immediately before `lower_to_numba_cuda()` is called.
-A sparsity-aware scheduler should integrate at this boundary. Because concrete
-sparsity is available only when the wrapper is invoked, runtime scheduling
-requires lowering and compilation to be deferred or cached as specialized
-variants.
+When every scheduling option is explicitly fixed, lowering and compilation
+may happen at decoration time. Otherwise they are deferred until concrete
+sparsity information is available.
 
 ## Intermediate representations
 
@@ -54,6 +52,17 @@ formats:
 - sync-free: `dep_count`, `dag_ptr`, and `dag_index`;
 - wavefront: flattened `wavefronts` and `wavefront_ptr` arrays.
 
+`structural_lookups.py` identifies recurring sparse searches and prepares the
+auxiliary data needed to lower them efficiently.
+
+## Scheduling
+
+`scheduler.py` selects the execution mode and CUDA mapping parameters for an
+input. Decorator arguments may leave these choices automatic or constrain
+individual fields. The selected schedule is passed to preprocessing and CUDA
+lowering; the remaining compiler components do not depend on how the scheduler
+arrived at that choice.
+
 ## CUDA lowering and runtime
 
 `cuda_lowering.py` removes the block-mapped loop, assigns its iterator from
@@ -77,8 +86,11 @@ launcher, synchronizes, and copies returned values back to the host.
 | `SMT_Generator.py` | SMT constraints and symbolic function properties. |
 | `dag_codegen.py` | DAG planning, simplification, and inspector generation. |
 | `dag_preprocessing.py` | Executor-array construction. |
+| `structural_lookups.py` | Detection, preprocessing, and lowering of repeated sparse searches. |
+| `scheduler.py` | Execution-configuration selection. |
 | `cuda_lowering.py` | CUDA kernel and launcher generation. |
 | `cuda_runtime.py` | Compilation, transfers, execution, and result restoration. |
-| `demo/` | User-facing examples and physical-GPU end-to-end tests. |
+| `demo/` | Executable examples and Matrix Market input handling. |
+| `e2e_tests/` | Physical-GPU numerical end-to-end tests. |
 | `transform_tests/` | Structural and code-generation regression tests. |
 

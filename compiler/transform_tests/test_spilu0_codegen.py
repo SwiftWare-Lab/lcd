@@ -191,8 +191,26 @@ class SpILU0CodegenTests(unittest.TestCase):
                     return_value=legality_result,
                 ):
                     with redirect_stdout(io.StringIO()):
-                        compiled = compile_functions[storage]()
+                        compiled = (
+                            compile_functions[storage](thread_unroll=1)
+                            if storage == "csr"
+                            else compile_functions[storage]()
+                        )
                 self.assertTrue(callable(compiled))
+                self.assertEqual(len(compiled.structural_lookups), 1)
+                lookup_name = compiled.structural_lookups[0].name
+                self.assertIn(lookup_name, compiled.cuda_kernel_source)
+                self.assertIn(lookup_name, compiled.cuda_launcher_source)
+                if storage == "csr":
+                    self.assertNotIn(
+                        "for diag_ptr in range",
+                        compiled.cuda_kernel_source,
+                    )
+                else:
+                    self.assertNotIn(
+                        "for dptr in range",
+                        compiled.cuda_kernel_source,
+                    )
 
 
 if __name__ == "__main__":

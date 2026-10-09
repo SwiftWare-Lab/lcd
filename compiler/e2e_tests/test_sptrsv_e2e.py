@@ -9,9 +9,9 @@ from scipy.sparse import csc_matrix, csr_matrix
 from scipy.sparse import tril
 from scipy.sparse.linalg import spsolve_triangular
 
-from compiler.demo.gpu_test_utils import physical_cuda_status
-from compiler.demo.suitesparse_test_matrix import (
-    load_suitesparse_test_matrix,
+from compiler.e2e_tests.gpu_test_utils import (
+    load_test_matrix,
+    physical_cuda_status,
 )
 
 
@@ -34,7 +34,7 @@ class SpTRSVEndToEndTests(unittest.TestCase):
         cls.csr_solver = staticmethod(simple_sptrsv_csr)
 
     def setUp(self):
-        source_matrix = load_suitesparse_test_matrix()
+        source_matrix = load_test_matrix()
         self.lower_triangular = tril(source_matrix, format="csr")
         self.lower_triangular.sort_indices()
         expected_solution = np.linspace(
