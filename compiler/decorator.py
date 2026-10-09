@@ -8,6 +8,7 @@ from compiler.ast_normalization import normalize_aliases
 from compiler.dag_codegen import (
     compile_dag_builder,
     create_dag_plan,
+    generate_dag_ast,
     generate_dag_source,
 )
 from compiler.cuda_lowering import lower_to_numba_cuda
@@ -17,7 +18,23 @@ from compiler.cuda_runtime import (
     execute_cuda_call,
     prepare_cuda_arguments,
 )
-from compiler.dag_preprocessing import preprocess_dag_output
+from compiler.dag_preprocessing import (
+    preprocess_dag_output,
+    preprocess_sync_free,
+    preprocess_wavefront,
+    wavefronts_from_dag,
+)
+from compiler.scheduler import (
+    AUTO,
+    SYNC_FREE,
+    AnalyticScheduler,
+    SchedulePlan,
+    ScheduleSpace,
+    count_inner_loop_flops,
+    extract_workload_features,
+    inspection_fingerprint,
+    pointer_array_names,
+)
 from compiler.legality_check import finalize_legality_of_fusion, transform_ast, generate_dag_generation_code, \
     extract_dependences
 from compiler.legality_check import extract_node_data, extract_dag_creation_components
@@ -145,39 +162,67 @@ def parallel(**kwargs):
             block_iterator=loop,
         )
         node_data = extract_node_data(root_node)
-        execution_mode = kwargs.get("execution_mode", "sync_free")
-        cuda_execution_mode = (
-            "sync_free"
-            if execution_mode.replace("-", "_") == "sync_free"
-            else "wavefront"
-        )
+        execution_mode = kwargs.get("execution_mode", AUTO)
         thread_loop = kwargs.get(
             "thread_loop",
             kwargs.get("thread_map", None),
         )
         thread_unroll = kwargs.get(
             "thread_unroll",
-            kwargs.get("thread_unroll_factor", 1),
+            kwargs.get("thread_unroll_factor", None),
         )
-        cuda_lowering = lower_to_numba_cuda(
-            cur_ast,
-            loop_iterator=loop,
-            reductions=dependence_analysis,
-            execution_mode=cuda_execution_mode,
-            sync_free_ready_count=kwargs.get(
-                "sync_free_ready_count",
-                0,
-            ),
-            wavefront_threads_per_block=kwargs.get(
-                "threads_per_block",
-                128,
-            ),
-            thread_loop_iterator=thread_loop,
-            thread_unroll_factor=thread_unroll,
+        schedule_space = ScheduleSpace.from_options(
+            execution_mode=execution_mode,
+            threads_per_block=kwargs.get("threads_per_block"),
+            thread_unroll=thread_unroll,
+            thread_mapped=thread_loop is not None,
+        )
+        fixed_schedule = (
+            schedule_space.fixed_schedule()
+            if schedule_space.is_fixed
+            else None
+        )
+        scheduler = kwargs.get("scheduler") or AnalyticScheduler(
+            kwargs.get("arch_constants"),
+        )
+        lowered_variants = {}
+        compiled_variants = {}
+
+        def lower_variant(lowering_key):
+            if lowering_key not in lowered_variants:
+                cuda_execution_mode, threads_per_block, unroll_factor = (
+                    lowering_key
+                )
+                lowered_variants[lowering_key] = lower_to_numba_cuda(
+                    cur_ast,
+                    loop_iterator=loop,
+                    reductions=dependence_analysis,
+                    execution_mode=cuda_execution_mode,
+                    sync_free_ready_count=kwargs.get(
+                        "sync_free_ready_count",
+                        0,
+                    ),
+                    wavefront_threads_per_block=threads_per_block,
+                    thread_loop_iterator=thread_loop,
+                    thread_unroll_factor=unroll_factor,
+                )
+            return lowered_variants[lowering_key]
+
+        def compile_variant(lowering_key):
+            cuda_lowering = lower_variant(lowering_key)
+            if lowering_key not in compiled_variants:
+                compiled_variants[lowering_key] = compile_cuda_module(
+                    cuda_lowering,
+                    function_globals=function.__globals__,
+                )
+            return cuda_lowering, compiled_variants[lowering_key]
+
+        host_lowering = lower_variant(
+            schedule_space.configurations()[0][:3]
         )
         dag_argument_names = argument_names + [
             name
-            for name in cuda_lowering.lifted_loop_parameters
+            for name in host_lowering.lifted_loop_parameters
             if name not in argument_names
         ]
         dag_plan = create_dag_plan(
@@ -188,68 +233,162 @@ def parallel(**kwargs):
             function_props=function_props,
         )
         validate_endpoints = kwargs.get("validate_dag_endpoints", False)
+        inspector_mode = (
+            execution_mode
+            if fixed_schedule is not None
+            else SYNC_FREE
+        )
         dag_source = generate_dag_source(
             dag_plan,
             validate_endpoints=validate_endpoints,
-            execution_mode=execution_mode,
+            execution_mode=inspector_mode,
         )
         dag_builder = compile_dag_builder(
             dag_plan,
             validate_endpoints=validate_endpoints,
-            execution_mode=execution_mode,
+            execution_mode=inspector_mode,
         )
-        compiled_cuda_module = compile_cuda_module(
-            cuda_lowering,
-            function_globals=function.__globals__,
+        inspector_names = {
+            node.id
+            for node in ast.walk(generate_dag_ast(
+                dag_plan,
+                validate_endpoints=validate_endpoints,
+                execution_mode=inspector_mode,
+            ))
+            if isinstance(node, ast.Name)
+        }
+        fingerprint_names = [
+            name
+            for name in dag_argument_names
+            if name in inspector_names
+        ] + pointer_array_names(function_props)
+        flops_per_iteration = count_inner_loop_flops(
+            cur_ast,
+            loop,
+            thread_loop,
         )
+        schedule_plans = {}
 
-        def build_dag(*args, **call_kwargs):
+        def bind_arguments(args, call_kwargs):
             bound_arguments = signature.bind(*args, **call_kwargs)
             bound_arguments.apply_defaults()
-            dag_values = dict(bound_arguments.arguments)
+            return bound_arguments.arguments
+
+        def dag_values_for(argument_values):
+            dag_values = dict(argument_values)
             dag_values.update(
                 evaluate_host_prelude(
-                    lowering=cuda_lowering,
+                    lowering=host_lowering,
                     argument_values=dag_values,
                     function_globals=function.__globals__,
                 )
             )
+            return dag_values
+
+        def run_inspector(dag_values):
             return dag_builder(*[
                 dag_values[name]
                 for name in dag_argument_names
             ])
 
-        def build_execution_data(*args, **call_kwargs):
-            dag_successors, scheduling_data = build_dag(
-                *args,
-                **call_kwargs,
-            )
-            return preprocess_dag_output(
-                dag_successors,
-                scheduling_data,
-                execution_mode,
+        def build_dag(*args, **call_kwargs):
+            return run_inspector(
+                dag_values_for(bind_arguments(args, call_kwargs))
             )
 
-        def prepare_cuda_call(*args, **call_kwargs):
-            bound_arguments = signature.bind(*args, **call_kwargs)
-            bound_arguments.apply_defaults()
-            execution_data = build_execution_data(
-                *args,
-                **call_kwargs,
+        def create_schedule_plan(dag_values):
+            dag_successors, scheduling_data = run_inspector(dag_values)
+            if fixed_schedule is not None:
+                return SchedulePlan(
+                    schedule=fixed_schedule,
+                    execution_data=preprocess_dag_output(
+                        dag_successors,
+                        scheduling_data,
+                        execution_mode,
+                    ),
+                )
+            wavefront_list = wavefronts_from_dag(
+                dag_successors,
+                scheduling_data,
             )
-            return prepare_cuda_arguments(
-                lowering=cuda_lowering,
-                argument_values=bound_arguments.arguments,
+            features = extract_workload_features(
+                dag_successors,
+                wavefront_list,
+                dag_values,
+                function_props=function_props,
+                flops_per_iteration=flops_per_iteration,
+            )
+            schedule = scheduler.schedule(features, schedule_space)
+            if schedule.execution_mode == SYNC_FREE:
+                execution_data = preprocess_sync_free(
+                    dag_successors,
+                    scheduling_data,
+                )
+            else:
+                execution_data = preprocess_wavefront(
+                    dag_successors,
+                    wavefront_list,
+                )
+            return SchedulePlan(
+                schedule=schedule,
                 execution_data=execution_data,
+                features=features,
+            )
+
+        def plan_for(argument_values):
+            dag_values = dag_values_for(argument_values)
+            fingerprint = inspection_fingerprint(
+                dag_values,
+                fingerprint_names,
+            )
+            plan = schedule_plans.get(fingerprint)
+            if plan is None:
+                plan = create_schedule_plan(dag_values)
+                if len(schedule_plans) >= SCHEDULE_CACHE_SIZE:
+                    schedule_plans.pop(next(iter(schedule_plans)))
+                schedule_plans[fingerprint] = plan
+            return plan
+
+        def schedule_plan(*args, **call_kwargs):
+            return plan_for(bind_arguments(args, call_kwargs))
+
+        def schedule_call(*args, **call_kwargs):
+            return schedule_plan(*args, **call_kwargs).schedule
+
+        def build_execution_data(*args, **call_kwargs):
+            return schedule_plan(*args, **call_kwargs).execution_data
+
+        def publish_variant(schedule, cuda_lowering, compiled_cuda_module):
+            if wrapper.current_schedule == schedule:
+                return
+            wrapper.current_schedule = schedule
+            wrapper.__dict__.update(
+                _variant_attributes(cuda_lowering, compiled_cuda_module)
+            )
+
+        def resolve_call(args, call_kwargs):
+            argument_values = bind_arguments(args, call_kwargs)
+            plan = plan_for(argument_values)
+            cuda_lowering, compiled_cuda_module = compile_variant(
+                plan.schedule.lowering_key
+            )
+            publish_variant(plan.schedule, cuda_lowering, compiled_cuda_module)
+            prepared_arguments = prepare_cuda_arguments(
+                lowering=cuda_lowering,
+                argument_values=argument_values,
+                execution_data=plan.execution_data,
                 function_globals=function.__globals__,
                 cuda_module=compiled_cuda_module.namespace["cuda"],
             )
+            return cuda_lowering, compiled_cuda_module, prepared_arguments
+
+        def prepare_cuda_call(*args, **call_kwargs):
+            return resolve_call(args, call_kwargs)[2]
 
         @functools.wraps(function)
         def wrapper(*args, **call_kwargs):
-            prepared_arguments = prepare_cuda_call(
-                *args,
-                **call_kwargs,
+            cuda_lowering, compiled_cuda_module, prepared_arguments = (
+                resolve_call(args, call_kwargs)
             )
             return execute_cuda_call(
                 compiled_module=compiled_cuda_module,
@@ -264,24 +403,51 @@ def parallel(**kwargs):
         wrapper.build_dag = build_dag
         wrapper.build_execution_data = build_execution_data
         wrapper.prepare_cuda_arguments = prepare_cuda_call
+        wrapper.schedule_plan = schedule_plan
+        wrapper.schedule_call = schedule_call
+        wrapper.schedule_space = schedule_space
+        wrapper.scheduler = scheduler
         wrapper.dag_plan = dag_plan
         wrapper.dag_source = dag_source
         wrapper.execution_mode = execution_mode
         wrapper.dependence_analysis = dependence_analysis
         wrapper.reduction_statements = dependence_analysis.atomic_statements
-        wrapper.cuda_lowering = cuda_lowering
-        wrapper.compiled_cuda_module = compiled_cuda_module
-        wrapper.cuda_kernel = compiled_cuda_module.kernel
-        wrapper.cuda_launcher = compiled_cuda_module.launcher
-        wrapper.cuda_module_ast = cuda_lowering.module_ast
-        wrapper.cuda_kernel_ast = cuda_lowering.kernel_ast
-        wrapper.cuda_source = cuda_lowering.source
-        wrapper.cuda_kernel_source = ast.unparse(
-            cuda_lowering.kernel_ast
-        )
-        wrapper.cuda_launcher_ast = cuda_lowering.launcher_ast
-        wrapper.cuda_launcher_source = ast.unparse(
-            cuda_lowering.launcher_ast
-        )
+        wrapper.current_schedule = None
+        wrapper.__dict__.update(dict.fromkeys(VARIANT_ATTRIBUTES))
+        if fixed_schedule is not None:
+            publish_variant(
+                fixed_schedule,
+                *compile_variant(fixed_schedule.lowering_key),
+            )
         return wrapper
     return decorator
+
+
+SCHEDULE_CACHE_SIZE = 8
+VARIANT_ATTRIBUTES = (
+    "cuda_lowering",
+    "compiled_cuda_module",
+    "cuda_kernel",
+    "cuda_launcher",
+    "cuda_module_ast",
+    "cuda_kernel_ast",
+    "cuda_source",
+    "cuda_kernel_source",
+    "cuda_launcher_ast",
+    "cuda_launcher_source",
+)
+
+
+def _variant_attributes(cuda_lowering, compiled_cuda_module):
+    return {
+        "cuda_lowering": cuda_lowering,
+        "compiled_cuda_module": compiled_cuda_module,
+        "cuda_kernel": compiled_cuda_module.kernel,
+        "cuda_launcher": compiled_cuda_module.launcher,
+        "cuda_module_ast": cuda_lowering.module_ast,
+        "cuda_kernel_ast": cuda_lowering.kernel_ast,
+        "cuda_source": cuda_lowering.source,
+        "cuda_kernel_source": ast.unparse(cuda_lowering.kernel_ast),
+        "cuda_launcher_ast": cuda_lowering.launcher_ast,
+        "cuda_launcher_source": ast.unparse(cuda_lowering.launcher_ast),
+    }
