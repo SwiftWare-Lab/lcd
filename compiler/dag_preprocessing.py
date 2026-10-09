@@ -106,6 +106,26 @@ def compact_successors(dag_successors):
     )
 
 
+def wavefronts_from_dag(dag_successors, dep_count):
+    remaining_dep_count = list(dep_count)
+    wavefront_list = []
+    wavefront = [
+        node
+        for node, count in enumerate(remaining_dep_count)
+        if count == 0
+    ]
+    while wavefront:
+        wavefront_list.append(wavefront)
+        new_wavefront = set()
+        for node in wavefront:
+            for successor in dag_successors[node]:
+                remaining_dep_count[successor] -= 1
+                if remaining_dep_count[successor] == 0:
+                    new_wavefront.add(successor)
+        wavefront = sorted(new_wavefront)
+    return wavefront_list
+
+
 def preprocess_wavefront(dag_successors, wavefront_list):
     """Flatten wavefronts and build the offset array used by the launcher."""
     node_count = len(dag_successors)
