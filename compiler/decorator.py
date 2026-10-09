@@ -6,8 +6,11 @@ import types
 import ast
 from compiler.ast_normalization import normalize_aliases
 from compiler.dag_codegen import (
+    COUNTER_DEPENDENCE,
+    PUSH_DEPENDENCE,
     compile_dag_builder,
     create_dag_plan,
+    direct_dependence,
     generate_dag_ast,
     generate_dag_source,
 )
@@ -21,6 +24,7 @@ from compiler.cuda_runtime import (
 from compiler.dag_preprocessing import (
     preprocess_dag_output,
     preprocess_sync_free,
+    preprocess_warp_tasks,
     preprocess_wavefront,
     wavefronts_from_dag,
 )
@@ -171,28 +175,30 @@ def parallel(**kwargs):
             "thread_unroll",
             kwargs.get("thread_unroll_factor", None),
         )
-        schedule_space = ScheduleSpace.from_options(
+        space_options = dict(
             execution_mode=execution_mode,
             threads_per_block=kwargs.get("threads_per_block"),
             thread_unroll=thread_unroll,
             thread_mapped=thread_loop is not None,
+            n_warp=kwargs.get("n_warp"),
         )
-        fixed_schedule = (
-            schedule_space.fixed_schedule()
-            if schedule_space.is_fixed
-            else None
-        )
+        band_width = kwargs.get("band_width", 1)
         scheduler = kwargs.get("scheduler") or AnalyticScheduler(
             kwargs.get("arch_constants"),
         )
         lowered_variants = {}
         compiled_variants = {}
+        dependence = None
 
         def lower_variant(lowering_key):
             if lowering_key not in lowered_variants:
-                cuda_execution_mode, threads_per_block, unroll_factor = (
-                    lowering_key
-                )
+                (
+                    cuda_execution_mode,
+                    threads_per_block,
+                    unroll_factor,
+                    n_warp,
+                    dependence_protocol,
+                ) = lowering_key
                 lowered_variants[lowering_key] = lower_to_numba_cuda(
                     cur_ast,
                     loop_iterator=loop,
@@ -205,6 +211,13 @@ def parallel(**kwargs):
                     wavefront_threads_per_block=threads_per_block,
                     thread_loop_iterator=thread_loop,
                     thread_unroll_factor=unroll_factor,
+                    n_warp=n_warp,
+                    dependence_protocol=dependence_protocol,
+                    direct_dependence=(
+                        None
+                        if dependence_protocol == COUNTER_DEPENDENCE
+                        else dependence
+                    ),
                 )
             return lowered_variants[lowering_key]
 
@@ -218,7 +231,7 @@ def parallel(**kwargs):
             return cuda_lowering, compiled_variants[lowering_key]
 
         host_lowering = lower_variant(
-            schedule_space.configurations()[0][:3]
+            ScheduleSpace.from_options(**space_options).configurations()[0]
         )
         dag_argument_names = argument_names + [
             name
@@ -233,28 +246,42 @@ def parallel(**kwargs):
             function_props=function_props,
         )
         validate_endpoints = kwargs.get("validate_dag_endpoints", False)
+        dependence = direct_dependence(
+            dag_plan,
+            thread_loop,
+            validate_endpoints=validate_endpoints,
+        )
+        schedule_space = ScheduleSpace.from_options(
+            **space_options,
+            direct_protocol=None if dependence is None else dependence.kind,
+            dependence_protocol=kwargs.get("dependence_protocol"),
+        )
+        fixed_schedule = (
+            schedule_space.fixed_schedule()
+            if schedule_space.is_fixed
+            else None
+        )
+        edge_multiplicity = any(
+            configuration[-1] == PUSH_DEPENDENCE
+            for configuration in schedule_space.configurations()
+        )
         inspector_mode = (
             execution_mode
             if fixed_schedule is not None
             else SYNC_FREE
         )
-        dag_source = generate_dag_source(
-            dag_plan,
+        inspector_options = dict(
             validate_endpoints=validate_endpoints,
             execution_mode=inspector_mode,
+            edge_multiplicity=edge_multiplicity,
         )
-        dag_builder = compile_dag_builder(
-            dag_plan,
-            validate_endpoints=validate_endpoints,
-            execution_mode=inspector_mode,
-        )
+        dag_source = generate_dag_source(dag_plan, **inspector_options)
+        dag_builder = compile_dag_builder(dag_plan, **inspector_options)
         inspector_names = {
             node.id
-            for node in ast.walk(generate_dag_ast(
-                dag_plan,
-                validate_endpoints=validate_endpoints,
-                execution_mode=inspector_mode,
-            ))
+            for node in ast.walk(
+                generate_dag_ast(dag_plan, **inspector_options)
+            )
             if isinstance(node, ast.Name)
         }
         fingerprint_names = [
@@ -294,17 +321,50 @@ def parallel(**kwargs):
         def build_dag(*args, **call_kwargs):
             return run_inspector(
                 dag_values_for(bind_arguments(args, call_kwargs))
+            )[:2]
+
+        def warp_mapped(schedule):
+            return lower_variant(schedule.lowering_key).warp_mapped
+
+        def warp_task_data(schedule, dag_successors, wavefront_list, edge_count):
+            pushed = (
+                lower_variant(schedule.lowering_key).dependence_protocol
+                == PUSH_DEPENDENCE
+            )
+            return preprocess_warp_tasks(
+                dag_successors,
+                wavefront_list,
+                band_width,
+                edge_count=edge_count if pushed else None,
             )
 
         def create_schedule_plan(dag_values):
-            dag_successors, scheduling_data = run_inspector(dag_values)
+            dag_successors, scheduling_data, *edge_count = run_inspector(
+                dag_values,
+            )
+            edge_count = edge_count[0] if edge_count else None
             if fixed_schedule is not None:
+                if not warp_mapped(fixed_schedule):
+                    return SchedulePlan(
+                        schedule=fixed_schedule,
+                        execution_data=preprocess_dag_output(
+                            dag_successors,
+                            scheduling_data,
+                            execution_mode,
+                        ),
+                    )
+                wavefront_list = (
+                    scheduling_data
+                    if fixed_schedule.execution_mode != SYNC_FREE
+                    else wavefronts_from_dag(dag_successors, scheduling_data)
+                )
                 return SchedulePlan(
                     schedule=fixed_schedule,
-                    execution_data=preprocess_dag_output(
+                    execution_data=warp_task_data(
+                        fixed_schedule,
                         dag_successors,
-                        scheduling_data,
-                        execution_mode,
+                        wavefront_list,
+                        edge_count,
                     ),
                 )
             wavefront_list = wavefronts_from_dag(
@@ -319,7 +379,14 @@ def parallel(**kwargs):
                 flops_per_iteration=flops_per_iteration,
             )
             schedule = scheduler.schedule(features, schedule_space)
-            if schedule.execution_mode == SYNC_FREE:
+            if warp_mapped(schedule):
+                execution_data = warp_task_data(
+                    schedule,
+                    dag_successors,
+                    wavefront_list,
+                    edge_count,
+                )
+            elif schedule.execution_mode == SYNC_FREE:
                 execution_data = preprocess_sync_free(
                     dag_successors,
                     scheduling_data,

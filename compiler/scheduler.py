@@ -9,6 +9,12 @@ from functools import lru_cache
 
 import numpy as np
 
+from compiler.dag_codegen import (
+    COUNTER_DEPENDENCE,
+    PULL_DEPENDENCE,
+    PUSH_DEPENDENCE,
+)
+
 def executer(Ap, Ai, Ax, **kwargs):
     assert 'schedule' in kwargs
     schedule = kwargs['schedule']
@@ -58,6 +64,8 @@ BLOCK_SIZES = (32, 64, 128, 256)
 UNROLL_FACTORS = (1, 2, 4, 8)
 DEFAULT_THREADS_PER_BLOCK = 128
 N_WARP_CANDIDATES = (1,)
+WARP_SIZE = 32
+PULL_POLLING_FACTOR = 2.0
 ARITHMETIC_OPERATORS = (
     ast.Add,
     ast.Sub,
@@ -123,11 +131,18 @@ class Schedule:
     threads_per_block: int
     thread_unroll: int
     n_warp: int = 1
+    dependence_protocol: str = COUNTER_DEPENDENCE
     cost: CostEstimate | None = None
 
     @property
     def lowering_key(self):
-        return self.execution_mode, self.threads_per_block, self.thread_unroll
+        return (
+            self.execution_mode,
+            self.threads_per_block,
+            self.thread_unroll,
+            self.n_warp,
+            self.dependence_protocol,
+        )
 
 
 @dataclass(frozen=True)
@@ -152,6 +167,7 @@ class ScheduleSpace:
     unroll_factors: tuple
     n_warps: tuple = N_WARP_CANDIDATES
     thread_mapped: bool = False
+    dependence_protocols: tuple = (COUNTER_DEPENDENCE,)
 
     @classmethod
     def from_options(
@@ -160,10 +176,37 @@ class ScheduleSpace:
             threads_per_block=None,
             thread_unroll=None,
             thread_mapped=False,
+            n_warp=None,
+            direct_protocol=None,
+            dependence_protocol=None,
     ):
         mode = normalize_execution_mode(execution_mode)
+        if n_warp is not None and (not isinstance(n_warp, int) or n_warp <= 0):
+            raise SchedulerError("n_warp must be a positive integer.")
+        block_task = n_warp is not None and n_warp > 1
+        if (
+                block_task
+                and threads_per_block is not None
+                and threads_per_block != n_warp * WARP_SIZE
+        ):
+            raise SchedulerError(
+                f"n_warp={n_warp} maps one task to {n_warp * WARP_SIZE} "
+                f"threads, but threads_per_block={threads_per_block}."
+            )
+        if (
+                n_warp == 1
+                and thread_mapped
+                and threads_per_block is not None
+                and threads_per_block % WARP_SIZE
+        ):
+            raise SchedulerError(
+                "n_warp=1 requires threads_per_block to be a multiple of "
+                f"{WARP_SIZE}, but threads_per_block={threads_per_block}."
+            )
         if threads_per_block is not None:
             block_sizes = (threads_per_block,)
+        elif block_task:
+            block_sizes = (n_warp * WARP_SIZE,)
         elif thread_mapped:
             block_sizes = BLOCK_SIZES
         else:
@@ -174,20 +217,70 @@ class ScheduleSpace:
             unroll_factors = UNROLL_FACTORS
         else:
             unroll_factors = (1,)
+        execution_modes = EXECUTION_MODES if mode is None else (mode,)
+        n_warps = N_WARP_CANDIDATES if n_warp is None else (n_warp,)
+        available_protocols = (COUNTER_DEPENDENCE,) + (
+            (direct_protocol,)
+            if thread_mapped and direct_protocol is not None
+            else ()
+        )
+        searched = len(execution_modes) * len(block_sizes) * len(
+            unroll_factors
+        ) * len(n_warps) > 1
+        if dependence_protocol is not None:
+            if dependence_protocol not in available_protocols:
+                raise SchedulerError(
+                    f"Dependence protocol {dependence_protocol!r} is not "
+                    "supported by this loop; available protocols: "
+                    + ", ".join(available_protocols)
+                    + "."
+                )
+            dependence_protocols = (dependence_protocol,)
+        elif PUSH_DEPENDENCE in available_protocols:
+            dependence_protocols = (PUSH_DEPENDENCE,)
+        elif PULL_DEPENDENCE in available_protocols and searched:
+            dependence_protocols = (COUNTER_DEPENDENCE, PULL_DEPENDENCE)
+        else:
+            dependence_protocols = (COUNTER_DEPENDENCE,)
         return cls(
-            execution_modes=EXECUTION_MODES if mode is None else (mode,),
+            execution_modes=execution_modes,
             block_sizes=block_sizes,
             unroll_factors=unroll_factors,
+            n_warps=n_warps,
             thread_mapped=thread_mapped,
+            dependence_protocols=dependence_protocols,
         )
 
     def configurations(self):
-        return list(itertools.product(
-            self.execution_modes,
-            self.block_sizes,
-            self.unroll_factors,
-            self.n_warps,
-        ))
+        configurations = []
+        for execution_mode, threads_per_block, thread_unroll, n_warp in (
+                itertools.product(
+                    self.execution_modes,
+                    self.block_sizes,
+                    self.unroll_factors,
+                    self.n_warps,
+                )
+        ):
+            protocols = (
+                self.dependence_protocols
+                if (
+                    execution_mode == SYNC_FREE
+                    and self.thread_mapped
+                    and _warp_task(threads_per_block, n_warp)
+                )
+                else (COUNTER_DEPENDENCE,)
+            )
+            configurations.extend(
+                (
+                    execution_mode,
+                    threads_per_block,
+                    thread_unroll,
+                    n_warp,
+                    protocol,
+                )
+                for protocol in protocols
+            )
+        return configurations
 
     @property
     def is_fixed(self):
@@ -219,6 +312,7 @@ class AnalyticScheduler:
             thread_unroll,
             n_warp,
             thread_mapped,
+            dependence_protocol=COUNTER_DEPENDENCE,
     ):
         arch = self.arch_constants
         average_in_degree = features.average_in_degree
@@ -227,14 +321,25 @@ class AnalyticScheduler:
             sync_s = 0.0
         elif execution_mode == SYNC_FREE:
             launch_s = arch.launch_latency_s
-            sync_s = arch.atomic_cost_s * (
-                average_in_degree + features.rows / n_warp
-            )
+            if dependence_protocol == PUSH_DEPENDENCE:
+                sync_s = arch.atomic_cost_s * features.rows / n_warp
+            elif dependence_protocol == PULL_DEPENDENCE:
+                sync_s = arch.atomic_cost_s * average_in_degree * (
+                    1.0 + PULL_POLLING_FACTOR * features.levels
+                )
+            else:
+                sync_s = arch.atomic_cost_s * (
+                    average_in_degree + features.rows / n_warp
+                )
         else:
             raise SchedulerError(
                 f"Unknown execution mode {execution_mode!r}."
             )
-        lanes = threads_per_block * thread_unroll if thread_mapped else 1
+        lanes = (
+            task_threads(threads_per_block, n_warp) * thread_unroll
+            if thread_mapped
+            else 1
+        )
         active_lanes = min(lanes, max(average_in_degree, 1.0))
         return CostEstimate(
             launch_s=launch_s,
@@ -250,6 +355,7 @@ class AnalyticScheduler:
                 threads_per_block=threads_per_block,
                 thread_unroll=thread_unroll,
                 n_warp=n_warp,
+                dependence_protocol=dependence_protocol,
                 cost=self.estimate(
                     features,
                     execution_mode,
@@ -257,6 +363,7 @@ class AnalyticScheduler:
                     thread_unroll,
                     n_warp,
                     space.thread_mapped,
+                    dependence_protocol,
                 ),
             )
             for (
@@ -264,6 +371,7 @@ class AnalyticScheduler:
                 threads_per_block,
                 thread_unroll,
                 n_warp,
+                dependence_protocol,
             ) in space.configurations()
         ]
 
@@ -271,13 +379,29 @@ class AnalyticScheduler:
         return min(self.candidates(features, space), key=_schedule_rank)
 
 
+def task_threads(threads_per_block, n_warp):
+    if threads_per_block % WARP_SIZE:
+        return threads_per_block
+    return min(threads_per_block, WARP_SIZE * n_warp)
+
+
+def _warp_task(threads_per_block, n_warp):
+    return n_warp == 1 and threads_per_block % WARP_SIZE == 0
+
+
 def _schedule_rank(schedule):
     return (
         schedule.cost.total_s,
-        schedule.threads_per_block * schedule.thread_unroll,
+        task_threads(schedule.threads_per_block, schedule.n_warp)
+        * schedule.thread_unroll,
+        abs(
+            schedule.threads_per_block.bit_length()
+            - DEFAULT_THREADS_PER_BLOCK.bit_length()
+        ),
         schedule.threads_per_block,
         schedule.n_warp,
         EXECUTION_MODES.index(schedule.execution_mode),
+        schedule.dependence_protocol,
     )
 
 

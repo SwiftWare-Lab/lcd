@@ -5,6 +5,7 @@ already-filtered list of ordering dependences plus SPF node data.
 """
 
 import ast
+from copy import deepcopy
 from dataclasses import dataclass, field
 import re
 
@@ -31,6 +32,10 @@ class DAGCodegenError(Exception):
 
 
 EXECUTION_MODES = frozenset({"sync_free", "wavefront"})
+COUNTER_DEPENDENCE = "counter"
+PUSH_DEPENDENCE = "push"
+PULL_DEPENDENCE = "pull"
+DEPENDENCE_PROTOCOLS = (COUNTER_DEPENDENCE, PUSH_DEPENDENCE, PULL_DEPENDENCE)
 
 
 @dataclass(frozen=True)
@@ -72,6 +77,13 @@ class DAGPlan:
     node_count: object
     edge_rules: list[EdgeRule]
     parallel_iterator: str
+
+
+@dataclass(frozen=True)
+class DirectDependence:
+    kind: str
+    endpoint: ast.expr
+    guard: ast.expr | None
 
 
 class DAGPlanner:
@@ -1143,12 +1155,18 @@ class PythonASTEmitter:
             self,
             validate_endpoints=False,
             execution_mode="sync_free",
+            edge_multiplicity=False,
     ):
         self.validate_endpoints = validate_endpoints
         self.execution_mode = _normalize_execution_mode(execution_mode)
+        self.edge_multiplicity = edge_multiplicity
 
     def generate(self, plan, function_name="extract_dag"):
         body = [self._successor_initialization(plan)]
+        if self.edge_multiplicity:
+            body.append(
+                self._dependency_count_initialization(plan, "_dag_edge_count")
+            )
         for index, edge_rule in enumerate(plan.edge_rules):
             body.append(self._edge_rule(plan, edge_rule, index))
         body.append(self._dependency_count_initialization(plan))
@@ -1156,6 +1174,10 @@ class PythonASTEmitter:
         if self.execution_mode == "wavefront":
             body.extend(self._wavefront_statements())
         body.append(self._return_statement(self.execution_mode))
+        if self.edge_multiplicity:
+            body[-1].value.elts.append(
+                ast.Name(id="_dag_edge_count", ctx=ast.Load())
+            )
 
         function = ast.FunctionDef(
             name=function_name,
@@ -1198,26 +1220,7 @@ class PythonASTEmitter:
             ),
         )
 
-    def _edge_rule(self, plan, edge_rule, index):
-        lowerer = _ExpressionLowerer(
-            edge_rule.name_replacements,
-            edge_rule.bindings,
-        )
-        source_name = f"_dag_source_{index}"
-        destination_name = f"_dag_destination_{index}"
-        statements = [
-            ast.Assign(
-                targets=[ast.Name(id=source_name, ctx=ast.Store())],
-                value=lowerer.value(edge_rule.source),
-            ),
-            ast.Assign(
-                targets=[ast.Name(id=destination_name, ctx=ast.Store())],
-                value=lowerer.value(edge_rule.destination),
-            ),
-        ]
-
-        source = ast.Name(id=source_name, ctx=ast.Load())
-        destination = ast.Name(id=destination_name, ctx=ast.Load())
+    def _edge_guards(self, plan, edge_rule, lowerer, source, destination):
         dependence_guards = [
             lowerer.premise(guard)
             for guard in edge_rule.guards
@@ -1285,6 +1288,35 @@ class PythonASTEmitter:
                 comparators=[destination],
             ))
         guards.extend(dependence_guards)
+        return guards
+
+    def _edge_rule(self, plan, edge_rule, index):
+        lowerer = _ExpressionLowerer(
+            edge_rule.name_replacements,
+            edge_rule.bindings,
+        )
+        source_name = f"_dag_source_{index}"
+        destination_name = f"_dag_destination_{index}"
+        statements = [
+            ast.Assign(
+                targets=[ast.Name(id=source_name, ctx=ast.Store())],
+                value=lowerer.value(edge_rule.source),
+            ),
+            ast.Assign(
+                targets=[ast.Name(id=destination_name, ctx=ast.Store())],
+                value=lowerer.value(edge_rule.destination),
+            ),
+        ]
+
+        source = ast.Name(id=source_name, ctx=ast.Load())
+        destination = ast.Name(id=destination_name, ctx=ast.Load())
+        guards = self._edge_guards(
+            plan,
+            edge_rule,
+            lowerer,
+            source,
+            destination,
+        )
         add_edge = ast.Expr(
             value=ast.Call(
                 func=ast.Attribute(
@@ -1303,6 +1335,7 @@ class PythonASTEmitter:
                 keywords=[],
             )
         )
+        edge_statements = [add_edge] + self._edge_count_statements(destination)
         if guards:
             guard_expression = (
                 guards[0]
@@ -1311,11 +1344,11 @@ class PythonASTEmitter:
             )
             statements.append(ast.If(
                 test=guard_expression,
-                body=[add_edge],
+                body=edge_statements,
                 orelse=[],
             ))
         else:
-            statements.append(add_edge)
+            statements.extend(edge_statements)
 
         nested = statements
         for iterator in reversed(edge_rule.iterators):
@@ -1355,6 +1388,19 @@ class PythonASTEmitter:
             raise DAGCodegenError("An edge rule has no iteration space.")
         return nested[0]
 
+    def _edge_count_statements(self, destination):
+        if not self.edge_multiplicity:
+            return []
+        return [ast.AugAssign(
+            target=ast.Subscript(
+                value=ast.Name(id="_dag_edge_count", ctx=ast.Load()),
+                slice=destination,
+                ctx=ast.Store(),
+            ),
+            op=ast.Add(),
+            value=ast.Constant(value=1),
+        )]
+
     @staticmethod
     def _has_strict_endpoint_order(lowerer, edge_rule, guards):
         source = ast.dump(lowerer.value(edge_rule.source))
@@ -1372,9 +1418,9 @@ class PythonASTEmitter:
         return False
 
     @staticmethod
-    def _dependency_count_initialization(plan):
+    def _dependency_count_initialization(plan, name="dep_count"):
         return ast.Assign(
-            targets=[ast.Name(id="dep_count", ctx=ast.Store())],
+            targets=[ast.Name(id=name, ctx=ast.Store())],
             value=ast.ListComp(
                 elt=ast.Constant(value=0),
                 generators=[
@@ -1524,10 +1570,12 @@ def generate_dag_ast(
         function_name="extract_dag",
         validate_endpoints=False,
         execution_mode="sync_free",
+        edge_multiplicity=False,
 ):
     return PythonASTEmitter(
         validate_endpoints=validate_endpoints,
         execution_mode=execution_mode,
+        edge_multiplicity=edge_multiplicity,
     ).generate(plan, function_name=function_name)
 
 
@@ -1536,6 +1584,7 @@ def generate_dag_source(
         function_name="extract_dag",
         validate_endpoints=False,
         execution_mode="sync_free",
+        edge_multiplicity=False,
 ):
     return ast.unparse(
         generate_dag_ast(
@@ -1543,6 +1592,7 @@ def generate_dag_source(
             function_name=function_name,
             validate_endpoints=validate_endpoints,
             execution_mode=execution_mode,
+            edge_multiplicity=edge_multiplicity,
         )
     )
 
@@ -1553,6 +1603,7 @@ def compile_dag_builder(
         globals_dict=None,
         validate_endpoints=False,
         execution_mode="sync_free",
+        edge_multiplicity=False,
 ):
     namespace = dict(globals_dict or {})
     module = generate_dag_ast(
@@ -1560,10 +1611,63 @@ def compile_dag_builder(
         function_name=function_name,
         validate_endpoints=validate_endpoints,
         execution_mode=execution_mode,
+        edge_multiplicity=edge_multiplicity,
     )
     print(ast.unparse(module))
     exec(compile(module, filename="<generated-dag>", mode="exec"), namespace)
     return namespace[function_name]
+
+
+def direct_dependence(plan, thread_iterator, validate_endpoints=False):
+    if thread_iterator is None or len(plan.edge_rules) != 1:
+        return None
+    edge_rule = plan.edge_rules[0]
+    if edge_rule.structural:
+        return None
+    if [iterator.name for iterator in edge_rule.iterators] != [
+        plan.parallel_iterator,
+        thread_iterator,
+    ]:
+        return None
+    if any(
+            iterator.break_before or iterator.break_after
+            for iterator in edge_rule.iterators
+    ):
+        return None
+    sides = {name[-1] for name in edge_rule.name_replacements}
+    lowerer = _ExpressionLowerer(
+        edge_rule.name_replacements,
+        edge_rule.bindings,
+    )
+    source = lowerer.value(edge_rule.source)
+    destination = lowerer.value(edge_rule.destination)
+    if sides == {"1"} and ast.unparse(source) == plan.parallel_iterator:
+        kind, endpoint = PUSH_DEPENDENCE, destination
+    elif sides == {"2"} and ast.unparse(destination) == plan.parallel_iterator:
+        kind, endpoint = PULL_DEPENDENCE, source
+    else:
+        return None
+    endpoint_names = {
+        node.id
+        for node in ast.walk(endpoint)
+        if isinstance(node, ast.Name)
+    }
+    if thread_iterator not in endpoint_names:
+        return None
+    guards = PythonASTEmitter(
+        validate_endpoints=validate_endpoints,
+    )._edge_guards(plan, edge_rule, lowerer, source, destination)
+    return DirectDependence(
+        kind=kind,
+        endpoint=deepcopy(endpoint),
+        guard=_conjunction(guards) if guards else None,
+    )
+
+
+def _conjunction(guards):
+    if len(guards) == 1:
+        return guards[0]
+    return ast.BoolOp(op=ast.And(), values=guards)
 
 
 def _normalize_execution_mode(execution_mode):

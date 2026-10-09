@@ -8,8 +8,12 @@ import numpy as np
 
 from compiler.dag_preprocessing import (
     SyncFreeExecutionData,
+    WarpTaskExecutionData,
     WavefrontExecutionData,
 )
+
+
+HOST_LAUNCH_ARGUMENTS = frozenset({"wavefront_ptr", "band_ptr"})
 
 
 class CUDARuntimePreparationError(Exception):
@@ -163,7 +167,7 @@ def prepare_cuda_arguments(
     prepared_values = {}
     for name in lowering.launcher_arguments:
         value = host_values[name]
-        if name == "wavefront_ptr":
+        if name in HOST_LAUNCH_ARGUMENTS:
             # The host launcher reads the offsets to issue each kernel launch.
             prepared_values[name] = value
         else:
@@ -331,6 +335,21 @@ def _stored_names(statements):
 
 def _execution_values(execution_mode, execution_data):
     execution_mode = execution_mode.replace("-", "_")
+    if isinstance(execution_data, WarpTaskExecutionData):
+        initial_dep_count = execution_data.initial_dep_count
+        if initial_dep_count is None:
+            initial_dep_count = execution_data.dep_count.copy()
+        return {
+            "task_nodes": execution_data.task_nodes,
+            "task_ptr": execution_data.task_ptr,
+            "band_ptr": execution_data.band_ptr,
+            "task_counter": np.zeros(1, dtype=np.int32),
+            "done": np.zeros(len(execution_data.dep_count), dtype=np.int32),
+            "dep_count": execution_data.dep_count,
+            "initial_dep_count": initial_dep_count,
+            "dag_ptr": execution_data.dag_ptr,
+            "dag_index": execution_data.dag_index,
+        }
     if execution_mode == "sync_free":
         if not isinstance(execution_data, SyncFreeExecutionData):
             raise CUDARuntimePreparationError(
