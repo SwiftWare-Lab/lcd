@@ -9,12 +9,6 @@ from functools import lru_cache
 
 import numpy as np
 
-
-# DAG is adjacency list of the dependency DAG.
-# DAG_rev is the same DAG with reversed edges.
-# l1_nodes_num: number of elements in the first level of the DAG.
-# Outputs: level_ptr, partition_ptr, id
-
 def executer(Ap, Ai, Ax, **kwargs):
     assert 'schedule' in kwargs
     schedule = kwargs['schedule']
