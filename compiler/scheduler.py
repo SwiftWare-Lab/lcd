@@ -4,6 +4,7 @@ import itertools
 import statistics
 import time
 from collections import deque
+from copy import deepcopy
 from dataclasses import dataclass
 from functools import lru_cache
 
@@ -105,12 +106,20 @@ class WorkloadFeatures:
     nonzeros: int
     flops: float
     memory_bytes: int
+    thread_work_items: int = 0
+    thread_loop_invocations: int = 0
 
     @property
     def average_in_degree(self):
         if self.rows == 0:
             return 0.0
         return self.edges / self.rows
+
+    @property
+    def average_thread_trip_count(self):
+        if self.thread_loop_invocations == 0:
+            return 0.0
+        return self.thread_work_items / self.thread_loop_invocations
 
 
 @dataclass(frozen=True)
@@ -340,7 +349,12 @@ class AnalyticScheduler:
             if thread_mapped
             else 1
         )
-        active_lanes = min(lanes, max(average_in_degree, 1.0))
+        thread_parallelism = (
+            features.average_thread_trip_count
+            if thread_mapped and features.thread_loop_invocations
+            else average_in_degree
+        )
+        active_lanes = min(lanes, max(thread_parallelism, 1.0))
         return CostEstimate(
             launch_s=launch_s,
             sync_s=sync_s,
@@ -411,20 +425,164 @@ def extract_workload_features(
         argument_values,
         function_props=None,
         flops_per_iteration=1,
+        thread_trip_counts=None,
 ):
     rows = len(dag_successors)
     edges = sum(len(successors) for successors in dag_successors)
     nonzeros = _nonzeros_from_pointer_arrays(argument_values, function_props)
     if nonzeros is None:
         nonzeros = rows + edges
+    trip_counts = (
+        None
+        if thread_trip_counts is None
+        else tuple(max(int(count), 0) for count in thread_trip_counts)
+    )
+    thread_work_items = 0 if trip_counts is None else sum(trip_counts)
+    thread_loop_invocations = 0 if trip_counts is None else len(trip_counts)
+    work_items = nonzeros if trip_counts is None else thread_work_items
     return WorkloadFeatures(
         rows=rows,
         edges=edges,
         levels=len(wavefront_list),
         nonzeros=nonzeros,
-        flops=float(flops_per_iteration * nonzeros),
+        flops=float(flops_per_iteration * work_items),
         memory_bytes=_array_bytes(argument_values),
+        thread_work_items=thread_work_items,
+        thread_loop_invocations=thread_loop_invocations,
     )
+
+
+def compile_thread_trip_counter(
+        function_ast,
+        thread_loop_iterator,
+        function_globals=None,
+):
+    """Compile a side-effect-isolated probe for a thread-mapped loop's ranges.
+
+    The probe follows the original outer control flow, including ``break`` and
+    ``continue``, but replaces each execution of the mapped loop with the
+    length of its ``range``. Its callers pass copies of mutable arguments so
+    scalar work before the mapped loop cannot modify user inputs.
+    """
+    if thread_loop_iterator is None:
+        return None
+    module = deepcopy(function_ast)
+    functions = [
+        node for node in module.body if isinstance(node, ast.FunctionDef)
+    ]
+    if len(functions) != 1:
+        raise SchedulerError(
+            "Thread-loop trip counting requires exactly one function."
+        )
+    function = functions[0]
+    transformer = _ThreadTripCounter(thread_loop_iterator)
+    function.body = [
+        transformer.visit(statement) for statement in function.body
+    ]
+    if transformer.matches == 0:
+        raise SchedulerError(
+            f"Could not find thread-mapped loop {thread_loop_iterator!r}."
+        )
+    if transformer.matches > 1:
+        raise SchedulerError(
+            "Thread-loop trip counting requires a unique loop iterator; "
+            f"found {transformer.matches} loops named "
+            f"{thread_loop_iterator!r}."
+        )
+    function.name = "_lcd_thread_trip_counter"
+    function.decorator_list = []
+    function.body.insert(
+        0,
+        ast.Assign(
+            targets=[ast.Name(id="_lcd_trip_counts", ctx=ast.Store())],
+            value=ast.List(elts=[], ctx=ast.Load()),
+        ),
+    )
+    function.body.append(_trip_count_return())
+    module.body = [function]
+    namespace = dict(function_globals or {})
+    exec(
+        compile(
+            ast.fix_missing_locations(module),
+            filename="<lcd-thread-trip-counter>",
+            mode="exec",
+        ),
+        namespace,
+    )
+    return namespace[function.name]
+
+
+def measure_thread_trip_counts(counter, argument_values, argument_names):
+    """Execute a trip-count probe without exposing mutable user arguments."""
+    if counter is None:
+        return None
+    arguments = [
+        _trip_probe_copy(argument_values[name])
+        for name in argument_names
+    ]
+    return tuple(counter(*arguments))
+
+
+class _ThreadTripCounter(ast.NodeTransformer):
+    def __init__(self, iterator):
+        self.iterator = iterator
+        self.matches = 0
+
+    def visit_For(self, node):
+        if not (
+                isinstance(node.target, ast.Name)
+                and node.target.id == self.iterator
+        ):
+            return self.generic_visit(node)
+        self.matches += 1
+        if node.orelse:
+            raise SchedulerError(
+                "Thread-mapped loops with for/else cannot be trip-counted."
+            )
+        if not (
+                isinstance(node.iter, ast.Call)
+                and isinstance(node.iter.func, ast.Name)
+                and node.iter.func.id == "range"
+                and not node.iter.keywords
+                and 1 <= len(node.iter.args) <= 3
+        ):
+            raise SchedulerError(
+                "Thread-loop trip counting requires a range-based loop."
+            )
+        return ast.Expr(
+            value=ast.Call(
+                func=ast.Attribute(
+                    value=ast.Name(id="_lcd_trip_counts", ctx=ast.Load()),
+                    attr="append",
+                    ctx=ast.Load(),
+                ),
+                args=[
+                    ast.Call(
+                        func=ast.Name(id="len", ctx=ast.Load()),
+                        args=[deepcopy(node.iter)],
+                        keywords=[],
+                    )
+                ],
+                keywords=[],
+            )
+        )
+
+    def visit_Return(self, node):
+        return _trip_count_return()
+
+
+def _trip_count_return():
+    return ast.Return(
+        value=ast.Name(id="_lcd_trip_counts", ctx=ast.Load())
+    )
+
+
+def _trip_probe_copy(value):
+    if isinstance(value, np.ndarray):
+        return value.copy()
+    if isinstance(value, (list, dict, set)):
+        return deepcopy(value)
+    return value
 
 
 def pointer_array_names(function_props):

@@ -1,6 +1,6 @@
 """Compact generated DAG schedules into CUDA executor data structures."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field, replace
 
 import numpy as np
 
@@ -17,6 +17,7 @@ class SyncFreeExecutionData:
     dag_ptr: np.ndarray
     dag_index: np.ndarray
     initial_dep_count: np.ndarray | None = None
+    auxiliary_values: dict[str, np.ndarray] = field(default_factory=dict)
 
     @property
     def launcher_arguments(self):
@@ -30,6 +31,7 @@ class WavefrontExecutionData:
 
     wavefronts: np.ndarray
     wavefront_ptr: np.ndarray
+    auxiliary_values: dict[str, np.ndarray] = field(default_factory=dict)
 
     @property
     def launcher_arguments(self):
@@ -46,6 +48,7 @@ class WarpTaskExecutionData:
     dag_ptr: np.ndarray
     dag_index: np.ndarray
     initial_dep_count: np.ndarray | None = None
+    auxiliary_values: dict[str, np.ndarray] = field(default_factory=dict)
 
 
 def preprocess_dag_output(
@@ -63,6 +66,29 @@ def preprocess_dag_output(
         f"Unknown execution mode {execution_mode!r}; expected sync_free "
         "or wavefront."
     )
+
+
+def attach_auxiliary_values(execution_data, auxiliary_values):
+    """Attach immutable inspector outputs to any supported executor format."""
+    if not auxiliary_values:
+        return execution_data
+    if not isinstance(
+            execution_data,
+            (SyncFreeExecutionData, WavefrontExecutionData,
+             WarpTaskExecutionData),
+    ):
+        raise DAGPreprocessingError(
+            "Auxiliary values require recognized DAG execution data."
+        )
+    collisions = set(execution_data.auxiliary_values) & set(auxiliary_values)
+    if collisions:
+        raise DAGPreprocessingError(
+            "Duplicate auxiliary execution values: "
+            + ", ".join(sorted(collisions))
+        )
+    combined = dict(execution_data.auxiliary_values)
+    combined.update(auxiliary_values)
+    return replace(execution_data, auxiliary_values=combined)
 
 
 def preprocess_sync_free(dag_successors, dep_count):

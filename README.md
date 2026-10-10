@@ -11,12 +11,22 @@ This repository contains the artifact for:
 The artifact provides a Python decorator that transforms sparse loops with
 loop-carried dependences into dependency-aware Numba-CUDA executions. It
 identifies ordering dependences, recognizes supported associative reductions,
-constructs a runtime task DAG, and generates a CUDA kernel and host launcher.
+constructs a runtime task DAG, selects an execution schedule from the concrete
+sparsity pattern, and generates a CUDA kernel and host launcher.
 
-The implementation is experimental. Wavefront execution is the recommended
-mode for correctness-oriented evaluation. The sync-free executor is also
-available, but its busy-wait implementation still requires stronger CUDA
-forward-progress and memory-publication guarantees.
+## Components
+
+The artifact is organized as a set of cooperating components:
+
+- The LCD frontend captures loop structure, accesses, and predicates.
+- Dependence analysis separates ordering dependences from reductions.
+- DAG generation creates the dependency information required by the executor.
+- The scheduler selects an execution configuration for the input.
+- CUDA lowering generates the device kernel and host launcher.
+- The runtime prepares data, launches the generated code, and returns results.
+
+The public interface is the `parallel` decorator; these components are invoked
+automatically when the decorated function is called.
 
 ## LCD representation
 
@@ -70,7 +80,7 @@ properties = {
 }
 
 
-@parallel(block_map="i", function_props=properties, execution_mode="wavefront", threads_per_block=128)
+@parallel(block_map="i", thread_map="j", function_props=properties)
 def sptrsv_csc(Ap, Ai, Ax, b, n):
     x = np.zeros(n)
     for i in range(n):
@@ -86,9 +96,11 @@ Call the decorated function with ordinary host values:
 x = sptrsv_csc(Ap, Ai, Ax, b, n)
 ```
 
-The wrapper inspects the concrete sparsity, prepares the selected executor,
-transfers arrays, launches the generated CUDA code, and copies explicitly
-returned results back to the host.
+The wrapper inspects the concrete sparsity, chooses an execution schedule,
+prepares the selected executor, transfers arrays, launches the generated CUDA
+code, and copies explicitly returned results back to the host. Passing an
+execution mode, block size, or unrolling factor explicitly constrains that
+choice; omitting them leaves the decision to the scheduler.
 
 The source extractor currently expects `@parallel(...)` to be written on one
 physical line. An updated array should be explicitly returned when its final
@@ -100,10 +112,13 @@ value is required on the host.
 | --- | --- |
 | `block_map`, `loop`, `block_loop` | Name of the loop iterator mapped to logical GPU tasks. |
 | `function_props` | Symbolic properties used during dependence analysis and DAG simplification. |
-| `execution_mode` | `"wavefront"` or `"sync_free"`. The demos use wavefront mode. |
-| `threads_per_block` | CUDA thread-block size. Default: `128`. |
+| `execution_mode` | Optional `"wavefront"` or `"sync_free"`; selected automatically when omitted. |
+| `threads_per_block` | Optional CUDA thread-block size; selected automatically when omitted. |
 | `thread_map`, `thread_loop` | Optional inner-loop iterator distributed across threads in a task block. |
-| `thread_unroll`, `thread_unroll_factor` | Compile-time unrolling factor for the thread-mapped loop. Default: `1`. |
+| `thread_unroll`, `thread_unroll_factor` | Optional compile-time unrolling factor for the thread-mapped loop; selected automatically when omitted. |
+| `n_warp` | Optional number of cooperating warps assigned to one logical task. |
+| `dependence_protocol` | Optional sync-free dependence protocol override. |
+| `scheduler` | Optional scheduler implementation. |
 | `sync_free_ready_count` | Dependency-count value at which a sync-free task becomes ready. Default: `0`. |
 | `validate_dag_endpoints` | Enables runtime bounds checks for generated DAG endpoints. |
 
@@ -126,7 +141,9 @@ properties = {
 ```
 
 These properties allow the dependence analysis to reason about compressed
-sparse segments and the ownership of pointer iterations.
+sparse segments and the ownership of pointer iterations. They are consumed by
+the compiler automatically and do not change the decorated function's calling
+interface.
 
 ### Execution modes
 
@@ -134,8 +151,8 @@ Wavefront execution groups independent DAG nodes into topological levels. The
 host launcher issues one kernel for each level and synchronizes between levels.
 
 Sync-free execution launches the task blocks together. Each task waits on its
-incoming-dependency count and atomically releases its successors when it
-finishes. CUDA simulation should not be used for this busy-wait executor.
+incoming-dependency state and publishes completion to dependent tasks. CUDA
+simulation should not be used for the busy-wait executor.
 
 ## Demos
 
@@ -144,6 +161,13 @@ operations that exercise the decorator and CUDA code-generation path. Run the
 following commands from the repository root. If required by your Numba
 installation, set `NUMBA_CUDA_USE_NVIDIA_BINDING=1` before starting Python.
 
+Each solver accepts an optional Matrix Market (`.mtx`) path. If it is omitted,
+the demos use the bundled default matrix. By default only the leading
+128-by-128 principal submatrix is used; pass `--max-n 0` to use the complete
+matrix. The loader preserves the sparse pattern but normalizes values and
+constructs a strictly dominant diagonal so the demos exercise code generation
+without failures caused by missing or zero pivots.
+
 ### Sparse triangular solve
 
 [`compiler/demo/sptrsv.py`](compiler/demo/sptrsv.py) contains CSR and CSC
@@ -151,8 +175,10 @@ SpTRSV operations. The CSR operation consumes previously solved rows, while
 the CSC operation uses atomic updates to future rows.
 
 ```bash
-python -m compiler.demo.sptrsv
+python -m compiler.demo.sptrsv path/to/matrix/matrix.mtx --storage both --max-n 128
 ```
+
+Use `--storage csr` or `--storage csc` to run one representation.
 
 ### Gauss-Seidel
 
@@ -162,15 +188,25 @@ in the sparse matrix. The outer sweep remains host-side, while the row loop is
 mapped to DAG tasks.
 
 ```bash
-python -m compiler.demo.gauss_seidel
+python -m compiler.demo.gauss_seidel path/to/matrix/matrix.mtx --variant both --iterations 2 --max-n 128
 ```
+
+`--variant` accepts `simple`, `full`, or `both`.
 
 ### Incomplete LU factorization
 
 [`compiler/demo/spilu0.py`](compiler/demo/spilu0.py) contains CSR and CSC ILU0
 operations and helper functions that apply the decorator with a selected
-execution mode and thread-block size.
+execution mode and thread-block size. CSR maps the nested `j_ptr` update loop
+to CUDA lanes.
 
 ```bash
-python -m compiler.demo.spilu0
+python -m compiler.demo.spilu0 path/to/matrix/matrix.mtx --storage both --execution-mode wavefront --threads-per-block 128 --max-n 128
 ```
+
+For CSR ILU0, `--thread-unroll` accepts `1`, `2`, `4`, or `8`. Omitting it
+allows the scheduler to choose.
+
+The executable examples are kept in `compiler/demo`. Physical-GPU numerical
+tests are separate in `compiler/e2e_tests`, while structural compiler tests
+remain in `compiler/transform_tests`.

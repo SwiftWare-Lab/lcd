@@ -7,9 +7,9 @@ import unittest
 import numpy as np
 from scipy.sparse import tril
 
-from compiler.demo.gpu_test_utils import physical_cuda_status
-from compiler.demo.suitesparse_test_matrix import (
-    load_suitesparse_test_matrix,
+from compiler.e2e_tests.gpu_test_utils import (
+    load_test_matrix,
+    physical_cuda_status,
 )
 
 
@@ -58,7 +58,7 @@ class GaussSeidelEndToEndTests(unittest.TestCase):
         cls.simple_gauss_seidel_csr = staticmethod(simple_gauss_seidel_csr)
 
     def setUp(self):
-        source_matrix = load_suitesparse_test_matrix()
+        source_matrix = load_test_matrix()
         full_lower = tril(source_matrix, format="csr")
         full_lower.sort_indices()
         strict_lower = tril(source_matrix, k=-1, format="csr")

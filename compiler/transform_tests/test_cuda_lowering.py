@@ -23,10 +23,18 @@ from compiler.spf_raising import build_spf_from_ast, extract_node_data
 
 
 SPTRSV_SOURCE = Path(__file__).parents[1] / "demo" / "sptrsv.py"
+SPILU0_SOURCE = Path(__file__).parents[1] / "demo" / "spilu0.py"
+SPILU0_FUNCTION_PROPS = {
+    "A_indptr": ["monotonically_increasing"],
+    "A_indices": [],
+    ("A_indptr", "A_indices"): [
+        ("segmented_monotonically_increasing", "n"),
+    ],
+}
 
 
-def _load_function(function_name):
-    module = ast.parse(SPTRSV_SOURCE.read_text())
+def _load_function(function_name, source=SPTRSV_SOURCE):
+    module = ast.parse(source.read_text())
     function = next(
         node
         for node in module.body
@@ -289,6 +297,102 @@ class CUDALoweringTests(unittest.TestCase):
             4,
         )
         compile(result.module_ast, "<csc-thread-map-u4-lowering>", "exec")
+
+    def test_thread_maps_loop_nested_below_sequential_pivot_loop(self):
+        result = lower_to_numba_cuda(
+            _load_function("ilu0_csr", SPILU0_SOURCE),
+            loop_iterator="i",
+            execution_mode="wavefront",
+            thread_loop_iterator="j_ptr",
+            wavefront_threads_per_block=128,
+            function_props=SPILU0_FUNCTION_PROPS,
+        )
+
+        self.assertIn(
+            "for k_ptr in range(A_indptr[i], A_indptr[i + 1]):",
+            result.source,
+        )
+        self.assertIn(
+            "for j_ptr in range(k_ptr + 1 + _thread_id, "
+            "A_indptr[i + 1], cuda.blockDim.x):",
+            result.source,
+        )
+        self.assertIn("if _thread_id == 0:", result.source)
+        self.assertIn(
+            "A_data[k_ptr] = A_data[k_ptr] / diag_val",
+            result.source,
+        )
+        self.assertIn(
+            "_lcd_shared_scalar_0 = cuda.shared.array(1, ",
+            result.source,
+        )
+        self.assertIn(
+            "_lcd_shared_scalar_0[0] = A_data[k_ptr]",
+            result.source,
+        )
+        self.assertIn(
+            "_lcd_shared_scalar_0[0] * A_data[kj_ptr]",
+            result.source,
+        )
+        self.assertNotIn(
+            "for kj_ptr in range(A_indptr[A_indices[k_ptr]]",
+            result.source,
+        )
+        self.assertIn(
+            "while _lcd_binary_search_0_left < "
+            "_lcd_binary_search_0_right:",
+            result.source,
+        )
+        self.assertIn(
+            "A_indices[_lcd_binary_search_0_middle] < "
+            "_lcd_binary_search_0_target",
+            result.source,
+        )
+        self.assertIn("cuda.syncthreads()", result.source)
+        self.assertNotIn(
+            "cuda.syncthreads()\n                    cuda.syncthreads()",
+            result.source,
+        )
+        self.assertIn("_blocks_per_grid = _wave_size", result.source)
+        self.assertNotIn("_threads_per_block = 1\n", result.source)
+        compile(result.module_ast, "<nested-thread-map-lowering>", "exec")
+
+    def test_keeps_linear_search_without_segmented_sorted_property(self):
+        result = lower_to_numba_cuda(
+            _load_function("ilu0_csr", SPILU0_SOURCE),
+            loop_iterator="i",
+            execution_mode="wavefront",
+            thread_loop_iterator="j_ptr",
+            wavefront_threads_per_block=128,
+        )
+
+        self.assertIn(
+            "for kj_ptr in range(A_indptr[A_indices[k_ptr]], "
+            "A_indptr[A_indices[k_ptr] + 1]):",
+            result.source,
+        )
+        self.assertNotIn("_lcd_binary_search_0_left", result.source)
+
+    def test_unrolls_nested_binary_search_update(self):
+        result = lower_to_numba_cuda(
+            _load_function("ilu0_csr", SPILU0_SOURCE),
+            loop_iterator="i",
+            execution_mode="wavefront",
+            thread_loop_iterator="j_ptr",
+            thread_unroll_factor=4,
+            wavefront_threads_per_block=128,
+            function_props=SPILU0_FUNCTION_PROPS,
+        )
+
+        self.assertIn("cuda.blockDim.x * 4", result.source)
+        self.assertEqual(
+            result.source.count(
+                "while _lcd_binary_search_0_left < "
+                "_lcd_binary_search_0_right:"
+            ),
+            4,
+        )
+        compile(result.module_ast, "<nested-thread-map-u4>", "exec")
 
     def test_maps_nested_loop_to_blocks_inside_host_loop(self):
         module = ast.parse("""

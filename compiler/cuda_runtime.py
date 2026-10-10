@@ -339,7 +339,7 @@ def _execution_values(execution_mode, execution_data):
         initial_dep_count = execution_data.initial_dep_count
         if initial_dep_count is None:
             initial_dep_count = execution_data.dep_count.copy()
-        return {
+        return _with_auxiliary_values({
             "task_nodes": execution_data.task_nodes,
             "task_ptr": execution_data.task_ptr,
             "band_ptr": execution_data.band_ptr,
@@ -349,7 +349,7 @@ def _execution_values(execution_mode, execution_data):
             "initial_dep_count": initial_dep_count,
             "dag_ptr": execution_data.dag_ptr,
             "dag_index": execution_data.dag_index,
-        }
+        }, execution_data)
     if execution_mode == "sync_free":
         if not isinstance(execution_data, SyncFreeExecutionData):
             raise CUDARuntimePreparationError(
@@ -358,22 +358,34 @@ def _execution_values(execution_mode, execution_data):
         initial_dep_count = execution_data.initial_dep_count
         if initial_dep_count is None:
             initial_dep_count = execution_data.dep_count.copy()
-        return {
+        return _with_auxiliary_values({
             "dep_count": execution_data.dep_count,
             "initial_dep_count": initial_dep_count,
             "dag_ptr": execution_data.dag_ptr,
             "dag_index": execution_data.dag_index,
-        }
+        }, execution_data)
     if execution_mode == "wavefront":
         if not isinstance(execution_data, WavefrontExecutionData):
             raise CUDARuntimePreparationError(
                 "Wavefront lowering requires WavefrontExecutionData."
             )
-        return {
+        return _with_auxiliary_values({
             "wavefronts": execution_data.wavefronts,
             "wavefront_ptr": execution_data.wavefront_ptr,
-        }
+        }, execution_data)
     return {}
+
+
+def _with_auxiliary_values(values, execution_data):
+    auxiliary_values = getattr(execution_data, "auxiliary_values", {})
+    collisions = set(values) & set(auxiliary_values)
+    if collisions:
+        raise CUDARuntimePreparationError(
+            "Auxiliary values conflict with executor arguments: "
+            + ", ".join(sorted(collisions))
+        )
+    values.update(auxiliary_values)
+    return values
 
 
 def _prepare_value(value, cuda_module):

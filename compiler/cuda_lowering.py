@@ -24,6 +24,10 @@ from compiler.dag_codegen import (
     PULL_DEPENDENCE,
     PUSH_DEPENDENCE,
 )
+from compiler.structural_lookups import (
+    rewrite_structural_lookups,
+    structural_lookup_names,
+)
 
 
 class CUDALoweringError(Exception):
@@ -320,6 +324,8 @@ class CUDALowerer:
             n_warp=None,
             dependence_protocol=COUNTER_DEPENDENCE,
             direct_dependence=None,
+            function_props=None,
+            structural_lookups=(),
     ):
         self.loop_iterator = loop_iterator
         self.thread_loop_iterator = thread_loop_iterator
@@ -367,6 +373,25 @@ class CUDALowerer:
                 f"Unknown dependence protocol {dependence_protocol!r}."
             )
         self.direct_dependence = direct_dependence
+        self.function_props = function_props or {}
+        self.structural_lookups = tuple(structural_lookups or ())
+        self.segmented_sorted_arrays = {
+            (key[0], key[1])
+            for key, properties in self.function_props.items()
+            if (
+                isinstance(key, tuple)
+                and len(key) == 2
+                and all(isinstance(name, str) for name in key)
+                and any(
+                    (
+                        property_[0]
+                        if isinstance(property_, (tuple, list))
+                        else property_
+                    ) == "segmented_monotonically_increasing"
+                    for property_ in properties
+                )
+            )
+        }
         self.dependence_protocol = (
             dependence_protocol
             if (
@@ -381,7 +406,15 @@ class CUDALowerer:
 
     def lower(self, code):
         self.thread_reduction_count = 0
+        self.shared_scalar_count = 0
+        self.shared_scalar_declarations = []
+        self.binary_search_count = 0
         module = normalize_aliases(_to_module(code))
+        module = rewrite_structural_lookups(
+            module,
+            self.structural_lookups,
+            self.function_props,
+        )
         functions = [
             node for node in module.body
             if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
@@ -428,6 +461,11 @@ class CUDALowerer:
             for iterator in self.host_loop_iterators
             if iterator not in kernel_arguments
         )
+        lookup_arguments = structural_lookup_names(self.structural_lookups)
+        kernel_arguments.extend(
+            name for name in lookup_arguments
+            if name not in kernel_arguments
+        )
         atomic_lowerer = _AtomicReductionLowerer(self.reductions)
         lowered_loop_body = [
             atomic_lowerer.visit(deepcopy(statement))
@@ -438,27 +476,28 @@ class CUDALowerer:
                 lowered_loop_body,
             )
 
-        auxiliary_arguments = []
+        executor_arguments = []
         if self.execution_mode == "sync_free":
             if not self.warp_mapped:
-                auxiliary_arguments = list(SYNC_FREE_ARGUMENTS)
+                executor_arguments = list(SYNC_FREE_ARGUMENTS)
             elif self.dependence_protocol == PUSH_DEPENDENCE:
-                auxiliary_arguments = list(WARP_PUSH_ARGUMENTS)
+                executor_arguments = list(WARP_PUSH_ARGUMENTS)
             elif self.dependence_protocol == PULL_DEPENDENCE:
-                auxiliary_arguments = list(WARP_PULL_ARGUMENTS)
+                executor_arguments = list(WARP_PULL_ARGUMENTS)
             else:
-                auxiliary_arguments = list(WARP_SYNC_FREE_ARGUMENTS)
+                executor_arguments = list(WARP_SYNC_FREE_ARGUMENTS)
             if (
                     self._needs_sync_free_dep_count_reset()
                     and self.dependence_protocol != PULL_DEPENDENCE
             ):
-                auxiliary_arguments.insert(1, SYNC_FREE_RESET_ARGUMENT)
+                executor_arguments.insert(1, SYNC_FREE_RESET_ARGUMENT)
         elif self.execution_mode == "wavefront":
-            auxiliary_arguments = list(
+            executor_arguments = list(
                 WARP_WAVEFRONT_ARGUMENTS
                 if self.warp_mapped
                 else WAVEFRONT_ARGUMENTS
             )
+        auxiliary_arguments = [*lookup_arguments, *executor_arguments]
         if auxiliary_arguments:
             kernel_arguments.extend(
                 name
@@ -500,6 +539,10 @@ class CUDALowerer:
                         *self._sync_free_release(),
                     )
                 )
+        kernel_body = [
+            *self.shared_scalar_declarations,
+            *kernel_body,
+        ]
         missing_reductions = (
             {
                 reduction.statement_id
@@ -550,7 +593,7 @@ class CUDALowerer:
             reset_kernel_name,
         )
         numba_names = [ast.alias(name="cuda")]
-        if self.thread_reduction_count:
+        if self.thread_reduction_count or self.shared_scalar_count:
             numba_names.append(
                 ast.alias(name="float64", asname=THREAD_REDUCTION_DTYPE)
             )
@@ -1413,6 +1456,16 @@ for _dag_position in range(
         ).body
 
     def _thread_mapped_body(self, lowered_loop_body):
+        all_matches = [
+            node
+            for statement in lowered_loop_body
+            for node in ast.walk(statement)
+            if (
+                isinstance(node, ast.For)
+                and isinstance(node.target, ast.Name)
+                and node.target.id == self.thread_loop_iterator
+            )
+        ]
         matches = [
             (index, statement)
             for index, statement in enumerate(lowered_loop_body)
@@ -1422,10 +1475,15 @@ for _dag_position in range(
                 and statement.target.id == self.thread_loop_iterator
             )
         ]
+        if not matches and len(all_matches) == 1:
+            return self._nested_thread_mapped_body(
+                lowered_loop_body,
+                all_matches[0],
+            )
         if len(matches) != 1:
             raise CUDALoweringError(
                 "The selected thread iterator must identify exactly one "
-                f"direct inner for loop; found {len(matches)} for "
+                f"inner for loop; found {len(all_matches)} for "
                 f"{self.thread_loop_iterator!r}."
             )
 
@@ -1510,6 +1568,425 @@ for _dag_position in range(
         if epilogue:
             body.append(self._thread_zero_statement(*epilogue))
         return body
+
+    def _nested_thread_mapped_body(self, lowered_loop_body, thread_loop):
+        """Map a loop nested beneath uniform sequential control flow.
+
+        Every thread follows the enclosing loops and branches. Scalar work is
+        replicated, while side effects outside the mapped loop are performed
+        by thread zero and published before collective execution continues.
+        This preserves sequential pivot loops such as CSR ILU0's ``k_ptr``
+        loop while distributing its nested ``j_ptr`` updates.
+        """
+        # Direct-dependence hooks describe task-level edges. They cannot be
+        # attached to a nested work-sharing loop without changing their
+        # multiplicity, so nested mapping uses the task-level counter protocol.
+        self.dependence_protocol = COUNTER_DEPENDENCE
+
+        thread_loop = self._lower_segmented_sorted_searches(thread_loop)
+
+        privatized = self._privatize_thread_reductions(
+            thread_loop,
+            [],
+            [],
+        )
+        if privatized is None:
+            raise CUDALoweringError(
+                "The nested thread-mapped loop writes state that cannot be "
+                "privatized safely."
+            )
+        thread_loop, reductions = privatized
+        if reductions:
+            raise CUDALoweringError(
+                "Reductions from nested thread-mapped loops are not yet "
+                "supported."
+            )
+
+        lowerer = self
+
+        class NestedLoopMapper(ast.NodeTransformer):
+            def __init__(self):
+                self.mapped = False
+
+            def visit_For(self, node):
+                if (
+                        isinstance(node.target, ast.Name)
+                        and node.target.id == lowerer.thread_loop_iterator
+                ):
+                    if self.mapped:
+                        raise CUDALoweringError(
+                            "The nested thread iterator occurs more than once."
+                        )
+                    self.mapped = True
+                    mapped_loop = lowerer._thread_stride_loop(thread_loop)
+                    mapped_loop._lcd_thread_mapped = True
+                    return [
+                        lowerer._thread_sync(),
+                        mapped_loop,
+                        lowerer._thread_sync(),
+                    ]
+                return self.generic_visit(node)
+
+        mapped_body = NestedLoopMapper().visit(
+            ast.Module(
+                body=deepcopy(lowered_loop_body),
+                type_ignores=[],
+            )
+        ).body
+        guarded_body = self._guard_nested_thread_side_effects(mapped_body)
+        broadcast_body = self._broadcast_nested_mapped_inputs(guarded_body)
+        return self._deduplicate_thread_syncs(broadcast_body)
+
+    def _lower_segmented_sorted_searches(self, thread_loop):
+        """Replace property-backed linear equality searches with lower-bound.
+
+        This deliberately recognizes only the canonical sparse lookup used by
+        CSR ILU0: a loop over one pointer-delimited segment whose sole body is
+        an equality test on the paired index array, ending in ``break``.  The
+        segmented-monotonic function property is required, so arbitrary loops
+        keep their original linear-search semantics.
+        """
+        if not self.segmented_sorted_arrays:
+            return thread_loop
+
+        lowerer = self
+
+        class SortedSearchLowerer(ast.NodeTransformer):
+            def visit_For(self, node):
+                node = self.generic_visit(node)
+                replacement = lowerer._binary_search_replacement(node)
+                return replacement if replacement is not None else node
+
+        return SortedSearchLowerer().visit(deepcopy(thread_loop))
+
+    def _binary_search_replacement(self, node):
+        if (
+                node.orelse
+                or not isinstance(node.target, ast.Name)
+                or not isinstance(node.iter, ast.Call)
+                or not isinstance(node.iter.func, ast.Name)
+                or node.iter.func.id != "range"
+                or len(node.iter.args) != 2
+                or node.iter.keywords
+                or len(node.body) != 1
+                or not isinstance(node.body[0], ast.If)
+        ):
+            return None
+
+        match = node.body[0]
+        if (
+                match.orelse
+                or not match.body
+                or not isinstance(match.body[-1], ast.Break)
+                or not isinstance(match.test, ast.Compare)
+                or len(match.test.ops) != 1
+                or not isinstance(match.test.ops[0], ast.Eq)
+                or len(match.test.comparators) != 1
+        ):
+            return None
+
+        iterator = node.target.id
+        lower, upper = node.iter.args
+        for pointer_array, index_array in self.segmented_sorted_arrays:
+            if not _is_consecutive_segment(lower, upper, pointer_array):
+                continue
+            left = match.test.left
+            right = match.test.comparators[0]
+            if _is_index_lookup(left, index_array, iterator):
+                target = right
+            elif _is_index_lookup(right, index_array, iterator):
+                target = left
+            else:
+                continue
+            if any(
+                    isinstance(value, ast.Name) and value.id == iterator
+                    for value in ast.walk(target)
+            ):
+                continue
+            return self._make_binary_search(
+                node,
+                index_array,
+                target,
+                match.body[:-1],
+            )
+        return None
+
+    def _make_binary_search(
+            self,
+            node,
+            index_array,
+            target,
+            matched_body,
+    ):
+        search_number = self.binary_search_count
+        self.binary_search_count += 1
+        prefix = f"_lcd_binary_search_{search_number}"
+        left_name = prefix + "_left"
+        right_name = prefix + "_right"
+        end_name = prefix + "_end"
+        middle_name = prefix + "_middle"
+        target_name = prefix + "_target"
+        iterator = node.target.id
+        lower, upper = node.iter.args
+
+        statements = ast.parse(
+            f"""
+{left_name} = {ast.unparse(lower)}
+{end_name} = {ast.unparse(upper)}
+{right_name} = {end_name}
+{target_name} = {ast.unparse(target)}
+while {left_name} < {right_name}:
+    {middle_name} = ({left_name} + {right_name}) // 2
+    if {index_array}[{middle_name}] < {target_name}:
+        {left_name} = {middle_name} + 1
+    else:
+        {right_name} = {middle_name}
+if (
+    {left_name} < {end_name}
+    and {index_array}[{left_name}] == {target_name}
+):
+    {iterator} = {left_name}
+    pass
+"""
+        ).body
+        statements[-1].body = [
+            statements[-1].body[0],
+            *deepcopy(matched_body),
+        ]
+        return [ast.copy_location(statement, node) for statement in statements]
+
+    def _broadcast_nested_mapped_inputs(self, statements):
+        """Publish sequentially produced mapped-loop inputs through shared memory."""
+        mapped_loops = [
+            node
+            for statement in statements
+            for node in ast.walk(statement)
+            if isinstance(node, ast.For)
+            and getattr(node, "_lcd_thread_mapped", False)
+        ]
+        mapped_loads = {
+            _memory_access_key(node)
+            for loop in mapped_loops
+            for node in ast.walk(loop)
+            if isinstance(node, ast.Subscript)
+            and isinstance(node.ctx, ast.Load)
+        }
+        if not mapped_loads:
+            return statements
+
+        written_targets = []
+
+        class OutsideWriteCollector(ast.NodeVisitor):
+            def visit_For(self, node):
+                if getattr(node, "_lcd_thread_mapped", False):
+                    return
+                self.generic_visit(node)
+
+            def visit_Assign(self, node):
+                for target in node.targets:
+                    if isinstance(target, ast.Subscript):
+                        key = _memory_access_key(target)
+                        if key in mapped_loads:
+                            written_targets.append((key, deepcopy(target)))
+                self.generic_visit(node.value)
+
+        collector = OutsideWriteCollector()
+        for statement in statements:
+            collector.visit(statement)
+        unique_targets = {}
+        for key, target in written_targets:
+            unique_targets.setdefault(key, target)
+        if not unique_targets:
+            return statements
+
+        shared_names = {}
+        shared_slots = {}
+        shared_shape = self._warps_per_block if self.warp_mapped else 1
+        for key in unique_targets:
+            name = f"_lcd_shared_scalar_{self.shared_scalar_count}"
+            self.shared_scalar_count += 1
+            shared_names[key] = name
+            shared_slots[key] = self._shared_scalar_slot()
+            self.shared_scalar_declarations.append(
+                ast.Assign(
+                    targets=[ast.Name(id=name, ctx=ast.Store())],
+                    value=ast.Call(
+                        func=ast.Attribute(
+                            value=ast.Attribute(
+                                value=ast.Name(id="cuda", ctx=ast.Load()),
+                                attr="shared",
+                                ctx=ast.Load(),
+                            ),
+                            attr="array",
+                            ctx=ast.Load(),
+                        ),
+                        args=[
+                            ast.Constant(value=shared_shape),
+                            ast.Name(
+                                id=THREAD_REDUCTION_DTYPE,
+                                ctx=ast.Load(),
+                            ),
+                        ],
+                        keywords=[],
+                    ),
+                )
+            )
+
+        class SharedWriter(ast.NodeTransformer):
+            def visit_For(self, node):
+                if getattr(node, "_lcd_thread_mapped", False):
+                    return node
+                return self.generic_visit(node)
+
+            def visit_Assign(self, node):
+                node = self.generic_visit(node)
+                publications = []
+                for target in node.targets:
+                    if not isinstance(target, ast.Subscript):
+                        continue
+                    key = _memory_access_key(target)
+                    name = shared_names.get(key)
+                    if name is None:
+                        continue
+                    publications.append(
+                        ast.Assign(
+                            targets=[ast.Subscript(
+                                value=ast.Name(id=name, ctx=ast.Load()),
+                                slice=deepcopy(shared_slots[key]),
+                                ctx=ast.Store(),
+                            )],
+                            value=_as_load(target),
+                        )
+                    )
+                return [node, *publications] if publications else node
+
+        published = SharedWriter().visit(
+            ast.Module(body=deepcopy(statements), type_ignores=[])
+        ).body
+
+        class SharedLoadReplacer(ast.NodeTransformer):
+            def visit_For(self, node):
+                if not getattr(node, "_lcd_thread_mapped", False):
+                    return self.generic_visit(node)
+                return MappedLoadReplacer().visit(node)
+
+        class MappedLoadReplacer(ast.NodeTransformer):
+            def visit_Subscript(self, node):
+                node = self.generic_visit(node)
+                if not isinstance(node.ctx, ast.Load):
+                    return node
+                key = _memory_access_key(node)
+                name = shared_names.get(key)
+                if name is None:
+                    return node
+                return ast.copy_location(
+                    ast.Subscript(
+                        value=ast.Name(id=name, ctx=ast.Load()),
+                        slice=deepcopy(shared_slots[key]),
+                        ctx=ast.Load(),
+                    ),
+                    node,
+                )
+
+        return SharedLoadReplacer().visit(
+            ast.Module(body=published, type_ignores=[])
+        ).body
+
+    def _shared_scalar_slot(self):
+        if not self.warp_mapped:
+            return ast.Constant(value=0)
+        return ast.BinOp(
+            left=ast.Attribute(
+                value=ast.Attribute(
+                    value=ast.Name(id="cuda", ctx=ast.Load()),
+                    attr="threadIdx",
+                    ctx=ast.Load(),
+                ),
+                attr="x",
+                ctx=ast.Load(),
+            ),
+            op=ast.FloorDiv(),
+            right=ast.Constant(value=WARP_SIZE),
+        )
+
+    def _deduplicate_thread_syncs(self, statements):
+        for statement in statements:
+            for field in ("body", "orelse", "finalbody"):
+                nested = getattr(statement, field, None)
+                if isinstance(nested, list):
+                    setattr(
+                        statement,
+                        field,
+                        self._deduplicate_thread_syncs(nested),
+                    )
+        result = []
+        for statement in statements:
+            if (
+                    result
+                    and self._is_thread_sync(result[-1])
+                    and self._is_thread_sync(statement)
+            ):
+                continue
+            result.append(statement)
+        return result
+
+    def _guard_nested_thread_side_effects(self, statements):
+        """Serialize writes in the collective context surrounding a map."""
+        lowerer = self
+
+        class SideEffectGuard(ast.NodeTransformer):
+            def visit_For(self, node):
+                if getattr(node, "_lcd_thread_mapped", False):
+                    return node
+                return self.generic_visit(node)
+
+            def visit_Assign(self, node):
+                node = self.generic_visit(node)
+                memory_targets = [
+                    _is_memory_write_target(target)
+                    for target in node.targets
+                ]
+                if not any(memory_targets):
+                    return node
+                if not all(memory_targets):
+                    raise CUDALoweringError(
+                        "A nested thread-mapped context cannot mix scalar "
+                        "and memory targets in one assignment."
+                    )
+                return self._serialized(node)
+
+            def visit_AnnAssign(self, node):
+                node = self.generic_visit(node)
+                if _is_memory_write_target(node.target):
+                    return self._serialized(node)
+                return node
+
+            def visit_AugAssign(self, node):
+                node = self.generic_visit(node)
+                if _is_memory_write_target(node.target):
+                    return self._serialized(node)
+                return node
+
+            def visit_Expr(self, node):
+                node = self.generic_visit(node)
+                if (
+                        isinstance(node.value, ast.Call)
+                        and not lowerer._is_thread_sync(node)
+                ):
+                    return self._serialized(node)
+                return node
+
+            @staticmethod
+            def _serialized(statement):
+                return [
+                    lowerer._thread_zero_statement(statement),
+                    lowerer._thread_sync(),
+                ]
+
+        guarded = SideEffectGuard().visit(
+            ast.Module(body=statements, type_ignores=[])
+        )
+        return guarded.body
 
     def _prefetch_node_loads(self, prelude, thread_loop, epilogue):
         node_statements = [*prelude, thread_loop, *epilogue]
@@ -2119,6 +2596,14 @@ def _multiply_expr(left, right):
     return ast.BinOp(left=left, op=ast.Mult(), right=right)
 
 
+def _is_memory_write_target(target):
+    if isinstance(target, (ast.Subscript, ast.Attribute)):
+        return True
+    if isinstance(target, (ast.Tuple, ast.List)):
+        return any(_is_memory_write_target(element) for element in target.elts)
+    return False
+
+
 def _stored_names(statements):
     return {
         node.id
@@ -2310,6 +2795,48 @@ def _source_location(node):
     )
 
 
+def _is_subscript_of(node, array_name):
+    return (
+        isinstance(node, ast.Subscript)
+        and isinstance(node.value, ast.Name)
+        and node.value.id == array_name
+    )
+
+
+def _is_consecutive_segment(lower, upper, pointer_array):
+    if not (
+            _is_subscript_of(lower, pointer_array)
+            and _is_subscript_of(upper, pointer_array)
+    ):
+        return False
+    expected_upper_index = ast.BinOp(
+        left=deepcopy(lower.slice),
+        op=ast.Add(),
+        right=ast.Constant(value=1),
+    )
+    return ast.dump(upper.slice) == ast.dump(expected_upper_index)
+
+
+def _is_index_lookup(node, array_name, iterator):
+    return (
+        _is_subscript_of(node, array_name)
+        and isinstance(node.slice, ast.Name)
+        and node.slice.id == iterator
+    )
+
+
+def _as_load(node):
+    result = deepcopy(node)
+    for child in ast.walk(result):
+        if hasattr(child, "ctx"):
+            child.ctx = ast.Load()
+    return result
+
+
+def _memory_access_key(node):
+    return ast.dump(_as_load(node), include_attributes=False)
+
+
 def _to_module(code):
     if isinstance(code, ast.Module):
         return deepcopy(code)
@@ -2337,6 +2864,8 @@ def lower_to_numba_cuda(
         n_warp=None,
         dependence_protocol=COUNTER_DEPENDENCE,
         direct_dependence=None,
+        function_props=None,
+        structural_lookups=(),
 ):
     return CUDALowerer(
         loop_iterator=loop_iterator,
@@ -2350,4 +2879,6 @@ def lower_to_numba_cuda(
         n_warp=n_warp,
         dependence_protocol=dependence_protocol,
         direct_dependence=direct_dependence,
+        function_props=function_props,
+        structural_lookups=structural_lookups,
     ).lower(code)

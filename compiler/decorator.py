@@ -22,11 +22,17 @@ from compiler.cuda_runtime import (
     prepare_cuda_arguments,
 )
 from compiler.dag_preprocessing import (
+    attach_auxiliary_values,
     preprocess_dag_output,
     preprocess_sync_free,
     preprocess_warp_tasks,
     preprocess_wavefront,
     wavefronts_from_dag,
+)
+from compiler.structural_lookups import (
+    create_structural_lookup_plan,
+    materialize_structural_lookups,
+    structural_argument_names,
 )
 from compiler.scheduler import (
     AUTO,
@@ -34,9 +40,11 @@ from compiler.scheduler import (
     AnalyticScheduler,
     SchedulePlan,
     ScheduleSpace,
+    compile_thread_trip_counter,
     count_inner_loop_flops,
     extract_workload_features,
     inspection_fingerprint,
+    measure_thread_trip_counts,
     pointer_array_names,
 )
 from compiler.legality_check import finalize_legality_of_fusion, transform_ast, generate_dag_generation_code, \
@@ -145,6 +153,10 @@ def parallel(**kwargs):
         print(source)
         old_code_obj = function.__code__
         cur_ast = normalize_aliases(ast.parse(source))
+        structural_lookups = create_structural_lookup_plan(
+            cur_ast,
+            function_props,
+        )
         constraints, dependence_analysis = finalize_legality_of_fusion(
             (loop, loop),
             cur_ast,
@@ -218,6 +230,8 @@ def parallel(**kwargs):
                         if dependence_protocol == COUNTER_DEPENDENCE
                         else dependence
                     ),
+                    function_props=function_props,
+                    structural_lookups=structural_lookups,
                 )
             return lowered_variants[lowering_key]
 
@@ -288,11 +302,18 @@ def parallel(**kwargs):
             name
             for name in dag_argument_names
             if name in inspector_names
-        ] + pointer_array_names(function_props)
+        ] + pointer_array_names(function_props) + structural_argument_names(
+            structural_lookups
+        )
         flops_per_iteration = count_inner_loop_flops(
             cur_ast,
             loop,
             thread_loop,
+        )
+        thread_trip_counter = compile_thread_trip_counter(
+            cur_ast,
+            thread_loop,
+            function.__globals__,
         )
         schedule_plans = {}
 
@@ -339,6 +360,17 @@ def parallel(**kwargs):
             )
 
         def create_schedule_plan(dag_values):
+            lookup_values = materialize_structural_lookups(
+                structural_lookups,
+                dag_values,
+            )
+
+            def with_lookups(execution_data):
+                return attach_auxiliary_values(
+                    execution_data,
+                    lookup_values,
+                )
+
             dag_successors, scheduling_data, *edge_count = run_inspector(
                 dag_values,
             )
@@ -347,11 +379,11 @@ def parallel(**kwargs):
                 if not warp_mapped(fixed_schedule):
                     return SchedulePlan(
                         schedule=fixed_schedule,
-                        execution_data=preprocess_dag_output(
+                        execution_data=with_lookups(preprocess_dag_output(
                             dag_successors,
                             scheduling_data,
                             execution_mode,
-                        ),
+                        )),
                     )
                 wavefront_list = (
                     scheduling_data
@@ -360,12 +392,12 @@ def parallel(**kwargs):
                 )
                 return SchedulePlan(
                     schedule=fixed_schedule,
-                    execution_data=warp_task_data(
+                    execution_data=with_lookups(warp_task_data(
                         fixed_schedule,
                         dag_successors,
                         wavefront_list,
                         edge_count,
-                    ),
+                    )),
                 )
             wavefront_list = wavefronts_from_dag(
                 dag_successors,
@@ -377,6 +409,11 @@ def parallel(**kwargs):
                 dag_values,
                 function_props=function_props,
                 flops_per_iteration=flops_per_iteration,
+                thread_trip_counts=measure_thread_trip_counts(
+                    thread_trip_counter,
+                    dag_values,
+                    argument_names,
+                ),
             )
             schedule = scheduler.schedule(features, schedule_space)
             if warp_mapped(schedule):
@@ -398,7 +435,7 @@ def parallel(**kwargs):
                 )
             return SchedulePlan(
                 schedule=schedule,
-                execution_data=execution_data,
+                execution_data=with_lookups(execution_data),
                 features=features,
             )
 
@@ -478,6 +515,7 @@ def parallel(**kwargs):
         wrapper.dag_source = dag_source
         wrapper.execution_mode = execution_mode
         wrapper.dependence_analysis = dependence_analysis
+        wrapper.structural_lookups = structural_lookups
         wrapper.reduction_statements = dependence_analysis.atomic_statements
         wrapper.current_schedule = None
         wrapper.__dict__.update(dict.fromkeys(VARIANT_ATTRIBUTES))

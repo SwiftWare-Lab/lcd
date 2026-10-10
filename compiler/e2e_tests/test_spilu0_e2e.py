@@ -7,9 +7,9 @@ import unittest
 import numpy as np
 from scipy.sparse import csc_matrix, csr_matrix
 
-from compiler.demo.gpu_test_utils import physical_cuda_status
-from compiler.demo.suitesparse_test_matrix import (
-    load_suitesparse_test_matrix,
+from compiler.e2e_tests.gpu_test_utils import (
+    load_test_matrix,
+    physical_cuda_status,
 )
 
 
@@ -86,7 +86,7 @@ class SpILU0EndToEndTests(unittest.TestCase):
             cls.csc_ilu0 = staticmethod(compile_ilu0_csc())
 
     def setUp(self):
-        self.matrix = load_suitesparse_test_matrix()
+        self.matrix = load_test_matrix()
 
     def test_csr_matches_sequential_reference(self):
         matrix = csr_matrix(self.matrix)
