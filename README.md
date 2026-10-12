@@ -6,7 +6,7 @@ This repository contains the artifact for:
 > Da Ma, Mohammad Mahdi Salehi, Amir Mohammad Tavakkoli, Samirasadat
 > Jamalidinan, Hossein Albkri, Mary Hall, and Kazem Cheshmi  
 > *International Conference for High Performance Computing, Networking,
-> Storage and Analysis, SC'26* **(Accepted)**
+> Storage and Analysis, SC'26* 
 
 The artifact provides a Python decorator that transforms sparse loops with
 loop-carried dependences into dependency-aware Numba-CUDA executions. It
@@ -24,6 +24,8 @@ The artifact is organized as a set of cooperating components:
 - The scheduler selects an execution configuration for the input.
 - CUDA lowering generates the device kernel and host launcher.
 - The runtime prepares data, launches the generated code, and returns results.
+
+** We are currently in the process of releasing the final benchmark and key compiler components.**
 
 The public interface is the `parallel` decorator; these components are invoked
 automatically when the decorated function is called.
