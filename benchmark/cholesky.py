@@ -62,14 +62,16 @@ def cholesky_left_looking(n, c, r, values, lC, lR, lValues, prunePtr, pruneSet):
     return True
 
 
-@njit(numba.bool(numba.int32, numba.int32[:], numba.int32[:], numba.float64[:],
-                 numba.int32[:], numba.int32[:], numba.float64[:], numba.int32[:],
-                 numba.int32[:]), parallel=True, fastmath=True)
+@njit(cache=True)
 def cholesky_left_looking_numba(n, c, r, values, lC, lR, lValues, prunePtr, pruneSet):
     """
     Performs a Cholesky decomposition on a given matrix (c, r, values), i.e.
     stored in compressed column format, and produces L, which are
     stored in column compressed format.
+
+    Serial numeric kernel. Symbolic columns must be sorted with the diagonal
+    first; pruning rows must contain earlier contributing columns followed by
+    their own diagonal, which is skipped. Callers may supply read-only indices.
 
     Args:
         n (int): Size of the matrix.
@@ -94,17 +96,18 @@ def cholesky_left_looking_numba(n, c, r, values, lC, lR, lValues, prunePtr, prun
             f[r[nzNo]] = values[nzNo]  # Copying nonzero of the col
         for i in range(lb, ub):
             spCol = pruneSet[i]
-            sw = False
-            facing_val, tmp = 0, 0
+            facing_val = 0.0
             facing_idx = -1
             for l in range(lC[spCol], lC[spCol + 1]):
                 if lR[l] == colNo:
                     facing_val = lValues[l]
                     facing_idx = l
                     break
+            if facing_idx < 0:
+                return False  # Inconsistent symbolic dependency; avoid index -1.
             for l in range(facing_idx, lC[spCol + 1]):
                 f[lR[l]] -= lValues[l] * facing_val
-        if f[colNo] <= 0:
+        if f[colNo] <= 0 or not np.isfinite(f[colNo]):
             return False  # The matrix is not SPD
         tmpSqrt = math.sqrt(f[colNo])
         f[colNo] = 0
