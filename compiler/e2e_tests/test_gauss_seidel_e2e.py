@@ -128,6 +128,58 @@ class GaussSeidelEndToEndTests(unittest.TestCase):
 
         np.testing.assert_allclose(result, reference, rtol=1e-10, atol=1e-12)
 
+    def test_sync_free_schedules_match_reference_over_several_sweeps(self):
+        from compiler.decorator import parallel
+
+        # Consecutive sweeps are ordered only by the stream, so every
+        # sync-free executor must reset its counters before each sweep.
+        schedules = {
+            "thread per row": dict(threads_per_block=128),
+            "warp per row": dict(
+                thread_map="j", threads_per_block=128, thread_unroll=1,
+            ),
+            "block per row": dict(
+                thread_map="j", threads_per_block=128, thread_unroll=2,
+                n_warp=4,
+            ),
+        }
+        max_iter = 4
+        reference = _simple_gauss_seidel_reference(
+            self.simple_Ap,
+            self.simple_Ai,
+            self.simple_Ax,
+            self.D,
+            self.b,
+            self.x0,
+            self.n,
+            max_iter,
+        )
+        for name, options in schedules.items():
+            with self.subTest(schedule=name):
+                with redirect_stdout(io.StringIO()):
+                    solver = parallel(
+                        block_map="i",
+                        function_props={
+                            "Ap": ["monotonically_increasing"],
+                            "Ai": [],
+                        },
+                        execution_mode="sync_free",
+                        **options,
+                    )(self.simple_gauss_seidel_csr.original_function)
+                result = solver(
+                    self.simple_Ap,
+                    self.simple_Ai,
+                    self.simple_Ax,
+                    self.D,
+                    self.b,
+                    self.x0.copy(),
+                    self.n,
+                    max_iter,
+                )
+                np.testing.assert_allclose(
+                    result, reference, rtol=1e-10, atol=1e-12,
+                )
+
 
 if __name__ == "__main__":
     unittest.main()
