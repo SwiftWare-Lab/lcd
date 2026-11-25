@@ -84,6 +84,9 @@ class DirectDependence:
     kind: str
     endpoint: ast.expr
     guard: ast.expr | None
+    # Loop whose iterations observe the dependence: the thread-mapped loop,
+    # or a sequential loop of the task that encloses it.
+    iterator: str | None = None
 
 
 class DAGPlanner:
@@ -1619,19 +1622,28 @@ def compile_dag_builder(
 
 
 def direct_dependence(plan, thread_iterator, validate_endpoints=False):
+    """Describe a single edge rule as waits or releases inside one loop.
+
+    Push and pull edges observed per iteration of the thread-mapped loop are
+    attached to that loop. A pull edge whose endpoint is fixed by one
+    iteration of another loop of the task (for example the pivot loop of CSR
+    ILU0, which encloses the mapped update loop) is attached to that loop's
+    iterations instead, after its leading ``break`` tests. Lowering verifies
+    that the loop encloses the mapped loop.
+    """
     if thread_iterator is None or len(plan.edge_rules) != 1:
         return None
     edge_rule = plan.edge_rules[0]
-    if edge_rule.structural:
+    iterator_names = [iterator.name for iterator in edge_rule.iterators]
+    if len(iterator_names) != 2 or iterator_names[0] != plan.parallel_iterator:
         return None
-    if [iterator.name for iterator in edge_rule.iterators] != [
-        plan.parallel_iterator,
-        thread_iterator,
-    ]:
+    hook_iterator = iterator_names[1]
+    on_thread_loop = hook_iterator == thread_iterator
+    if on_thread_loop and edge_rule.structural:
         return None
-    if any(
-            iterator.break_before or iterator.break_after
-            for iterator in edge_rule.iterators
+    if any(iterator.break_after for iterator in edge_rule.iterators) or (
+            on_thread_loop
+            and any(iterator.break_before for iterator in edge_rule.iterators)
     ):
         return None
     sides = {name[-1] for name in edge_rule.name_replacements}
@@ -1641,7 +1653,11 @@ def direct_dependence(plan, thread_iterator, validate_endpoints=False):
     )
     source = lowerer.value(edge_rule.source)
     destination = lowerer.value(edge_rule.destination)
-    if sides == {"1"} and ast.unparse(source) == plan.parallel_iterator:
+    if (
+            on_thread_loop
+            and sides == {"1"}
+            and ast.unparse(source) == plan.parallel_iterator
+    ):
         kind, endpoint = PUSH_DEPENDENCE, destination
     elif sides == {"2"} and ast.unparse(destination) == plan.parallel_iterator:
         kind, endpoint = PULL_DEPENDENCE, source
@@ -1652,7 +1668,7 @@ def direct_dependence(plan, thread_iterator, validate_endpoints=False):
         for node in ast.walk(endpoint)
         if isinstance(node, ast.Name)
     }
-    if thread_iterator not in endpoint_names:
+    if hook_iterator not in endpoint_names:
         return None
     guards = PythonASTEmitter(
         validate_endpoints=validate_endpoints,
@@ -1661,6 +1677,7 @@ def direct_dependence(plan, thread_iterator, validate_endpoints=False):
         kind=kind,
         endpoint=deepcopy(endpoint),
         guard=_conjunction(guards) if guards else None,
+        iterator=hook_iterator,
     )
 
 

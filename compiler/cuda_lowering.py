@@ -1531,6 +1531,12 @@ for _dag_position in range(
                     for node in ast.walk(thread_loop)
             ):
                 self.dependence_protocol = COUNTER_DEPENDENCE
+        if (
+                self.dependence_protocol != COUNTER_DEPENDENCE
+                and self.direct_dependence.iterator
+                != self.thread_loop_iterator
+        ):
+            self.dependence_protocol = COUNTER_DEPENDENCE
         if self.dependence_protocol != COUNTER_DEPENDENCE:
             thread_loop = self._with_dependence_hooks(thread_loop)
         privatized = self._privatize_thread_reductions(
@@ -1603,10 +1609,19 @@ for _dag_position in range(
         This preserves sequential pivot loops such as CSR ILU0's ``k_ptr``
         loop while distributing its nested ``j_ptr`` updates.
         """
-        # Direct-dependence hooks describe task-level edges. They cannot be
-        # attached to a nested work-sharing loop without changing their
-        # multiplicity, so nested mapping uses the task-level counter protocol.
-        self.dependence_protocol = COUNTER_DEPENDENCE
+        # Hooks on the nested work-sharing loop would change the multiplicity
+        # of task-level edges. A pull edge fixed by one iteration of an
+        # enclosing sequential loop is observed at the top of that iteration;
+        # every other protocol falls back to the task-level counter.
+        wait_iterator = None
+        if (
+                self.dependence_protocol == PULL_DEPENDENCE
+                and self.direct_dependence.iterator
+                != self.thread_loop_iterator
+        ):
+            wait_iterator = self.direct_dependence.iterator
+        else:
+            self.dependence_protocol = COUNTER_DEPENDENCE
 
         thread_loop = self._lower_segmented_sorted_searches(thread_loop)
 
@@ -1660,7 +1675,76 @@ for _dag_position in range(
         ).body
         guarded_body = self._guard_nested_thread_side_effects(mapped_body)
         broadcast_body = self._broadcast_nested_mapped_inputs(guarded_body)
-        return self._deduplicate_thread_syncs(broadcast_body)
+        body = self._deduplicate_thread_syncs(broadcast_body)
+        if wait_iterator is not None and not self._add_iteration_waits(
+                body,
+                wait_iterator,
+        ):
+            self.dependence_protocol = COUNTER_DEPENDENCE
+        return body
+
+    def _add_iteration_waits(self, statements, iterator):
+        """Wait for the pull endpoint at the top of each ``iterator`` iteration.
+
+        The loop must enclose the thread-mapped loop, and the ``break`` tests
+        that precede the wait may only read data that no task writes, since
+        they run before the producing task is known to have finished.
+        Returns False, leaving ``statements`` unchanged, when either
+        condition does not hold.
+        """
+        loops = [
+            node
+            for statement in statements
+            for node in ast.walk(statement)
+            if isinstance(node, ast.For)
+            and isinstance(node.target, ast.Name)
+            and node.target.id == iterator
+            and any(
+                getattr(inner, "_lcd_thread_mapped", False)
+                for inner in ast.walk(node)
+            )
+        ]
+        if len(loops) != 1:
+            return False
+        loop = loops[0]
+        written = _written_arrays(statements)
+        position = 0
+        while position < len(loop.body) and _is_break_test(loop.body[position]):
+            read_arrays = {
+                node.value.id
+                for node in ast.walk(loop.body[position].test)
+                if isinstance(node, ast.Subscript)
+                and isinstance(node.value, ast.Name)
+            }
+            if read_arrays & written:
+                return False
+            position += 1
+        endpoint = self.direct_dependence.endpoint
+        endpoint_names = {
+            node.id
+            for node in ast.walk(endpoint)
+            if isinstance(node, ast.Name)
+        }
+        if (endpoint_names - {iterator}) & _stored_names(statements):
+            return False
+        wait = ast.parse(
+            f"""
+while cuda.atomic.add(done, {ast.unparse(endpoint)}, 0) == 0:
+    pass
+cuda.threadfence()
+"""
+        ).body
+        if self.direct_dependence.guard is not None:
+            wait = [ast.If(
+                test=deepcopy(self.direct_dependence.guard),
+                body=wait,
+                orelse=[],
+            )]
+        loop.body[position:position] = [
+            self._thread_zero_statement(*wait),
+            self._thread_sync(),
+        ]
+        return True
 
     def _lower_segmented_sorted_searches(self, thread_loop):
         """Replace property-backed linear equality searches with lower-bound.
@@ -2714,6 +2798,15 @@ def _exits_early(statement):
     return any(
         isinstance(node, (ast.Break, ast.Continue, ast.Return))
         for node in ast.walk(statement)
+    )
+
+
+def _is_break_test(statement):
+    return (
+        isinstance(statement, ast.If)
+        and not statement.orelse
+        and len(statement.body) == 1
+        and isinstance(statement.body[0], ast.Break)
     )
 
 

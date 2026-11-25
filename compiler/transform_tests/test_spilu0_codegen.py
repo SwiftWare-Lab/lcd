@@ -10,16 +10,22 @@ from unittest.mock import patch
 from compiler.cuda_lowering import lower_to_numba_cuda
 from compiler.cuda_runtime import compile_cuda_module
 from compiler.dag_codegen import (
+    COUNTER_DEPENDENCE,
+    PULL_DEPENDENCE,
+    DirectDependence,
     compile_dag_builder,
     create_dag_plan,
+    direct_dependence,
     generate_dag_source,
 )
+from compiler.decorator import parallel
 from compiler.legality_check import finalize_legality_of_fusion
 from compiler.spf_raising import build_spf_from_ast, extract_node_data
 from compiler.demo.spilu0 import (
     FUNCTION_PROPS,
     compile_ilu0_csc,
     compile_ilu0_csr,
+    ilu0_csr,
 )
 
 
@@ -177,6 +183,89 @@ class SpILU0CodegenTests(unittest.TestCase):
         source = generate_dag_source(plan)
         self.assertIn("for i1 in range(0, n):", source)
         self.assertIn("for i2 in range(0, n):", source)
+
+    def test_csr_pivot_loop_carries_a_pull_dependence(self):
+        arguments = ["A_data", "A_indices", "A_indptr", "n"]
+        _, analysis = self.legality["csr"]
+        plan = create_dag_plan(
+            analysis.ordering_dependences,
+            self.node_data["csr"],
+            parallel_iterator="i",
+            arguments=arguments,
+            function_props=FUNCTION_PROPS,
+        )
+        dependence = direct_dependence(plan, "j_ptr")
+
+        self.assertEqual(dependence.kind, PULL_DEPENDENCE)
+        self.assertEqual(dependence.iterator, "k_ptr")
+        self.assertEqual(ast.unparse(dependence.endpoint), "A_indices[k_ptr]")
+
+    def test_csr_pull_waits_for_each_pivot_row(self):
+        with patch(
+            "compiler.decorator.finalize_legality_of_fusion",
+            return_value=self.legality["csr"],
+        ):
+            with redirect_stdout(io.StringIO()):
+                compiled = parallel(
+                    block_map="i",
+                    thread_map="j_ptr",
+                    function_props=FUNCTION_PROPS,
+                    execution_mode="sync_free",
+                    threads_per_block=128,
+                    thread_unroll=1,
+                    dependence_protocol="pull",
+                )(ilu0_csr)
+        source = compiled.cuda_kernel_source
+        pivot_loop = source[source.index("for k_ptr in range("):]
+
+        self.assertEqual(
+            compiled.cuda_lowering.dependence_protocol,
+            PULL_DEPENDENCE,
+        )
+        self.assertNotIn("dep_count", source)
+        self.assertLess(
+            pivot_loop.index("break"),
+            pivot_loop.index(
+                "while cuda.atomic.add(done, A_indices[k_ptr], 0) == 0:"
+            ),
+        )
+        self.assertLess(
+            pivot_loop.index("cuda.atomic.add(done, A_indices[k_ptr], 0)"),
+            pivot_loop.index("_lcd_lookup_position_"),
+        )
+        self.assertIn("cuda.atomic.exch(done, i, 1)", source)
+
+    def test_pull_falls_back_when_a_break_test_reads_task_output(self):
+        module = ast.parse(
+            """
+def scaled(A_data, A_indices, A_indptr):
+    n = len(A_indptr) - 1
+    for i in range(n):
+        for k_ptr in range(A_indptr[i], A_indptr[i + 1]):
+            if A_data[k_ptr] == 0.0:
+                break
+            for j_ptr in range(k_ptr + 1, A_indptr[i + 1]):
+                A_data[j_ptr] = A_data[j_ptr] * A_data[A_indptr[A_indices[k_ptr]]]
+    return A_data
+"""
+        )
+        result = lower_to_numba_cuda(
+            module,
+            loop_iterator="i",
+            execution_mode="sync_free",
+            thread_loop_iterator="j_ptr",
+            n_warp=1,
+            dependence_protocol=PULL_DEPENDENCE,
+            direct_dependence=DirectDependence(
+                kind=PULL_DEPENDENCE,
+                endpoint=ast.parse("A_indices[k_ptr]", mode="eval").body,
+                guard=None,
+                iterator="k_ptr",
+            ),
+        )
+
+        self.assertEqual(result.dependence_protocol, COUNTER_DEPENDENCE)
+        self.assertNotIn("done", result.source)
 
     def test_real_decorator_builds_simplified_dag_inspector(self):
         compile_functions = {
