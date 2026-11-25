@@ -90,6 +90,67 @@ class SpTRSVEndToEndTests(unittest.TestCase):
             atol=1e-12,
         )
 
+    def test_prepared_launches_are_repeatable_on_device_data(self):
+        from numba import cuda
+
+        from compiler.decorator import parallel
+
+        # A prepared launch zeroes lifted arrays and resets dependency state
+        # on the device, so it can be relaunched without new uploads.
+        schedules = {
+            ("csr", "pull"): dict(dependence_protocol="pull", n_warp=1),
+            ("csr", "counter"): dict(dependence_protocol="counter", n_warp=1),
+            ("csr", "block"): dict(n_warp=4),
+            ("csc", "push"): dict(dependence_protocol="push", n_warp=1),
+            ("csc", "block"): dict(n_warp=4),
+        }
+        solvers = {"csr": self.csr_solver, "csc": self.csc_solver}
+        properties = {
+            "csr": {"Ap": ["monotonically_increasing"], "Ai": []},
+            "csc": {
+                "Ap": ["monotonically_increasing"],
+                "Ai": [],
+                ("Ap", "Ai"): ["triangularity"],
+            },
+        }
+        matrix_types = {"csr": csr_matrix, "csc": csc_matrix}
+        for (storage, protocol), options in schedules.items():
+            with self.subTest(storage=storage, protocol=protocol):
+                with redirect_stdout(io.StringIO()):
+                    solver = parallel(
+                        block_map="i",
+                        thread_map="j",
+                        function_props=properties[storage],
+                        execution_mode="sync_free",
+                        threads_per_block=128,
+                        thread_unroll=1,
+                        **options,
+                    )(solvers[storage].original_function)
+                matrix = matrix_types[storage](self.lower_triangular)
+                matrix.sort_indices()
+                arguments = (
+                    matrix.indptr.astype(np.int32),
+                    matrix.indices.astype(np.int32),
+                    matrix.data,
+                    self.right_hand_side,
+                    matrix.shape[0],
+                )
+                reference = spsolve_triangular(
+                    matrix,
+                    self.right_hand_side,
+                    lower=True,
+                )
+                prepared = solver.prepare_cuda_arguments(*arguments)
+                for _ in range(3):
+                    solver.cuda_launcher(*prepared.launcher_arguments)
+                    cuda.synchronize()
+                    np.testing.assert_allclose(
+                        prepared.copy_to_host("x"),
+                        reference,
+                        rtol=1e-10,
+                        atol=1e-12,
+                    )
+
 
 if __name__ == "__main__":
     unittest.main()

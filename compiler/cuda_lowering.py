@@ -91,6 +91,7 @@ class CUDALoweringResult:
     n_warp: int | None = None
     warp_mapped: bool = False
     dependence_protocol: str = COUNTER_DEPENDENCE
+    zero_initialized_variables: tuple[str, ...] = ()
     challenges: tuple[str, ...] = KNOWN_LOWERING_CHALLENGES
 
     @property
@@ -592,6 +593,23 @@ class CUDALowerer:
             launcher_name,
             reset_kernel_name,
         )
+        zero_initialized_variables = _zero_initialized_variables(
+            host_prelude,
+            lifted_variables,
+        )
+        zero_fill_kernel = None
+        if zero_initialized_variables:
+            zero_fill_kernel_name = function.name + "_zero_fill_cuda_kernel"
+            zero_fill_kernel = _zero_fill_kernel(zero_fill_kernel_name)
+            launcher.body = [
+                statement
+                for variable in zero_initialized_variables
+                for statement in _zero_fill_launch(
+                    zero_fill_kernel_name,
+                    variable,
+                    self.wavefront_threads_per_block,
+                )
+            ] + launcher.body
         numba_names = [ast.alias(name="cuda")]
         if self.thread_reduction_count or self.shared_scalar_count:
             numba_names.append(
@@ -603,6 +621,8 @@ class CUDALowerer:
             level=0,
         )
         module_body = [cuda_import]
+        if zero_fill_kernel is not None:
+            module_body.append(zero_fill_kernel)
         if reset_kernel is not None:
             module_body.append(reset_kernel)
         module_body.extend([kernel, launcher])
@@ -633,6 +653,7 @@ class CUDALowerer:
             n_warp=self.n_warp,
             warp_mapped=self.warp_mapped,
             dependence_protocol=self.dependence_protocol,
+            zero_initialized_variables=tuple(zero_initialized_variables),
         )
 
     def _launcher(
@@ -721,7 +742,7 @@ class CUDALowerer:
                 kernel_arguments,
             ),
         ])
-        if reset_kernel_name is not None:
+        if reset_kernel_name is not None and self.enclosing_block_loops:
             body.append(_cuda_synchronize())
 
         launcher = ast.FunctionDef(
@@ -735,10 +756,9 @@ class CUDALowerer:
         return launcher, launcher_arguments
 
     def _needs_sync_free_dep_count_reset(self):
-        return bool(
-            self.enclosing_block_loops
-            and self.execution_mode == "sync_free"
-        )
+        # Every launch restores its dependency state on the device, so a
+        # prepared launch can be repeated without re-uploading counters.
+        return self.execution_mode == "sync_free"
 
     @staticmethod
     def _sync_free_reset_kernel_name(kernel_name):
@@ -1106,7 +1126,7 @@ if _blocks_per_grid > 0:
                 kernel_arguments,
             )
         ]
-        if reset_kernel_name is not None:
+        if reset_kernel_name is not None and self.enclosing_block_loops:
             body.append(_cuda_synchronize())
         launcher = ast.FunctionDef(
             name=launcher_name,
@@ -1536,6 +1556,19 @@ for _dag_position in range(
             prelude, thread_loop, epilogue, node_loads = (
                 self._prefetch_node_loads(prelude, thread_loop, epilogue)
             )
+        epilogue = [
+            ast.AugAssign(
+                target=deepcopy(reduction.target),
+                op=type(reduction.operator)(),
+                value=self._reduction_result(reduction),
+            )
+            for reduction in reductions
+        ] + epilogue
+        prelude, epilogue = _keep_reduction_targets_in_registers(
+            prelude,
+            epilogue,
+            reductions,
+        )
 
         body = list(node_loads)
         if prelude:
@@ -1557,14 +1590,6 @@ for _dag_position in range(
                 body.extend(self._warp_reduction(reduction))
             else:
                 body.extend(self._block_reduction(reduction))
-        epilogue = [
-            ast.AugAssign(
-                target=deepcopy(reduction.target),
-                op=type(reduction.operator)(),
-                value=self._reduction_result(reduction),
-            )
-            for reduction in reductions
-        ] + epilogue
         if epilogue:
             body.append(self._thread_zero_statement(*epilogue))
         return body
@@ -2747,6 +2772,107 @@ class _LoadReplacer(ast.NodeTransformer):
         return self.generic_visit(node)
 
 
+class _ElementToRegister(ast.NodeTransformer):
+    def __init__(self, element, register):
+        self.element = ast.unparse(element)
+        self.register = register
+
+    def visit_Subscript(self, node):
+        if ast.unparse(node) == self.element:
+            return ast.copy_location(
+                ast.Name(id=self.register, ctx=node.ctx),
+                node,
+            )
+        return self.generic_visit(node)
+
+
+def _keep_reduction_targets_in_registers(prelude, epilogue, reductions):
+    """Hold each reduced element in a thread-zero register for the task.
+
+    Thread zero initializes the element before the mapped loop and combines
+    the reduced value after it. The loop never reads the element: reduction
+    privatization already relies on that. The element is therefore stored
+    once, after all of the task's dependences were observed, instead of being
+    written and re-read in global memory.
+    """
+    for number, reduction in enumerate(reductions):
+        element = reduction.target
+        if not (
+                isinstance(element, ast.Subscript)
+                and isinstance(element.value, ast.Name)
+        ):
+            continue
+        array = element.value.id
+        statements = [*prelude, *epilogue]
+        key = ast.unparse(element)
+        uses = [
+            node
+            for statement in statements
+            for node in ast.walk(statement)
+            if isinstance(node, ast.Name) and node.id == array
+        ]
+        accesses = [
+            node
+            for statement in statements
+            for node in ast.walk(statement)
+            if isinstance(node, ast.Subscript)
+            and isinstance(node.value, ast.Name)
+            and node.value.id == array
+        ]
+        index_names = {
+            node.id
+            for node in ast.walk(element.slice)
+            if isinstance(node, ast.Name)
+        }
+        if (
+                len(uses) != len(accesses)
+                or any(ast.unparse(node) != key for node in accesses)
+                or (index_names | {array}) & _stored_names(statements)
+        ):
+            continue
+        register = f"_lcd_register_{number}"
+        replacer = _ElementToRegister(element, register)
+        first_access = next(
+            (
+                statement
+                for statement in statements
+                if any(
+                    isinstance(node, ast.Subscript) and ast.unparse(node) == key
+                    for node in ast.walk(statement)
+                )
+            ),
+            None,
+        )
+        defines_register = (
+            isinstance(first_access, ast.Assign)
+            and len(first_access.targets) == 1
+            and ast.unparse(first_access.targets[0]) == key
+            and key not in {
+                ast.unparse(node)
+                for node in ast.walk(first_access.value)
+                if isinstance(node, ast.Subscript)
+            }
+        )
+        initial_load = [] if defines_register else [
+            ast.Assign(
+                targets=[ast.Name(id=register, ctx=ast.Store())],
+                value=_as_load(element),
+            )
+        ]
+        prelude = initial_load + [
+            replacer.visit(deepcopy(statement)) for statement in prelude
+        ]
+        epilogue = [
+            replacer.visit(deepcopy(statement)) for statement in epilogue
+        ] + [
+            ast.Assign(
+                targets=[_as_store(element)],
+                value=ast.Name(id=register, ctx=ast.Load()),
+            )
+        ]
+    return prelude, epilogue
+
+
 def _function_arguments(argument_names):
     return ast.arguments(
         posonlyargs=[],
@@ -2780,6 +2906,70 @@ def _kernel_launch(
             keywords=[],
         )
     )
+
+
+def _is_one_dimensional_zeros(node):
+    return (
+        isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr == "zeros"
+        and isinstance(node.func.value, ast.Name)
+        and node.func.value.id in {"np", "numpy"}
+        and len(node.args) == 1
+        and not isinstance(node.args[0], (ast.Tuple, ast.List))
+        and all(keyword.arg == "dtype" for keyword in node.keywords)
+    )
+
+
+def _zero_initialized_variables(host_prelude, lifted_variables):
+    """Lifted one-dimensional ``np.zeros`` arrays the host never touches again.
+
+    Such arrays are allocated on the device and zeroed by the launcher, so a
+    launch does not depend on a host copy of their initial contents.
+    """
+    variables = []
+    for index, statement in enumerate(host_prelude):
+        if not (
+                isinstance(statement, ast.Assign)
+                and len(statement.targets) == 1
+                and isinstance(statement.targets[0], ast.Name)
+                and statement.targets[0].id in lifted_variables
+                and _is_one_dimensional_zeros(statement.value)
+        ):
+            continue
+        name = statement.targets[0].id
+        referenced_later = any(
+            isinstance(node, ast.Name) and node.id == name
+            for later in host_prelude[index + 1:]
+            for node in ast.walk(later)
+        )
+        if not referenced_later and name not in variables:
+            variables.append(name)
+    return variables
+
+
+def _zero_fill_kernel(kernel_name):
+    return ast.parse(
+        f"""
+@cuda.jit
+def {kernel_name}(array):
+    _index = cuda.grid(1)
+    if _index < array.shape[0]:
+        array[_index] = 0
+"""
+    ).body[0]
+
+
+def _zero_fill_launch(kernel_name, array_name, threads_per_block):
+    return ast.parse(
+        f"""
+if len({array_name}) > 0:
+    {kernel_name}[
+        (len({array_name}) + {threads_per_block - 1}) // {threads_per_block},
+        {threads_per_block},
+    ]({array_name})
+"""
+    ).body
 
 
 def _source_location(node):
@@ -2830,6 +3020,12 @@ def _as_load(node):
     for child in ast.walk(result):
         if hasattr(child, "ctx"):
             child.ctx = ast.Load()
+    return result
+
+
+def _as_store(node):
+    result = _as_load(node)
+    result.ctx = ast.Store()
     return result
 
 

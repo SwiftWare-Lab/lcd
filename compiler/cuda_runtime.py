@@ -164,12 +164,19 @@ def prepare_cuda_arguments(
             + ", ".join(missing_arguments)
         )
 
+    zero_initialized = set(lowering.zero_initialized_variables)
     prepared_values = {}
     for name in lowering.launcher_arguments:
         value = host_values[name]
         if name in HOST_LAUNCH_ARGUMENTS:
             # The host launcher reads the offsets to issue each kernel launch.
             prepared_values[name] = value
+        elif name in zero_initialized and isinstance(value, np.ndarray):
+            # The launcher zeroes these arrays on the device.
+            prepared_values[name] = cuda_module.device_array(
+                value.shape,
+                dtype=value.dtype,
+            )
         else:
             prepared_values[name] = _prepare_value(value, cuda_module)
 

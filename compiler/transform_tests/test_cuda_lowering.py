@@ -70,6 +70,9 @@ class _FakeCUDA:
         self.copied_values.append(device_value)
         return device_value
 
+    def device_array(self, shape, dtype):
+        return _FakeDeviceArray(np.empty(shape, dtype=dtype))
+
     def synchronize(self):
         self.synchronize_count += 1
 
@@ -133,12 +136,20 @@ class CUDALoweringTests(unittest.TestCase):
         self.assertEqual(result.execution_mode, "sync_free")
         self.assertEqual(
             result.auxiliary_arguments,
-            ["dep_count", "dag_ptr", "dag_index"],
+            ["dep_count", "initial_dep_count", "dag_ptr", "dag_index"],
         )
         self.assertEqual(
-            result.kernel_arguments[-3:],
-            ["dep_count", "dag_ptr", "dag_index"],
+            result.kernel_arguments[-4:],
+            ["dep_count", "initial_dep_count", "dag_ptr", "dag_index"],
         )
+        launcher_source = ast.unparse(result.launcher_ast)
+        self.assertLess(
+            launcher_source.index(
+                "simple_sptrsv_csc_dep_count_reset_cuda_kernel["
+            ),
+            launcher_source.index("simple_sptrsv_csc_cuda_kernel["),
+        )
+        self.assertNotIn("cuda.synchronize()", launcher_source)
         self.assertIn(
             "while cuda.atomic.add(dep_count, i, 0) != 0:",
             result.source,
@@ -169,7 +180,8 @@ class CUDALoweringTests(unittest.TestCase):
         self.assertIn(
             "simple_sptrsv_csc_cuda_kernel"
             "[_blocks_per_grid, _threads_per_block]"
-            "(Ap, Ai, Ax, b, n, x, dep_count, dag_ptr, dag_index)",
+            "(Ap, Ai, Ax, b, n, x, dep_count, initial_dep_count, dag_ptr, "
+            "dag_index)",
             result.source,
         )
         compile(result.module_ast, "<csc-sync-free-lowering>", "exec")
@@ -568,16 +580,84 @@ def nested_sync_free(A, n, steps):
         )
 
         self.assertEqual(
-            prepared.launcher_argument_names[-3:],
-            ("dep_count", "dag_ptr", "dag_index"),
+            prepared.launcher_argument_names[-4:],
+            ("dep_count", "initial_dep_count", "dag_ptr", "dag_index"),
         )
         self.assertEqual(prepared.values["n"], 2)
+        self.assertEqual(lowering.zero_initialized_variables, ("x",))
         self.assertIsInstance(prepared.values["x"], _FakeDeviceArray)
-        np.testing.assert_array_equal(
-            prepared.copy_lifted_variables_to_host()["x"],
-            np.zeros(2),
+        self.assertEqual(prepared.values["x"].host_value.shape, (2,))
+        self.assertNotIn(prepared.values["x"], fake_cuda.copied_values)
+        self.assertEqual(len(prepared.launcher_arguments), 10)
+
+    def test_keeps_reduced_element_in_a_register_until_the_task_ends(self):
+        result = lower_to_numba_cuda(
+            _load_function("simple_sptrsv_csr"),
+            loop_iterator="i",
+            execution_mode="sync_free",
+            thread_loop_iterator="j",
+            n_warp=1,
         )
-        self.assertEqual(len(prepared.launcher_arguments), 9)
+        kernel_source = ast.unparse(result.kernel_ast)
+
+        self.assertIn("_lcd_register_0 = _node_load_0", kernel_source)
+        self.assertIn("_lcd_register_0 -= _thread_partial_0", kernel_source)
+        self.assertEqual(kernel_source.count("x[i] ="), 1)
+        self.assertLess(
+            kernel_source.index("_lcd_register_0 -= _thread_partial_0"),
+            kernel_source.index("x[i] = _lcd_register_0"),
+        )
+
+    def test_keeps_element_in_memory_when_the_mapped_loop_reads_it(self):
+        module = _load_function("simple_sptrsv_csc")
+        result = lower_to_numba_cuda(
+            module,
+            loop_iterator="i",
+            reductions=_reduction_statements(module, "S2"),
+            execution_mode="sync_free",
+            thread_loop_iterator="j",
+            n_warp=1,
+        )
+
+        self.assertNotIn("_lcd_register", result.source)
+
+    def test_zero_fills_lifted_zero_arrays_before_the_kernel(self):
+        result = lower_to_numba_cuda(
+            _load_function("simple_sptrsv_csr"),
+            loop_iterator="i",
+            execution_mode="wavefront",
+        )
+
+        self.assertEqual(result.zero_initialized_variables, ("x",))
+        self.assertIn(
+            "def simple_sptrsv_csr_zero_fill_cuda_kernel(array):",
+            result.source,
+        )
+        launcher_source = ast.unparse(result.launcher_ast)
+        self.assertLess(
+            launcher_source.index("simple_sptrsv_csr_zero_fill_cuda_kernel["),
+            launcher_source.index("simple_sptrsv_csr_cuda_kernel["),
+        )
+        compile(result.module_ast, "<zero-fill-lowering>", "exec")
+
+    def test_keeps_host_initialization_when_the_host_modifies_the_array(self):
+        module = ast.parse("""
+def seeded(Ap, Ai, Ax, b, n):
+    x = np.zeros(n)
+    x[0] = b[0]
+    for i in range(n):
+        for j in range(Ap[i], Ap[i + 1]):
+            x[i] += Ax[j] * b[Ai[j]]
+    return x
+""")
+        result = lower_to_numba_cuda(
+            module,
+            loop_iterator="i",
+            execution_mode="wavefront",
+        )
+
+        self.assertEqual(result.zero_initialized_variables, ())
+        self.assertNotIn("zero_fill", result.source)
 
     def test_prepares_initial_dep_count_for_nested_sync_free_reset(self):
         module = ast.parse("""
