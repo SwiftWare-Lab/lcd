@@ -22,9 +22,7 @@ from compiler.spf_raising import (
 )
 
 
-SPILU0_SOURCE = (
-    Path(__file__).parents[2] / "benchmark" / "spilu0.py"
-)
+SPILU0_SOURCE = Path(__file__).parents[1] / "demo" / "spilu0.py"
 
 
 def _load_spilu0_function(name):
@@ -41,7 +39,7 @@ def _load_spilu0_function(name):
 class AliasNormalizationTests(unittest.TestCase):
     def test_csr_ilu0_aliases_are_expanded(self):
         normalized = normalize_aliases(
-            _load_spilu0_function("ilu0_csr_numba")
+            _load_spilu0_function("ilu0_csr")
         )
         source = ast.unparse(normalized)
 
@@ -68,7 +66,7 @@ class AliasNormalizationTests(unittest.TestCase):
 
     def test_csc_ilu0_aliases_are_expanded(self):
         normalized = normalize_aliases(
-            _load_spilu0_function("ilu0_csc_numba")
+            _load_spilu0_function("ilu0_csc")
         )
         source = ast.unparse(normalized)
 

@@ -742,8 +742,6 @@ class CUDALowerer:
                 kernel_arguments,
             ),
         ])
-        if reset_kernel_name is not None and self.enclosing_block_loops:
-            body.append(_cuda_synchronize())
 
         launcher = ast.FunctionDef(
             name=launcher_name,
@@ -994,20 +992,6 @@ def {reset_kernel_name}(dep_count, initial_dep_count):
                             ),
                             launch_arguments,
                         ),
-                        ast.Expr(
-                            value=ast.Call(
-                                func=ast.Attribute(
-                                    value=ast.Name(
-                                        id="cuda",
-                                        ctx=ast.Load(),
-                                    ),
-                                    attr="synchronize",
-                                    ctx=ast.Load(),
-                                ),
-                                args=[],
-                                keywords=[],
-                            )
-                        ),
                     ],
                     orelse=[],
                 ),
@@ -1126,8 +1110,6 @@ if _blocks_per_grid > 0:
                 kernel_arguments,
             )
         ]
-        if reset_kernel_name is not None and self.enclosing_block_loops:
-            body.append(_cuda_synchronize())
         launcher = ast.FunctionDef(
             name=launcher_name,
             args=_function_arguments(launcher_arguments),
@@ -2655,20 +2637,6 @@ def _cuda_threadfence():
             func=ast.Attribute(
                 value=ast.Name(id="cuda", ctx=ast.Load()),
                 attr="threadfence",
-                ctx=ast.Load(),
-            ),
-            args=[],
-            keywords=[],
-        )
-    )
-
-
-def _cuda_synchronize():
-    return ast.Expr(
-        value=ast.Call(
-            func=ast.Attribute(
-                value=ast.Name(id="cuda", ctx=ast.Load()),
-                attr="synchronize",
                 ctx=ast.Load(),
             ),
             args=[],
