@@ -128,6 +128,60 @@ class GaussSeidelEndToEndTests(unittest.TestCase):
 
         np.testing.assert_allclose(result, reference, rtol=1e-10, atol=1e-12)
 
+    def test_nonsymmetric_pattern_matches_sequential_reference(self):
+        from scipy.sparse import coo_matrix
+
+        from compiler.decorator import parallel
+
+        # Rows 1..m-1 form a dependence chain, while rows m..2m-1 have no
+        # lower entries and run first. Each chain row i also reads the old
+        # value x[m + i], which only an anti dependence protects. Rows
+        # m..2m-1 produce the same value in every sweep, so one sweep is
+        # needed for the old and new values to differ.
+        m = 64
+        n = 2 * m
+        chain = np.arange(1, m)
+        rows = np.concatenate([chain, chain])
+        columns = np.concatenate([chain - 1, chain + m])
+        matrix = coo_matrix(
+            (np.full(rows.size, 0.5), (rows, columns)),
+            shape=(n, n),
+        ).tocsr()
+        matrix.sort_indices()
+        b = np.linspace(1.0, 2.0, n)
+        x0 = np.linspace(-1.0, 1.0, n)
+        arguments = (
+            matrix.indptr.astype(np.int32),
+            matrix.indices.astype(np.int32),
+            matrix.data.copy(),
+            np.full(n, 4.0),
+            b,
+        )
+        max_iter = 1
+        reference = _simple_gauss_seidel_reference(
+            *arguments, x0, n, max_iter,
+        )
+        for protocol in ("pull", "counter"):
+            with self.subTest(protocol=protocol):
+                with redirect_stdout(io.StringIO()):
+                    solver = parallel(
+                        block_map="i",
+                        thread_map="j",
+                        function_props={
+                            "Ap": ["monotonically_increasing"],
+                            "Ai": [],
+                        },
+                        execution_mode="sync_free",
+                        threads_per_block=128,
+                        thread_unroll=1,
+                        dependence_protocol=protocol,
+                    )(self.simple_gauss_seidel_csr.original_function)
+                for _ in range(3):
+                    result = solver(*arguments, x0.copy(), n, max_iter)
+                    np.testing.assert_allclose(
+                        result, reference, rtol=1e-10, atol=1e-12,
+                    )
+
 
 if __name__ == "__main__":
     unittest.main()

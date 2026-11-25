@@ -1,5 +1,6 @@
 import inspect
 import functools
+from dataclasses import replace
 
 
 import types
@@ -339,6 +340,15 @@ def parallel(**kwargs):
                 for name in dag_argument_names
             ])
 
+        def inspect_dependences(dag_values):
+            dag_successors, scheduling_data, *extra = run_inspector(dag_values)
+            edge_count = extra.pop(0) if edge_multiplicity else None
+            anti_edges = extra.pop(0) if dag_plan.has_anti_rules else 0
+            return dag_successors, scheduling_data, edge_count, anti_edges
+
+        def counter_only(schedule):
+            return replace(schedule, dependence_protocol=COUNTER_DEPENDENCE)
+
         def build_dag(*args, **call_kwargs):
             return run_inspector(
                 dag_values_for(bind_arguments(args, call_kwargs))
@@ -371,14 +381,28 @@ def parallel(**kwargs):
                     lookup_values,
                 )
 
-            dag_successors, scheduling_data, *edge_count = run_inspector(
-                dag_values,
+            dag_successors, scheduling_data, edge_count, anti_edges = (
+                inspect_dependences(dag_values)
             )
-            edge_count = edge_count[0] if edge_count else None
+            # Per-access waits and releases only observe flow edges. When this
+            # input has anti edges, every task waits for all predecessors.
+            space = (
+                replace(
+                    schedule_space,
+                    dependence_protocols=(COUNTER_DEPENDENCE,),
+                )
+                if anti_edges
+                else schedule_space
+            )
             if fixed_schedule is not None:
-                if not warp_mapped(fixed_schedule):
+                schedule = (
+                    counter_only(fixed_schedule)
+                    if anti_edges
+                    else fixed_schedule
+                )
+                if not warp_mapped(schedule):
                     return SchedulePlan(
-                        schedule=fixed_schedule,
+                        schedule=schedule,
                         execution_data=with_lookups(preprocess_dag_output(
                             dag_successors,
                             scheduling_data,
@@ -387,13 +411,13 @@ def parallel(**kwargs):
                     )
                 wavefront_list = (
                     scheduling_data
-                    if fixed_schedule.execution_mode != SYNC_FREE
+                    if schedule.execution_mode != SYNC_FREE
                     else wavefronts_from_dag(dag_successors, scheduling_data)
                 )
                 return SchedulePlan(
-                    schedule=fixed_schedule,
+                    schedule=schedule,
                     execution_data=with_lookups(warp_task_data(
-                        fixed_schedule,
+                        schedule,
                         dag_successors,
                         wavefront_list,
                         edge_count,
@@ -415,7 +439,7 @@ def parallel(**kwargs):
                     argument_names,
                 ),
             )
-            schedule = scheduler.schedule(features, schedule_space)
+            schedule = scheduler.schedule(features, space)
             if warp_mapped(schedule):
                 execution_data = warp_task_data(
                     schedule,

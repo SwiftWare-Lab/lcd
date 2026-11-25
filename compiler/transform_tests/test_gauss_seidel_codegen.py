@@ -292,5 +292,149 @@ class GaussSeidelCodegenTests(unittest.TestCase):
         )
 
 
+SPTRSV_SOURCE = Path(__file__).parents[1] / "demo" / "sptrsv.py"
+
+
+def _csr_arrays(dense):
+    rows, columns = np.nonzero(dense)
+    pointers = np.zeros(dense.shape[0] + 1, dtype=np.int32)
+    np.add.at(pointers, rows + 1, 1)
+    return (
+        np.cumsum(pointers).astype(np.int32),
+        columns.astype(np.int32),
+        dense[rows, columns].astype(np.float64),
+    )
+
+
+class WriteAfterReadTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        from contextlib import redirect_stdout
+        import io
+
+        from compiler.demo.gauss_seidel import FUNCTION_PROPS_CSR
+        from compiler.legality_check import finalize_legality_of_fusion
+
+        cls.properties = FUNCTION_PROPS_CSR
+        cls.module, cls.node_data, cls.arguments = _load_function(
+            "simple_gauss_seidel_csr"
+        )
+        with redirect_stdout(io.StringIO()):
+            _, cls.analysis = finalize_legality_of_fusion(
+                ("i", "i"),
+                cls.module,
+                FUNCTION_PROPS_CSR,
+                block_iterator="i",
+            )
+
+    def _plan(self):
+        return create_dag_plan(
+            self.analysis.ordering_dependences,
+            self.node_data,
+            parallel_iterator="i",
+            arguments=self.arguments,
+            function_props=self.properties,
+        )
+
+    def test_old_value_reads_are_ordered_before_overwrites(self):
+        anti = [
+            dependence
+            for dependence in self.analysis.ordering_dependences
+            if dependence.type == "WAR"
+        ]
+
+        self.assertTrue(anti)
+        self.assertEqual({dependence.data for dependence in anti}, {"x"})
+        self.assertTrue(self._plan().has_anti_rules)
+
+    def test_update_target_reads_do_not_create_anti_dependences(self):
+        from contextlib import redirect_stdout
+        import io
+
+        from compiler.demo.sptrsv import FUNCTION_PROPS_CSC
+        from compiler.legality_check import finalize_legality_of_fusion
+
+        module = ast.parse(SPTRSV_SOURCE.read_text())
+        function = next(
+            node
+            for node in module.body
+            if isinstance(node, ast.FunctionDef)
+            and node.name == "simple_sptrsv_csc"
+        )
+        function.decorator_list = []
+        with redirect_stdout(io.StringIO()):
+            _, analysis = finalize_legality_of_fusion(
+                ("i", "i"),
+                ast.Module(body=[function], type_ignores=[]),
+                FUNCTION_PROPS_CSC,
+                block_iterator="i",
+            )
+
+        self.assertNotIn(
+            "WAR",
+            {dependence.type for dependence in analysis.ordering_dependences},
+        )
+
+    def test_inspector_counts_anti_edges_of_the_input(self):
+        from contextlib import redirect_stdout
+        import io
+
+        with redirect_stdout(io.StringIO()):
+            builder = compile_dag_builder(self._plan())
+        strictly_lower = np.array([
+            [0.0, 0.0, 0.0],
+            [1.0, 0.0, 0.0],
+            [1.0, 1.0, 0.0],
+        ])
+        with_upper = strictly_lower + np.array([
+            [0.0, 1.0, 0.0],
+            [0.0, 0.0, 0.0],
+            [0.0, 0.0, 0.0],
+        ])
+        for dense, has_anti_edges in ((strictly_lower, False), (with_upper, True)):
+            with self.subTest(upper_entries=has_anti_edges):
+                Ap, Ai, Ax = _csr_arrays(dense)
+                result = builder(
+                    Ap, Ai, Ax, np.ones(3), np.ones(3), np.zeros(3), 3, 1,
+                )
+                self.assertEqual(result[-1] > 0, has_anti_edges)
+
+    def test_direct_protocols_fall_back_when_the_input_has_anti_edges(self):
+        from contextlib import redirect_stdout
+        from unittest.mock import patch
+        import io
+
+        from compiler.decorator import parallel
+        from compiler.demo.gauss_seidel import simple_gauss_seidel_csr
+
+        with patch(
+            "compiler.decorator.finalize_legality_of_fusion",
+            return_value=(None, self.analysis),
+        ):
+            with redirect_stdout(io.StringIO()):
+                solver = parallel(
+                    block_map="i",
+                    thread_map="j",
+                    function_props=self.properties,
+                    execution_mode="sync_free",
+                    threads_per_block=128,
+                    thread_unroll=1,
+                    dependence_protocol="pull",
+                )(simple_gauss_seidel_csr.original_function)
+        strictly_lower = np.tril(np.ones((4, 4)), k=-1)
+        with_upper = strictly_lower + np.triu(np.ones((4, 4)), k=2)
+        for dense, protocol in (
+                (strictly_lower, "pull"),
+                (with_upper, "counter"),
+        ):
+            with self.subTest(expected=protocol):
+                Ap, Ai, Ax = _csr_arrays(dense)
+                with redirect_stdout(io.StringIO()):
+                    plan = solver.schedule_plan(
+                        Ap, Ai, Ax, np.ones(4), np.ones(4), np.zeros(4), 4, 1,
+                    )
+                self.assertEqual(plan.schedule.dependence_protocol, protocol)
+
+
 if __name__ == "__main__":
     unittest.main()

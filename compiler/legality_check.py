@@ -257,6 +257,50 @@ def extract_raw_data_dependencies(first_read_accesses, last_write_accesses):
     return dependences
 
 
+def extract_war_data_dependencies(first_read_accesses, last_write_accesses):
+    """Order a read in an earlier iteration before a later overwrite.
+
+    An augmented update's read of its own target is excluded. It is part of
+    the update's write, so ordering it against another write is an output
+    dependence, which the analysis does not model for plain writes either.
+    """
+    reads = {}
+    writes = {}
+    for loop_read_accesses in first_read_accesses.values():
+        for read_access, read_node in loop_read_accesses:
+            reads[(read_node.schedule, read_access)] = read_node
+    for last_write_access in last_write_accesses.values():
+        for write_node in last_write_access:
+            writes[write_node.schedule] = write_node
+    dependences = []
+    for (ri, r_access), read_node in reads.items():
+        for wi, write_node in writes.items():
+            w_access = write_node.write_access
+            if r_access.get_data_array() != w_access.get_data_array():
+                continue
+            if (
+                    read_node.update_op is not None
+                    and r_access == read_node.write_access
+            ):
+                continue
+            r_index = r_access.get_index()
+            w_index = w_access.get_index()
+            if r_index == w_index and not isinstance(r_index[0], Access):
+                continue
+            dependences.append(DataDependence(
+                ri,
+                wi,
+                r_access.get_data_array(),
+                [Equality(r_index[i], w_index[i]) for i in range(len(r_index))],
+                'WAR',
+                from_domain=deepcopy(read_node.loop_domain + read_node.domain),
+                to_domain=deepcopy(write_node.loop_domain + write_node.domain),
+                from_statement_id=read_node.id,
+                to_statement_id=write_node.id,
+            ))
+    return dependences
+
+
 def refine_dependences(dependences, fused_iter_vars):
     refined_dependences = []
     for dep in dependences:
@@ -346,6 +390,7 @@ def extract_dependences(node_data, fused_iter_vars, mapping_nodes):
         for s_node in last_write_access.values():
             last_write_accesses[loop_id].append(s_node)
     dependences = extract_raw_data_dependencies(first_read_accesses, last_write_accesses)
+    dependences += extract_war_data_dependencies(first_read_accesses, last_write_accesses)
     # print(dependences)
     # fused_iter_vars = [node_data[loop_id].iter_var for loop_id in fused_loop_ids]
     refined_dependences = refine_dependences(dependences, fused_iter_vars)
@@ -361,7 +406,8 @@ def separate_reduction_dependences(dependences, node_data):
         statement_id = dependence.from_statement_id
         statement = node_data.get(statement_id)
         is_reduction = (
-            statement_id is not None
+            dependence.type != 'WAR'
+            and statement_id is not None
             and statement_id == dependence.to_statement_id
             and isinstance(statement, AssignNode)
             and statement.update_op in ASSOCIATIVE_UPDATE_OPERATIONS

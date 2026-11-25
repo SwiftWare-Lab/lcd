@@ -36,6 +36,7 @@ COUNTER_DEPENDENCE = "counter"
 PUSH_DEPENDENCE = "push"
 PULL_DEPENDENCE = "pull"
 DEPENDENCE_PROTOCOLS = (COUNTER_DEPENDENCE, PUSH_DEPENDENCE, PULL_DEPENDENCE)
+ANTI_EDGE_COUNT = "_dag_anti_edge_count"
 
 
 @dataclass(frozen=True)
@@ -70,6 +71,11 @@ class EdgeRule:
     dependence: object = None
     structural: bool = False
 
+    @property
+    def anti(self):
+        """Whether the edge orders a read before a later overwrite."""
+        return getattr(self.dependence, "type", None) == "WAR"
+
 
 @dataclass
 class DAGPlan:
@@ -77,6 +83,10 @@ class DAGPlan:
     node_count: object
     edge_rules: list[EdgeRule]
     parallel_iterator: str
+
+    @property
+    def has_anti_rules(self):
+        return any(edge_rule.anti for edge_rule in self.edge_rules)
 
 
 @dataclass(frozen=True)
@@ -1170,6 +1180,11 @@ class PythonASTEmitter:
             body.append(
                 self._dependency_count_initialization(plan, "_dag_edge_count")
             )
+        if plan.has_anti_rules:
+            body.append(ast.Assign(
+                targets=[ast.Name(id=ANTI_EDGE_COUNT, ctx=ast.Store())],
+                value=ast.Constant(value=0),
+            ))
         for index, edge_rule in enumerate(plan.edge_rules):
             body.append(self._edge_rule(plan, edge_rule, index))
         body.append(self._dependency_count_initialization(plan))
@@ -1180,6 +1195,10 @@ class PythonASTEmitter:
         if self.edge_multiplicity:
             body[-1].value.elts.append(
                 ast.Name(id="_dag_edge_count", ctx=ast.Load())
+            )
+        if plan.has_anti_rules:
+            body[-1].value.elts.append(
+                ast.Name(id=ANTI_EDGE_COUNT, ctx=ast.Load())
             )
 
         function = ast.FunctionDef(
@@ -1339,6 +1358,12 @@ class PythonASTEmitter:
             )
         )
         edge_statements = [add_edge] + self._edge_count_statements(destination)
+        if edge_rule.anti:
+            edge_statements.append(ast.AugAssign(
+                target=ast.Name(id=ANTI_EDGE_COUNT, ctx=ast.Store()),
+                op=ast.Add(),
+                value=ast.Constant(value=1),
+            ))
         if guards:
             guard_expression = (
                 guards[0]
@@ -1631,9 +1656,13 @@ def direct_dependence(plan, thread_iterator, validate_endpoints=False):
     iterations instead, after its leading ``break`` tests. Lowering verifies
     that the loop encloses the mapped loop.
     """
-    if thread_iterator is None or len(plan.edge_rules) != 1:
+    # Anti edges cannot be observed by per-access waits or releases. The
+    # inspector counts them, and inputs that have any use the task-level
+    # counter protocol instead.
+    flow_rules = [rule for rule in plan.edge_rules if not rule.anti]
+    if thread_iterator is None or len(flow_rules) != 1:
         return None
-    edge_rule = plan.edge_rules[0]
+    edge_rule = flow_rules[0]
     iterator_names = [iterator.name for iterator in edge_rule.iterators]
     if len(iterator_names) != 2 or iterator_names[0] != plan.parallel_iterator:
         return None
