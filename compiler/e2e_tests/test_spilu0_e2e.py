@@ -104,6 +104,37 @@ class SpILU0EndToEndTests(unittest.TestCase):
             atol=1e-12,
         )
 
+    def test_csr_warp_schedules_match_sequential_reference(self):
+        from compiler.decorator import parallel
+        from compiler.demo.spilu0 import FUNCTION_PROPS, ilu0_csr
+
+        matrix = csr_matrix(self.matrix)
+        matrix.sort_indices()
+        indptr = matrix.indptr.astype(np.int32)
+        indices = matrix.indices.astype(np.int32)
+        data = matrix.data.copy()
+        reference = _ilu0_csr_reference(data, indices, indptr)
+        for protocol in ("pull", "counter"):
+            with self.subTest(protocol=protocol):
+                with redirect_stdout(io.StringIO()):
+                    factor = parallel(
+                        block_map="i",
+                        thread_map="j_ptr",
+                        function_props=FUNCTION_PROPS,
+                        execution_mode="sync_free",
+                        threads_per_block=128,
+                        thread_unroll=1,
+                        dependence_protocol=protocol,
+                    )(ilu0_csr)
+                for _ in range(3):
+                    result = factor(data.copy(), indices, indptr)
+                    np.testing.assert_allclose(
+                        result,
+                        reference,
+                        rtol=1e-12,
+                        atol=1e-12,
+                    )
+
     def test_csc_matches_sequential_reference(self):
         matrix = csc_matrix(self.matrix)
         indptr = matrix.indptr.astype(np.int32)
