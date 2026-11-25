@@ -5,10 +5,12 @@ import unittest
 
 import numpy as np
 
+from compiler.dag_codegen import PULL_DEPENDENCE
 from compiler.scheduler import (
     ArchConstants,
     AnalyticScheduler,
     ScheduleSpace,
+    SYNC_FREE,
     UNROLL_FACTORS,
     WAVEFRONT,
     WorkloadFeatures,
@@ -99,15 +101,47 @@ class SchedulerTests(unittest.TestCase):
             rows=10,
             edges=0,
             levels=1,
-            nonzeros=480,
-            flops=480.0,
+            nonzeros=2000,
+            flops=2000.0,
             memory_bytes=0,
-            thread_work_items=480,
+            thread_work_items=2000,
             thread_loop_invocations=10,
         )
 
         self.assertEqual(scheduler.schedule(short, space).thread_unroll, 1)
         self.assertEqual(scheduler.schedule(long, space).thread_unroll, 2)
+
+    def test_done_flag_waits_drop_the_per_task_counter_term(self):
+        scheduler = AnalyticScheduler(
+            ArchConstants(
+                launch_latency_s=1.0e-5,
+                atomic_cost_s=1.0e-6,
+                memory_bandwidth_bytes_per_s=1.0e12,
+                lane_flops_per_s=1.0e9,
+            )
+        )
+        space = ScheduleSpace.from_options(
+            thread_mapped=True,
+            threads_per_block=128,
+            thread_unroll=1,
+            n_warp=1,
+            direct_protocol=PULL_DEPENDENCE,
+        )
+        deep_chain = WorkloadFeatures(
+            rows=1000,
+            edges=999,
+            levels=1000,
+            nonzeros=1999,
+            flops=1999.0,
+            memory_bytes=0,
+            thread_work_items=999,
+            thread_loop_invocations=1000,
+        )
+
+        schedule = scheduler.schedule(deep_chain, space)
+
+        self.assertEqual(schedule.execution_mode, SYNC_FREE)
+        self.assertEqual(schedule.dependence_protocol, PULL_DEPENDENCE)
 
 
 if __name__ == "__main__":

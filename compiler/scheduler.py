@@ -66,7 +66,6 @@ UNROLL_FACTORS = (1, 2, 4, 8)
 DEFAULT_THREADS_PER_BLOCK = 128
 N_WARP_CANDIDATES = (1,)
 WARP_SIZE = 32
-PULL_POLLING_FACTOR = 2.0
 ARITHMETIC_OPERATORS = (
     ast.Add,
     ast.Sub,
@@ -333,9 +332,9 @@ class AnalyticScheduler:
             if dependence_protocol == PUSH_DEPENDENCE:
                 sync_s = arch.atomic_cost_s * features.rows / n_warp
             elif dependence_protocol == PULL_DEPENDENCE:
-                sync_s = arch.atomic_cost_s * average_in_degree * (
-                    1.0 + PULL_POLLING_FACTOR * features.levels
-                )
+                # The barrier-free term without the per-task counter wait:
+                # each edge is observed through its producer's done flag.
+                sync_s = arch.atomic_cost_s * average_in_degree
             else:
                 sync_s = arch.atomic_cost_s * (
                     average_in_degree + features.rows / n_warp
@@ -344,11 +343,7 @@ class AnalyticScheduler:
             raise SchedulerError(
                 f"Unknown execution mode {execution_mode!r}."
             )
-        lanes = (
-            task_threads(threads_per_block, n_warp) * thread_unroll
-            if thread_mapped
-            else 1
-        )
+        lanes = threads_per_block * thread_unroll if thread_mapped else 1
         thread_parallelism = (
             features.average_thread_trip_count
             if thread_mapped and features.thread_loop_invocations
