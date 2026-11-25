@@ -249,7 +249,7 @@ class CUDALoweringTests(unittest.TestCase):
             "(_threads_per_block - 1)) // _threads_per_block",
             result.source,
         )
-        self.assertIn("cuda.synchronize()", result.source)
+        self.assertNotIn("cuda.synchronize()", result.source)
         compile(result.module_ast, "<csc-wavefront-lowering>", "exec")
 
     def test_thread_maps_wavefront_inner_loop_without_unrolling_for_factor_one(self):
@@ -551,7 +551,7 @@ def nested_sync_free(A, n, steps):
             "initial_dep_count, dag_ptr, dag_index)",
             result.source,
         )
-        self.assertIn("cuda.synchronize()", result.source)
+        self.assertNotIn("cuda.synchronize()", result.source)
         compile(result.module_ast, "<nested-sync-free-lowering>", "exec")
 
     def test_prepares_sync_free_device_arrays_and_lifted_output(self):

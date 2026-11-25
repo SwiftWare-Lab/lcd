@@ -17,9 +17,7 @@ from compiler.spf_raising import (
 )
 
 
-SPILU0_SOURCE = (
-    Path(__file__).parents[2] / "benchmark" / "spilu0.py"
-)
+SPILU0_SOURCE = Path(__file__).parents[1] / "demo" / "spilu0.py"
 
 
 def _csr_break_premise():
@@ -28,7 +26,7 @@ def _csr_break_premise():
         node
         for node in module.body
         if isinstance(node, ast.FunctionDef)
-        and node.name == "ilu0_csr_numba"
+        and node.name == "ilu0_csr"
     )
     function.decorator_list = []
     function_module = normalize_aliases(
